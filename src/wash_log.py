@@ -650,6 +650,7 @@ class App(tk.Tk):
         self.after(150, self.dark_titlebar)
         self.after(200,lambda:self.connect(self.cfg.get('folder') or DEFAULT_FOLDER))
         self._update_bridge = CompanionUpdateBridge(self, WashLogUpdateSave(self))
+        self._window_state = CompanionWindowState(self, 'wash-log')
         try: WashLogUpdateSave.restore_draft(self)
         except (OSError, ValueError): self.note_feedback.set('업데이트 전 메모 보관 파일을 확인해 주세요.')
     def report_callback_exception(self,exc,val,tb):

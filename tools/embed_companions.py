@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def companion_source(root, key):
     helper = (root / 'src/companion_update.py').read_text(encoding='utf-8')
+    helper += '\n' + (root / 'src/window_state.py').read_text(encoding='utf-8')
     adapters = (root / 'src/companion_adapters.py').read_text(encoding='utf-8')
     source = (root / ('src/protrusion.py' if key == 'protrusion' else 'src/wash_log.py')).read_text(encoding='utf-8')
     adapter_name = 'ProtrusionUpdateSave' if key == 'protrusion' else 'WashLogUpdateSave'

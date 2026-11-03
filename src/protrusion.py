@@ -530,6 +530,7 @@ class DefectApp:
         self._later(100, self._poll_events)
         self._later(POLL_MS, self._periodic_sync)
         self._update_bridge = CompanionUpdateBridge(self.root, ProtrusionUpdateSave(self))
+        self._window_state = CompanionWindowState(self.root, 'protrusion')
 
     def _later(self, delay, callback):
         if self.closed:
