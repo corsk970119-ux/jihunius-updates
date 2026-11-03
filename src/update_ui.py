@@ -5,8 +5,8 @@ import time
 
 AUTO_CHECK_SECONDS = 60
 
-def block_reason(app, update_window=None):
-    if 'native_dialog_open' in globals() and native_dialog_open(app.window):
+def block_reason(app, update_window=None, allow_companions=False):
+    if 'native_dialog_open' in globals() and native_dialog_open(app.window,update_window):
         return '파일 선택 또는 확인 창을 먼저 닫은 뒤 다시 눌러 주세요.'
     if getattr(getattr(app,'wash_app',None),'busy',False):
         return '세척완료 작업 중입니다. 작업이 끝난 뒤 다시 눌러 주세요.'
@@ -18,7 +18,7 @@ def block_reason(app, update_window=None):
     worker=getattr(stl,'worker',None)
     if getattr(stl,'busy',False) is True or (worker is not None and worker.is_alive()):
         return 'STL 검색 중입니다. 검색이 끝난 뒤 다시 눌러 주세요.'
-    if app._suite_children.running_keys():
+    if not allow_companions and app._suite_children.running_keys():
         return '돌출량·세척일보 보조창을 저장하고 닫은 뒤 다시 눌러 주세요.'
     if getattr(app,'_suite_exit_pending',False):return '종료 처리가 진행 중입니다.'
     if app.number_input.get('1.0','end-1c').strip():
@@ -38,6 +38,8 @@ class Controller:
         self.store=Store(context['root'],context['origin'],context['base_version']) if context else None
         self.events=queue.Queue(maxsize=4);self.busy=False;self.closed=False;self.last_check=None
         self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None;self.check_timer=None
+        self.save_timer=None
+        self._download_apply=False
         self.message='시작할 때와 실행 중 1분마다 새 버전을 자동 확인합니다.'
         self.label=app.tk.StringVar(value='업데이트')
         self.button=app.ttk.Button(app.title_label.master,textvariable=self.label,style='Popup.TButton',command=self.open)
@@ -47,28 +49,36 @@ class Controller:
             self._restore(cancel_exit=cancel_exit)
             self.check()
         app.restore_from_tray=restore
+        self._exit=app.request_complete_exit
+        def complete_exit():
+            if self.applying:
+                self.message='업데이트 전 저장 중입니다. 업데이트 창을 닫아 취소한 뒤 종료해 주세요.'
+                self.open();self.refresh();return
+            self._exit()
+        app.request_complete_exit=complete_exit
         self._finish=app._finish_suite_shutdown
         def finish():
             if self.applying:
                 reason=block_reason(app,self.dialog)
-                if reason:self.applying=False;self.message=reason;self.refresh();return
+                if reason:self.abort_apply(reason);return
                 try:self.store.request(self.staged,self.context['nonce'])
                 except Exception:
-                    self.applying=False;self.message='업데이트 적용 요청을 저장하지 못했습니다. 현재 프로그램을 유지합니다.';self.refresh();return
+                    self.abort_apply('업데이트 적용 요청을 저장하지 못했습니다. 현재 프로그램을 유지합니다.');return
             try:self._finish()
             except Exception:
-                if self.applying:self.store.cancel_request();self.applying=False
+                if self.applying:
+                    self.store.cancel_request();self.abort_apply('종료하지 못했습니다. 현재 프로그램을 유지합니다.')
                 raise
             if app._suite_stopped:
                 self.closed=True
-                for name in ('timer','check_timer'):
+                for name in ('timer','check_timer','save_timer'):
                     timer=getattr(self,name)
                     if timer is not None:
                         try:self.root.after_cancel(timer)
                         except app.tk.TclError:pass
                         setattr(self,name,None)
             elif self.applying:
-                self.store.cancel_request();self.applying=False
+                self.store.cancel_request();self.abort_apply('종료 조건이 바뀌어 업데이트를 보류했습니다.')
         app._finish_suite_shutdown=finish
         self.schedule_check(500)
 
@@ -128,7 +138,10 @@ class Controller:
                 self.offered=None;self.label.set('업데이트');self.message='현재 사용할 수 있는 최신 버전입니다.'
         elif kind=='download':
             self.staged=value;self.message='새 버전 검증을 마쳤습니다.'
-            self.refresh();self.apply();return
+            resume=self._download_apply;self._download_apply=False
+            self.refresh()
+            if resume:self.apply()
+            return
         self.refresh()
 
     def open(self):
@@ -159,7 +172,10 @@ class Controller:
         for widget in frame.grid_slaves(row=3,column=0):widget.configure(wraplength=max(300,frame.winfo_width()-44))
 
     def close_dialog(self):
-        if self.applying:return
+        self._download_apply=False
+        if self.applying:
+            self.abort_apply('업데이트를 취소했습니다. 현재 버전을 계속 사용할 수 있습니다.')
+            return
         if self.dialog is not None:self.dialog.destroy();self.dialog=None
 
     def refresh(self):
@@ -174,22 +190,49 @@ class Controller:
         if self.notes.get('1.0','end-1c')!=text:
             self.notes.configure(state='normal');self.notes.delete('1.0','end');self.notes.insert('1.0',text);self.notes.configure(state='disabled')
         self.status.set(self.message)
-        self.check_button.configure(state='disabled' if self.busy else 'normal')
-        self.apply_button.configure(state='normal' if self.offered and not self.busy else 'disabled')
+        self.check_button.configure(state='disabled' if self.busy or self.applying else 'normal')
+        self.apply_button.configure(state='normal' if self.offered and not self.busy and not self.applying else 'disabled')
 
     def apply(self):
-        if self.closed or self.busy or not self.offered or self.context is None:return
+        if self.closed or self.busy or self.applying or not self.offered or self.context is None:return
         if not process_alive(self.context.get('supervisor_pid')):
             self.message='재시작 실행기 연결이 종료됐습니다. 지후니우스를 완전 종료하고 기존 실행 파일을 다시 열어 주세요.'
             self.refresh();return
-        reason=block_reason(self.app,self.dialog)
+        reason=block_reason(self.app,self.dialog,allow_companions=True)
         if reason:self.message=reason;self.refresh();return
         if self.staged is None or self.staged['sha256']!=self.offered['sha256']:
             offered=dict(self.offered);self.message='새 버전을 내려받고 검증하고 있습니다…'
+            self._download_apply=True
             self.task('download',lambda:self.store.stage(offered,public_fetch(offered['path'],offered['size'],20)))
             return
-        self.applying=True;self.message='업데이트를 적용하고 다시 시작합니다…';self.refresh()
-        self.app._finish_suite_shutdown()
+        self.open()
+        self.applying=True;self.message='세척일보·돌출량표를 저장하고 있습니다…';self.refresh()
+        self.dialog.grab_set()
+        try:self.app._suite_children.begin_update_save()
+        except Exception as exc:self.abort_apply(str(exc));return
+        self.save_timer=self.root.after(100,self.poll_companion_save)
+
+    def abort_apply(self,message):
+        self._download_apply=False
+        self.app._suite_children.cancel_update_save()
+        if self.save_timer is not None:
+            try:self.root.after_cancel(self.save_timer)
+            except self.app.tk.TclError:pass
+            self.save_timer=None
+        if self.dialog is not None and self.dialog.winfo_exists():self.dialog.grab_release()
+        self.applying=False;self.message=message;self.refresh()
+
+    def poll_companion_save(self):
+        self.save_timer=None
+        if self.closed or not self.applying:return
+        reason=block_reason(self.app,self.dialog,allow_companions=True)
+        if reason:self.abort_apply(reason);return
+        try:done=self.app._suite_children.poll_update_save()
+        except Exception as exc:self.abort_apply(str(exc));return
+        if done:
+            self.message='저장을 확인했습니다. 업데이트 후 다시 시작합니다…';self.refresh()
+            self.app._finish_suite_shutdown()
+        else:self.save_timer=self.root.after(100,self.poll_companion_save)
 
 def attach(app,context,app_version,icon_bytes=None):
     controller=Controller(app,context,app_version)

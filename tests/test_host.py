@@ -23,6 +23,9 @@ class HostTests(unittest.TestCase):
     def test_open_companion_prevents_update_without_sending_close(self):
         self.app._suite_children.running_keys=lambda:['wash-log']
         self.assertIn('보조창',self.u.block_reason(self.app))
+        self.assertEqual(self.u.block_reason(self.app,allow_companions=True),'')
+        self.app.wash_app.busy=True
+        self.assertIn('세척',self.u.block_reason(self.app,allow_companions=True))
 
     def test_copy_pending_handover_and_search_work_prevent_exit(self):
         for target,attribute in [(self.app,'busy'),(self.app,'card_modifier_pending'),(self.app,'handover_writing'),(self.app.stl_app,'busy')]:

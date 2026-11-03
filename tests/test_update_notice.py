@@ -44,7 +44,7 @@ class UpdateNoticeTests(unittest.TestCase):
         self.label = Mock()
         self.app = SimpleNamespace(window=self.root, tk=SimpleNamespace(StringVar=Mock(return_value=self.label), TclError=RuntimeError),
             ttk=SimpleNamespace(Button=Mock(return_value=self.button)), title_label=SimpleNamespace(master=None),
-            restore_from_tray=Mock(), _suite_stopped=False)
+            restore_from_tray=Mock(), request_complete_exit=Mock(), _suite_stopped=False)
         def finish():
             self.app._suite_stopped = True
         self.app._finish_suite_shutdown = finish

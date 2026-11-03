@@ -271,9 +271,10 @@ def managed_lease(context):
     if not lease.acquire():raise UpdateError('이미 실행 중인 지후니우스 창을 먼저 확인해 주세요.')
     return lease
 
-def native_dialog_open(root):
+def native_dialog_open(root, allowed_grab=None):
     try:
-        if root.grab_current() is not None:return True
+        grabbed=root.grab_current()
+        if grabbed is not None and grabbed is not allowed_grab:return True
         if os.name!='nt':return False
         from ctypes import wintypes as w
         u=ctypes.WinDLL('user32',use_last_error=True)

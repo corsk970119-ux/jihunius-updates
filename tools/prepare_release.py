@@ -38,4 +38,7 @@ def prepare(root,version,notes):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('version');parser.add_argument('--notes',type=Path,required=True)
-    args=parser.parse_args();print(json.dumps(prepare(ROOT,args.version,args.notes.read_text(encoding='utf-8')),ensure_ascii=False,indent=2))
+    args=parser.parse_args()
+    from embed_companions import embed
+    embed(ROOT)
+    print(json.dumps(prepare(ROOT,args.version,args.notes.read_text(encoding='utf-8')),ensure_ascii=False,indent=2))
