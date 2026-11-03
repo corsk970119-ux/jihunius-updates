@@ -1,6 +1,6 @@
 # 지후니우스 공개 업데이트
 
-현재 배포: **2026.11.03.2**. 기존 Python 프로그램을 유지하면서 앱 내부 업데이트와 실행 바로가기를 추가했습니다.
+현재 배포: **2026.11.03.3**. 기존 Python 프로그램을 유지하면서 앱 내부 업데이트와 실행 바로가기를 추가했습니다.
 
 ## 처음 사용
 
@@ -30,7 +30,7 @@
 변경 내용을 UTF-8 텍스트로 작성한 뒤 아래 명령으로 새 버전을 준비합니다.
 
 ```sh
-python tools/prepare_release.py 2026.11.03.3 --notes docs/changes.txt
+python tools/prepare_release.py 2026.11.03.4 --notes docs/changes.txt
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 

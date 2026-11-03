@@ -138,7 +138,7 @@ def public_fetch(path,maximum,seconds):
     return value
 
 def check_offer(current,fetch=public_fetch,rejected_sha=None):
-    try:manifest=json.loads(fetch(CHANNEL,MAX_MANIFEST,4).decode('utf-8-sig'))
+    try:manifest=json.loads(fetch(CHANNEL,MAX_MANIFEST,12).decode('utf-8-sig'))
     except (ValueError,UnicodeError):raise UpdateError('배포 목록을 읽지 못했습니다.') from None
     if not isinstance(manifest,dict) or manifest.get('schema')!=1 or not isinstance(manifest.get('apps'),dict):
         raise UpdateError('배포 목록 형식을 확인해 주세요.')
