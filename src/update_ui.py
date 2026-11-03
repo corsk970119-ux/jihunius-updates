@@ -3,6 +3,8 @@ import queue
 import threading
 import time
 
+AUTO_CHECK_SECONDS = 60
+
 def block_reason(app, update_window=None):
     if 'native_dialog_open' in globals() and native_dialog_open(app.window):
         return '파일 선택 또는 확인 창을 먼저 닫은 뒤 다시 눌러 주세요.'
@@ -35,8 +37,8 @@ class Controller:
         self.current=context['current'] if context else None
         self.store=Store(context['root'],context['origin'],context['base_version']) if context else None
         self.events=queue.Queue(maxsize=4);self.busy=False;self.closed=False;self.last_check=None
-        self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None
-        self.message='시작할 때와 트레이에서 다시 열 때 새 버전을 확인합니다.'
+        self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None;self.check_timer=None
+        self.message='시작할 때와 실행 중 1분마다 새 버전을 자동 확인합니다.'
         self.label=app.tk.StringVar(value='업데이트')
         self.button=app.ttk.Button(app.title_label.master,textvariable=self.label,style='Popup.TButton',command=self.open)
         self.button.pack(side='right',padx=(12,0))
@@ -59,13 +61,29 @@ class Controller:
                 raise
             if app._suite_stopped:
                 self.closed=True
-                if self.timer is not None:
-                    try:self.root.after_cancel(self.timer)
-                    except app.tk.TclError:pass
+                for name in ('timer','check_timer'):
+                    timer=getattr(self,name)
+                    if timer is not None:
+                        try:self.root.after_cancel(timer)
+                        except app.tk.TclError:pass
+                        setattr(self,name,None)
             elif self.applying:
                 self.store.cancel_request();self.applying=False
         app._finish_suite_shutdown=finish
-        self.root.after(500,self.check)
+        self.schedule_check(500)
+
+    def schedule_check(self,delay_ms=AUTO_CHECK_SECONDS*1000):
+        if self.check_timer is not None:
+            try:self.root.after_cancel(self.check_timer)
+            except self.app.tk.TclError:pass
+            self.check_timer=None
+        if not self.closed and self.current is not None:
+            self.check_timer=self.root.after(delay_ms,self.auto_check)
+
+    def auto_check(self):
+        self.check_timer=None
+        if self.closed:return
+        if not self.check():self.schedule_check()
 
     def task(self,kind,action):
         if self.busy or self.closed:return False
@@ -80,11 +98,13 @@ class Controller:
         return True
 
     def check(self,force=False):
-        if self.closed or self.busy or self.applying or self.current is None:return
-        if not force and self.last_check is not None and time.monotonic()-self.last_check<300:return
+        if self.closed or self.busy or self.applying or self.current is None:return False
+        if not force and self.last_check is not None and time.monotonic()-self.last_check<AUTO_CHECK_SECONDS:return False
         self.last_check=time.monotonic();self.message='새 버전을 확인하고 있습니다…'
-        self.label.set('업데이트 확인 중')
-        self.task('check',lambda:check_offer(self.current,rejected_sha=self.store.state().get('rejected_sha')))
+        if not self.offered:self.label.set('업데이트 확인 중')
+        started=self.task('check',lambda:check_offer(self.current,rejected_sha=self.store.state().get('rejected_sha')))
+        if started:self.schedule_check()
+        return started
 
     def poll(self):
         self.timer=None
@@ -101,13 +121,11 @@ class Controller:
             if value['kind']=='available':
                 self.offered=value['offered'];self.label.set('새 버전 있음')
                 self.message='새 버전이 있습니다. 변경 내용을 확인하고 적용해 주세요.'
-                self.button.configure(style='Selected.Mode.TButton')
             elif value['kind']=='rejected':
                 self.offered=None;self.label.set('업데이트')
                 self.message='시작에 실패해 복구한 버전입니다. 수정된 새 배포를 기다립니다.'
             else:
                 self.offered=None;self.label.set('업데이트');self.message='현재 사용할 수 있는 최신 버전입니다.'
-                self.button.configure(style='Popup.TButton')
         elif kind=='download':
             self.staged=value;self.message='새 버전 검증을 마쳤습니다.'
             self.refresh();self.apply();return
@@ -145,7 +163,10 @@ class Controller:
         if self.dialog is not None:self.dialog.destroy();self.dialog=None
 
     def refresh(self):
-        if self.closed or self.dialog is None or not self.dialog.winfo_exists():return
+        if self.closed:return
+        self.button.configure(style='HandoverNotice.TButton' if self.offered else 'Popup.TButton')
+        if self.offered:self.label.set('새 버전 있음')
+        if self.dialog is None or not self.dialog.winfo_exists():return
         current=self.current['version'] if self.current else self.app_version
         self.versions.set('현재 '+current+('   →   새 버전 '+self.offered['version'] if self.offered else ''))
         notes=self.offered.get('notes','') if self.offered else ''
