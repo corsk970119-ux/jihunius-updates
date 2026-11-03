@@ -115,6 +115,7 @@ class CompanionManager:
         self.processes = {}
         self.sessions = {}
         self.update_save = None
+        self.close_requests = {}
         self._lock = threading.RLock()
         base = Path(os.environ.get("LOCALAPPDATA") or str(Path.home()))
         self.cache = base / "JihuniusSuite" / "companions"
@@ -161,6 +162,7 @@ class CompanionManager:
             ended = [key for key, process in self.processes.items() if process.poll() is not None]
             for key in ended:
                 del self.processes[key]
+                self.close_requests.pop(key, None)
                 if self.update_save is None or key not in self.update_save['keys']:
                     self._clear_session(key)
             return list(self.processes)
@@ -207,6 +209,27 @@ class CompanionManager:
             self.processes[key] = process
             self.sessions[key] = (session, nonce)
             return True
+
+    def toggle(self, key):
+        with self._lock:
+            if self.update_save is not None:
+                raise RuntimeError('업데이트 전 저장을 진행 중입니다. 잠시 기다려 주세요.')
+            item = self._descriptor(key)
+            if key not in self.running_keys():
+                return self.open(key)
+            now = time.monotonic()
+            previous = self.close_requests.get(key)
+            if previous is not None and now - previous < 2:
+                return False
+            process = self.processes[key]
+            if process.poll() is not None:
+                return self.open(key)
+            # Show the owned window so its original save/cancel dialog is visible.
+            self.backend.focus(process.pid, item['title'])
+            self.backend.close(process.pid, item['title'])
+            # Repeated clicks must not queue multiple WM_CLOSE/discard prompts.
+            self.close_requests[key] = now
+            return False
 
     def _update_command(self, key, phase):
         session, nonce = self.sessions[key]

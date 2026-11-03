@@ -27,6 +27,7 @@ import errno
 import json
 import os
 import queue
+import stat
 import tempfile
 import threading
 import time
@@ -221,7 +222,17 @@ class SharedStore:
     def _read(self):
         try:
             raw = self.path.read_text(encoding="utf-8")
-        except FileNotFoundError:
+        except FileNotFoundError as error:
+            # Windows network-name failures can also appear as FileNotFoundError.
+            # Initialize only a genuinely missing file on an accessible share.
+            winerror = getattr(error, "winerror", None)
+            if winerror is not None:
+                if winerror != 2:
+                    raise
+            elif error.errno != errno.ENOENT:
+                raise
+            if not stat.S_ISDIR(self.folder.stat().st_mode):
+                raise NotADirectoryError("공유 현황표 폴더에 연결할 수 없습니다: " + str(self.folder))
             return {"version": 3, "revision": 0, "values": default_values()}, True
         state = json.loads(raw)
         if (not isinstance(state, dict) or state.get("version") not in (1, 2, 3)

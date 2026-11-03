@@ -83,6 +83,56 @@ class UpdateNoticeTests(unittest.TestCase):
         self.root.advance(60)
         self.assertEqual(self.requests, ['check','check'])
 
+    def test_failed_check_is_visible_without_opening_dialog(self):
+        self.root.advance(.5)
+        self.result(False, 'GitHub에 연결하지 못했습니다.')
+        self.assertIn('실패', self.label.set.call_args.args[0])
+        self.assertIn('GitHub', self.c.message)
+        self.assertIsNone(self.c.dialog)
+        self.assertIsNone(self.c.offered)
+        self.assertEqual(self.button.configure.call_args.kwargs['style'], 'Popup.TButton')
+
+    def test_missing_context_explains_disabled_automatic_checks(self):
+        self.root.jobs.clear()
+        self.c = u.Controller(self.app, None, '2026.11.03.4')
+        self.assertFalse(self.root.jobs)
+        self.assertFalse(self.c.check(force=True))
+        self.assertIn('꺼짐', self.app.tk.StringVar.call_args.kwargs['value'])
+        self.assertIn('완전 종료', self.c.message)
+        self.assertIn('다시 실행', self.c.message)
+
+    def test_dialog_shows_current_version_and_last_completed_check_result(self):
+        self.c.dialog = Mock()
+        self.c.versions = Mock(); self.c.status = Mock(); self.c.notes = Mock()
+        self.c.check_button = Mock(); self.c.apply_button = Mock()
+        self.root.advance(.5)
+        with patch.object(u.time, 'strftime', return_value='11-03 14:25:30'):
+            self.result()
+        text = self.c.versions.set.call_args.args[0]
+        self.assertIn('2026.11.03.4', text)
+        self.assertIn('11-03 14:25:30', text)
+        self.assertIn('성공', text)
+        self.root.advance(60)
+        with patch.object(u.time, 'strftime', return_value='11-03 14:26:30'):
+            self.result(False, 'offline')
+        text = self.c.versions.set.call_args.args[0]
+        self.assertIn('11-03 14:26:30', text)
+        self.assertIn('실패', text)
+        self.assertEqual(self.c.status.set.call_args.args[0], 'offline')
+
+    def test_download_does_not_change_last_check_time_or_result(self):
+        self.c.dialog = Mock()
+        self.c.versions = Mock(); self.c.status = Mock(); self.c.notes = Mock()
+        self.c.check_button = Mock(); self.c.apply_button = Mock()
+        self.root.advance(.5)
+        with patch.object(u.time, 'strftime', return_value='11-03 14:25:30'):
+            self.result(value={'kind':'available','offered':{'version':'2026.11.03.5'}})
+        self.c.events.put(('download', False, 'download failed'))
+        self.c.poll()
+        self.assertIn('11-03 14:25:30', self.c.versions.set.call_args.args[0])
+        self.assertIn('성공', self.c.versions.set.call_args.args[0])
+        self.assertEqual(self.label.set.call_args.args[0], '새 버전 있음')
+
     def test_available_notice_is_yellow_and_survives_recheck_and_error(self):
         self.root.advance(.5)
         self.result(value={'kind':'available','offered':{'version':'2026.11.03.5'}})

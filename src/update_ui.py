@@ -37,11 +37,14 @@ class Controller:
         self.current=context['current'] if context else None
         self.store=Store(context['root'],context['origin'],context['base_version']) if context else None
         self.events=queue.Queue(maxsize=4);self.busy=False;self.closed=False;self.last_check=None
+        self.last_check_completed=None;self.last_check_succeeded=None
         self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None;self.check_timer=None
         self.save_timer=None
         self._download_apply=False
         self.message='시작할 때와 실행 중 1분마다 새 버전을 자동 확인합니다.'
-        self.label=app.tk.StringVar(value='업데이트')
+        if self.current is None:
+            self.message='자동 업데이트 실행기 연결을 확인하지 못했습니다. 트레이 메뉴에서 완전 종료한 뒤 원래 지후니우스.pyw 파일을 다시 실행해 주세요.'
+        self.label=app.tk.StringVar(value='업데이트' if self.current is not None else '자동 확인 꺼짐')
         self.button=app.ttk.Button(app.title_label.master,textvariable=self.label,style='Popup.TButton',command=self.open)
         self.button.pack(side='right',padx=(12,0))
         self._restore=app.restore_from_tray
@@ -124,9 +127,12 @@ class Controller:
             if self.busy:self.timer=self.root.after(100,self.poll)
             return
         self.busy=False
+        if kind=='check':
+            self.last_check_completed=time.strftime('%m-%d %H:%M:%S')
+            self.last_check_succeeded=ok
         if not ok:
             self.message=value
-            self.label.set('새 버전 있음' if self.offered else '업데이트 확인')
+            self.label.set('새 버전 있음' if self.offered else '확인 실패')
         elif kind=='check':
             if value['kind']=='available':
                 self.offered=value['offered'];self.label.set('새 버전 있음')
@@ -184,13 +190,19 @@ class Controller:
         if self.offered:self.label.set('새 버전 있음')
         if self.dialog is None or not self.dialog.winfo_exists():return
         current=self.current['version'] if self.current else self.app_version
-        self.versions.set('현재 '+current+('   →   새 버전 '+self.offered['version'] if self.offered else ''))
+        if self.current is None:
+            checked='자동 확인 꺼짐 · 원래 실행 파일로 다시 실행해 주세요.'
+        elif self.last_check_completed is None:
+            checked='첫 확인 대기 중 · 실행 중 1분마다 자동 확인'
+        else:
+            checked='마지막 확인 '+self.last_check_completed+(' · 성공' if self.last_check_succeeded else ' · 실패')+' · 1분마다 자동 확인'
+        self.versions.set('현재 '+current+('   →   새 버전 '+self.offered['version'] if self.offered else '')+'\n'+checked)
         notes=self.offered.get('notes','') if self.offered else ''
         text=notes or ('변경 내용이 등록되지 않았습니다.' if self.offered else '새 버전이 있으면 변경 내용과 사용 안내가 여기에 표시됩니다.')
         if self.notes.get('1.0','end-1c')!=text:
             self.notes.configure(state='normal');self.notes.delete('1.0','end');self.notes.insert('1.0',text);self.notes.configure(state='disabled')
         self.status.set(self.message)
-        self.check_button.configure(state='disabled' if self.busy or self.applying else 'normal')
+        self.check_button.configure(state='disabled' if self.busy or self.applying or self.current is None else 'normal')
         self.apply_button.configure(state='normal' if self.offered and not self.busy and not self.applying else 'disabled')
 
     def apply(self):
