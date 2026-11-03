@@ -19,7 +19,8 @@ class WindowStateTests(unittest.TestCase):
 
     def create(self,key='wash-log',rect=None):
         root=Scheduler();root.after_idle=lambda fn:root.after(0,fn)
-        root.bind=Mock();root.destroy=Mock();root.update_idletasks=Mock()
+        root.bind=Mock();root.unbind=Mock();root.destroy=Mock();root.update_idletasks=Mock()
+        root.winfo_ismapped=Mock(return_value=True)
         backend=Mock(kind='windows-placement')
         backend.capture.return_value={'schema':1,'backend':backend.kind,
             'normal':rect or [-1700,80,-1200,980],'zoomed':False}

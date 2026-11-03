@@ -115,6 +115,7 @@ class CompanionWindowState:
         self.timer = None
         self.last = None
         self.pending = None
+        self.map_binding = root.bind('<Map>', self.mapped, add='+')
         self.startup = root.after_idle(self.restore)
         root.bind('<Configure>', self.changed, add='+')
         original_destroy = root.destroy
@@ -123,6 +124,7 @@ class CompanionWindowState:
             if not self.closed:
                 self.flush()
                 self.closed = True
+                self.stop_waiting_for_map()
                 for name in ('timer', 'startup'):
                     job = getattr(self, name)
                     if job is not None:
@@ -133,9 +135,27 @@ class CompanionWindowState:
 
         root.destroy = destroy
 
+    def stop_waiting_for_map(self):
+        if self.map_binding is not None:
+            try: self.root.unbind('<Map>', self.map_binding)
+            except Exception: pass
+            self.map_binding = None
+
+    def mapped(self, event):
+        if (event.widget is self.root and not self.ready and not self.closed
+                and self.startup is None):
+            self.startup = self.root.after_idle(self.restore)
+
     def restore(self):
         self.startup = None
-        if self.closed: return
+        if self.closed or self.ready: return
+        # Tk's initial MapFrame drains idle callbacks BEFORE creating the native
+        # top-level wrapper. update_idletasks() from inside that callback cannot
+        # complete the outer MapFrame. Wait for <Map>, otherwise Windows applies
+        # the saved placement to the inner window and then opens the real frame
+        # at CW_USEDEFAULT. Already-mapped companions still restore at idle.
+        if not self.root.winfo_ismapped(): return
+        self.stop_waiting_for_map()
         try:
             if self.backend is not None:
                 self.last = _window_record(_cu_read(self.path), self.backend.kind)
