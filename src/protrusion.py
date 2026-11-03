@@ -24,7 +24,9 @@ from datetime import datetime
 from pathlib import Path
 import ctypes
 import errno
+import hashlib
 import json
+import multiprocessing
 import os
 import queue
 import stat
@@ -55,6 +57,7 @@ SHARED_FOLDER = SHARED_PARENT / "지후니우스_인수인계"
 SHARED_FILENAME = "돌출량_현황표.json"
 POLL_MS = 2500
 SAVE_DELAY_MS = 500
+SYNC_TIMEOUT = 10.0
 
 
 class Theme:
@@ -271,10 +274,11 @@ class SharedStore:
         return state, False
 
     def _write(self, state):
-        descriptor, name = tempfile.mkstemp(
-            prefix=".roll_defect_", suffix=".tmp", dir=str(self.folder)
-        )
-        temporary = Path(name)
+        # sync() holds the same exclusive lock for every PC throughout this write.
+        # A killed SMB helper cannot run finally, so reuse our one staging name
+        # on the next attempt rather than accumulating abandoned snapshots.
+        temporary = self.folder / '.jihunius_protrusion_stage_v1.tmp'
+        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
                 json.dump(state, stream, ensure_ascii=False, indent=2)
@@ -323,6 +327,170 @@ class SharedStore:
                 state["updated_at"] = datetime.now().isoformat(timespec="seconds")
                 self._write(state)
             return {"state": state, "conflicts": conflicts}
+
+
+def _shared_store_service(connection, folder):
+    """Only this disposable process may wait inside a shared-folder OS call."""
+    store = SharedStore(folder)
+    try:
+        while True:
+            operations = connection.recv()
+            if operations is None:
+                return
+            try:
+                reply = (True, store.sync(operations))
+            except Exception as error:
+                reply = (False, str(error))
+            connection.send(reply)
+    except (EOFError, BrokenPipeError, OSError):
+        pass
+    finally:
+        connection.close()
+
+
+class SharedStoreClient:
+    """Reuse one helper for healthy polls; terminate it on timeout or close."""
+
+    def __init__(self, folder=None, timeout=SYNC_TIMEOUT, stop=None):
+        self.folder = str(folder if folder is not None else SHARED_FOLDER)
+        self.path = Path(self.folder) / SHARED_FILENAME
+        self.timeout = timeout
+        self.stop = stop
+        self.process = None
+        self.connection = None
+
+    def close(self):
+        connection, self.connection = self.connection, None
+        process, self.process = self.process, None
+        if process is not None:
+            try:
+                if process.is_alive():
+                    process.terminate()
+                process.join(timeout=.3)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=.3)
+                if not process.is_alive():
+                    process.close()
+            except (OSError, ValueError):
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    def _start(self):
+        if self.process is not None and self.process.is_alive():
+            return
+        self.close()
+        context = multiprocessing.get_context('spawn')
+        parent, child = context.Pipe()
+        process = context.Process(target=_shared_store_service,
+                                  args=(child, self.folder), daemon=True)
+        try:
+            process.start()
+        except Exception:
+            parent.close()
+            child.close()
+            process.close()
+            raise
+        child.close()
+        self.process, self.connection = process, parent
+
+    def sync(self, operations=()):
+        try:
+            if self.stop is not None and self.stop.is_set():
+                raise OSError('프로그램 종료 중입니다.')
+            deadline = time.monotonic() + self.timeout
+            self._start()
+            self.connection.send([dict(operation) for operation in operations])
+            while True:
+                if self.stop is not None and self.stop.is_set():
+                    raise OSError('프로그램 종료 중입니다.')
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('공유폴더 응답이 지연되어 대기를 중단했습니다. '
+                                       '미저장 내용은 유지하며 연결 후 저장 여부를 다시 확인합니다.')
+                if self.connection.poll(min(.1, remaining)):
+                    ok, result = self.connection.recv()
+                    if not ok:
+                        raise OSError(result)
+                    return result
+                if not self.process.is_alive():
+                    raise OSError('공유폴더 처리 응답을 받지 못했습니다.')
+        except Exception:
+            self.close()
+            raise
+
+
+class PendingRecovery:
+    """A single replaced PC-local snapshot, retaining each edit's original base."""
+
+    def __init__(self, shared_path, path=None):
+        self.shared_path = os.path.normcase(os.path.abspath(str(shared_path)))
+        if path is None:
+            local = Path(os.environ.get('LOCALAPPDATA') or
+                         (Path.home() / '.local' / 'share'))
+            # A redirected profile must not turn recovery into another SMB wait.
+            if str(local).startswith(('\\\\', '//')):
+                local = Path(tempfile.gettempdir())
+            identity = hashlib.sha256(self.shared_path.encode('utf-8')).hexdigest()[:16]
+            path = local / 'Jihunius' / 'pending' / ('protrusion-' + identity + '.json')
+        self.path = Path(path)
+
+    def load(self):
+        try:
+            state = json.loads(self.path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+        if (not isinstance(state, dict) or state.get('version') != 1
+                or state.get('shared_path') != self.shared_path
+                or not isinstance(state.get('operations'), list)):
+            raise ValueError('PC 복구본의 형식 또는 공유 저장 위치를 확인해 주세요.')
+        pending = {}
+        for sequence, operation in enumerate(state['operations'], 1):
+            if (not isinstance(operation, dict)
+                    or set(operation) != {'key', 'base', 'value'}
+                    or not isinstance(operation['key'], str)
+                    or operation['key'] in pending):
+                raise ValueError('PC 복구본의 변경 항목을 확인해 주세요.')
+            SharedStore._validate_value(operation['key'], operation['base'])
+            SharedStore._validate_value(operation['key'], operation['value'])
+            pending[operation['key']] = dict(operation, seq=sequence)
+        return pending
+
+    def save(self, pending):
+        if not pending:
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
+            return
+        operations = []
+        for key, operation in pending.items():
+            if operation['key'] != key:
+                raise ValueError('PC 복구본의 변경 항목을 확인해 주세요.')
+            SharedStore._validate_value(key, operation['base'])
+            SharedStore._validate_value(key, operation['value'])
+            operations.append({field: operation[field] for field in ('key', 'base', 'value')})
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, name = tempfile.mkstemp(prefix='.pending-', suffix='.tmp',
+                                           dir=str(self.path.parent))
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as stream:
+                json.dump({'version': 1, 'shared_path': self.shared_path,
+                           'operations': operations}, stream, ensure_ascii=False)
+                stream.write('\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 class DefectTable(tk.Frame):
@@ -511,9 +679,15 @@ class DefectTable(tk.Frame):
 
 
 class DefectApp:
-    def __init__(self, root, store=None):
+    def __init__(self, root, store=None, recovery=None):
         self.root = root
         self.store = store if store is not None else SharedStore()
+        self.stop = threading.Event()
+        # Explicit test/custom stores remain injectable without spawning them.
+        self._io = (SharedStoreClient(self.store.folder, stop=self.stop)
+                    if type(self.store) is SharedStore else self.store)
+        self.recovery = (recovery if recovery is not None
+                         else PendingRecovery(self.store.path))
         self.server_values = default_values()
         self.pending = {}
         self.sequence = 0
@@ -531,10 +705,31 @@ class DefectApp:
         self.last_error = ""
         self.last_synced = ""
         self.save_job = None
+        self.draft_job = None
+        self.draft_dirty = False
+        self.local_error = ""
+        self._recovery_load_error = ""
         self.field_vars = {}
         self.tables = {}
         self.timer_ids = set()
+        try:
+            self.pending = self.recovery.load()
+            self.sequence = max((op['seq'] for op in self.pending.values()), default=0)
+        except (OSError, ValueError) as error:
+            self.local_error = self._recovery_load_error = str(error)
         self._build_ui()
+        # Restore only local input; keep its recorded base for the first merge.
+        self.applying = True
+        try:
+            for key, operation in self.pending.items():
+                if key in self.field_vars:
+                    self.field_vars[key].set(operation['value'])
+                elif key == 'memo':
+                    self.memo_text.delete('1.0', 'end')
+                    self.memo_text.insert('1.0', operation['value'])
+                    self.memo_text.edit_modified(False)
+        finally:
+            self.applying = False
         self._set_editable(False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._later(0, self._start_sync)
@@ -831,10 +1026,35 @@ class DefectApp:
         else:
             base = self.pending[key]["base"] if key in self.pending else self.server_values[key]
             self.pending[key] = {"seq": self.sequence, "key": key, "base": base, "value": value}
+        self.draft_dirty = True
+        if self.draft_job is not None:
+            self._cancel_timer(self.draft_job)
+        self.draft_job = self._later(SAVE_DELAY_MS, self._flush_pending)
         self._update_status()
         if self.save_job is not None:
             self._cancel_timer(self.save_job)
         self.save_job = self._later(SAVE_DELAY_MS, self._save_now)
+
+    def _flush_pending(self):
+        """Flush at debounce, before network requests, and before any exit."""
+        if self.draft_job is not None:
+            self._cancel_timer(self.draft_job)
+            self.draft_job = None
+        if self._recovery_load_error:
+            # Do not silently replace an unreadable recovery file with defaults.
+            return False
+        if not self.draft_dirty:
+            return not self.local_error
+        try:
+            self.recovery.save(self.pending)
+        except (OSError, ValueError) as error:
+            self.local_error = str(error)
+            self._update_status()
+            return False
+        self.local_error = ""
+        self.draft_dirty = False
+        self._update_status()
+        return True
 
     def _save_now(self):
         self.save_job = None
@@ -891,6 +1111,8 @@ class DefectApp:
     def _start_sync(self):
         if self.closed:
             return
+        # The update-save bridge calls this even when an older save is running.
+        self._flush_pending()
         if self.busy or self.resolving_conflicts:
             self.sync_again = True
             return
@@ -905,7 +1127,7 @@ class DefectApp:
 
         def work():
             try:
-                result = self.store.sync(operations)
+                result = self._io.sync(operations)
                 self.events.put((True, operations, result))
             except Exception as error:
                 self.events.put((False, operations, str(error)))
@@ -963,6 +1185,9 @@ class DefectApp:
         self._apply_values()
         if conflicts:
             self._resolve_conflicts(conflicts)
+        if operations:
+            self.draft_dirty = True
+        self._flush_pending()
         self._update_status()
         if self.closing and not self.pending:
             self._destroy()
@@ -1018,17 +1243,23 @@ class DefectApp:
         self._update_status()
         if self.closing:
             self.closing = False
+            preserved = self._flush_pending()
             if messagebox.askyesno(
                 "저장하지 못한 변경 사항",
                 "공유폴더에 저장하지 못했습니다.\n" + error
-                + "\n\n종료하면 저장하지 못한 변경 사항이 사라집니다. 그래도 종료할까요?",
+                + ("\n\n미저장 내용은 이 PC에 보관했으며 다음 실행에서 다시 확인합니다. 종료할까요?"
+                   if preserved else "\n\nPC 복구본도 저장하지 못했습니다. 창을 유지하고 저장 위치를 확인해 주세요."),
                 parent=self.root, default="no",
-            ):
+            ) and preserved:
                 self._destroy()
 
     def _update_status(self):
-        if self.last_error:
+        if self.local_error:
+            text, color = "PC 복구본 저장 실패 · 상태를 눌러 확인해 주세요", Theme.ERROR
+        elif self.last_error:
             text = "공유 연결 실패 · " + (f"미저장 {len(self.pending)}건" if self.pending else "다시 연결해 주세요")
+            if self.pending and not self.draft_dirty:
+                text += " · PC 보관됨"
             color = Theme.ERROR
         elif self.closing:
             text, color = "변경 사항 저장 후 종료 중…", Theme.WARNING
@@ -1045,11 +1276,17 @@ class DefectApp:
         self.reset_all_button.configure(state="normal" if self.ready and not self.closing else "disabled")
 
     def _show_connection(self, _event=None):
-        if self.last_error:
+        if self.local_error:
+            messagebox.showwarning(
+                "PC 복구본 상태", "복구본 위치: " + str(self.recovery.path)
+                + "\n\n" + self.local_error + "\n\n공유 저장 여부와 PC 저장 공간·권한을 확인해 주세요.",
+                parent=self.root,
+            )
+        elif self.last_error:
             messagebox.showwarning(
                 "공유 연결 상태", "저장 위치: " + str(self.store.path) + "\n\n" + self.last_error
                 + "\n\n공유폴더 연결과 읽기·쓰기 권한을 확인해 주세요.\n"
-                "미저장 내용은 창을 열어 둔 동안 유지되며, 연결되면 다시 저장합니다.",
+                "미저장 내용은 이 PC의 복구본에 보관하며, 연결되면 저장 여부와 충돌을 확인합니다.",
                 parent=self.root,
             )
         else:
@@ -1062,13 +1299,16 @@ class DefectApp:
         # 종료 버튼 직전의 마지막 메모 입력도 저장 목록에 반영합니다.
         if self.ready:
             self._memo_changed()
+        if not self._flush_pending() and self.pending:
+            self._show_connection()
+            return
         if not self.pending:
             self._destroy()
             return
         if self.closing:
             if messagebox.askyesno(
                 "저장 대기 중", "아직 저장하지 못한 변경 사항이 있습니다.\n"
-                "기다리지 않고 종료하면 해당 변경 사항이 사라질 수 있습니다. 종료할까요?",
+                "미저장 내용은 이 PC에 보관했으며 다음 실행에서 다시 확인합니다. 종료할까요?",
                 parent=self.root, default="no",
             ):
                 self._destroy()
@@ -1080,10 +1320,18 @@ class DefectApp:
     def _destroy(self):
         if self.closed:
             return
+        if not self._flush_pending() and self.pending:
+            self.closing = False
+            self._show_connection()
+            return
         self.closed = True
+        self.stop.set()
+        if isinstance(self._io, SharedStoreClient):
+            self._io.close()
         for job in list(self.timer_ids):
             self._cancel_timer(job)
         self.save_job = None
+        self.draft_job = None
         self.root.destroy()
 
 
@@ -1099,4 +1347,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

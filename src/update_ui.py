@@ -19,7 +19,7 @@ def block_reason(app, update_window=None, allow_companions=False):
     if getattr(stl,'busy',False) is True or (worker is not None and worker.is_alive()):
         return 'STL 검색 중입니다. 검색이 끝난 뒤 다시 눌러 주세요.'
     if not allow_companions and app._suite_children.running_keys():
-        return '돌출량·세척일보 보조창을 저장하고 닫은 뒤 다시 눌러 주세요.'
+        return '보조창을 저장하고 닫은 뒤 다시 눌러 주세요.'
     if getattr(app,'_suite_exit_pending',False):return '종료 처리가 진행 중입니다.'
     if app.number_input.get('1.0','end-1c').strip():
         return '프로그램 번호 입력 내용이 남아 있습니다. 필요한 내용을 보관하고 입력칸을 비운 뒤 다시 눌러 주세요.'
@@ -218,7 +218,7 @@ class Controller:
             self.task('download',lambda:self.store.stage(offered,public_fetch(offered['path'],offered['size'],20)))
             return
         self.open()
-        self.applying=True;self.message='세척일보·돌출량표를 저장하고 있습니다…';self.refresh()
+        self.applying=True;self.message='열린 보조창을 저장하고 있습니다…';self.refresh()
         self.dialog.grab_set()
         try:self.app._suite_children.begin_update_save()
         except Exception as exc:self.abort_apply(str(exc));return

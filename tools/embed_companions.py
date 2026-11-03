@@ -12,10 +12,13 @@ def companion_source(root, key):
     helper = (root / 'src/companion_update.py').read_text(encoding='utf-8')
     helper += '\n' + (root / 'src/window_state.py').read_text(encoding='utf-8')
     adapters = (root / 'src/companion_adapters.py').read_text(encoding='utf-8')
-    source = (root / ('src/protrusion.py' if key == 'protrusion' else 'src/wash_log.py')).read_text(encoding='utf-8')
-    adapter_name = 'ProtrusionUpdateSave' if key == 'protrusion' else 'WashLogUpdateSave'
-    adapter = next(ast.get_source_segment(adapters, node) for node in ast.parse(adapters).body
-                   if isinstance(node, ast.ClassDef) and node.name == adapter_name)
+    filenames = {'protrusion': 'protrusion.py', 'wash-log': 'wash_log.py', 'special-table': 'special_table.py'}
+    source = (root / 'src' / filenames[key]).read_text(encoding='utf-8')
+    adapter = ''
+    if key != 'special-table':
+        adapter_name = 'ProtrusionUpdateSave' if key == 'protrusion' else 'WashLogUpdateSave'
+        adapter = next(ast.get_source_segment(adapters, node) for node in ast.parse(adapters).body
+                       if isinstance(node, ast.ClassDef) and node.name == adapter_name)
     nodes = ast.parse(source).body
     entry = next(node for node in nodes if isinstance(node, ast.If) and '__name__' in ast.unparse(node.test))
     lines = source.splitlines(keepends=True)

@@ -20,7 +20,7 @@ class SaveHandshakeTests(unittest.TestCase):
         env = patch.dict(os.environ, LOCALAPPDATA=self.tmp.name); env.start(); self.addCleanup(env.stop)
         data = b'# companion\n'
         payloads = {key: {'data':data, 'sha256':hashlib.sha256(data).hexdigest(), 'title':key}
-                    for key in ('protrusion', 'wash-log')}
+                    for key in ('protrusion', 'wash-log', 'special-table')}
         self.children = []
         def spawn(*args, **kwargs):
             process = Mock(pid=100+len(self.children)); process.poll.return_value = None
@@ -44,8 +44,12 @@ class SaveHandshakeTests(unittest.TestCase):
         self.assertEqual(self.command('protrusion'), 'prepare')
         self.response('wash-log', 'ready')
         self.assertFalse(self.manager.poll_update_save())
+        self.assertEqual(self.command('wash-log'), 'prepare')
+        self.response('special-table', 'ready')
+        self.assertFalse(self.manager.poll_update_save())
         self.assertEqual(self.command('protrusion'), 'close')
         self.assertEqual(self.command('wash-log'), 'close')
+        self.assertEqual(self.command('special-table'), 'close')
         for key in self.manager.sessions: self.response(key, 'closed')
         self.assertFalse(self.manager.poll_update_save())
         for process in self.children: process.poll.return_value = 0

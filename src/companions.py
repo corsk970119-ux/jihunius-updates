@@ -121,7 +121,7 @@ class CompanionManager:
         self.cache = base / "JihuniusSuite" / "companions"
 
     def _descriptor(self, key):
-        if key not in ("protrusion", "wash-log") or key not in self.payloads:
+        if key not in ("protrusion", "wash-log", "special-table") or key not in self.payloads:
             raise ValueError("알 수 없는 프로그램입니다.")
         item = self.payloads[key]
         data, digest = item.get("data"), item.get("sha256")
