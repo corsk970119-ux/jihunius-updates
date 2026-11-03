@@ -286,47 +286,11 @@ def native_dialog_open(root):
         return True
 
 def mark_ready(context):
-    if context:write_json(context['root']/'ready.json',{'nonce':context['nonce']})
-
-def install_shortcut(origin,root,icon_bytes):
-    if os.name!='nt':raise UpdateError('바탕화면 실행 아이콘은 Windows에서 만들 수 있습니다.')
-    origin=Path(origin).resolve();root=Path(root)
-    icon=root/'지후니우스.ico';atomic(icon,icon_bytes)
-    executable=Path(sys.executable)
-    if executable.with_name('pythonw.exe').is_file():executable=executable.with_name('pythonw.exe')
-    data={'target':str(executable),'arguments':subprocess.list2cmdline([str(origin)]),
-          'working':str(origin.parent),'icon':str(icon)}
-    # Paths are data on stdin, never interpolated into PowerShell source.
-    script=r'''
-$ErrorActionPreference = 'Stop'
-$d = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$w = New-Object -ComObject WScript.Shell
-$path = Join-Path ($w.SpecialFolders.Item('Desktop')) '지후니우스.lnk'
-if (Test-Path -LiteralPath $path) {
-  $old = $w.CreateShortcut($path)
-  if ($old.Description -ne '지후니우스 Python 실행기') {
-    throw '기존 바로가기가 있어 자동 교체하지 않았습니다.'
-  }
-}
-$s = $w.CreateShortcut($path)
-$s.TargetPath = $d.target
-$s.Arguments = $d.arguments
-$s.WorkingDirectory = $d.working
-$s.IconLocation = $d.icon + ',0'
-$s.Description = '지후니우스 Python 실행기'
-$s.Save()
-if (-not (Test-Path -LiteralPath $path)) { throw '바로가기 저장 실패' }
-'''
-    import base64
-    encoded=base64.b64encode(script.encode('utf-16-le')).decode('ascii')
-    try:
-        result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
-            input=json.dumps(data,ensure_ascii=True).encode('ascii'),stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-            timeout=12,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    except (OSError,subprocess.TimeoutExpired):raise UpdateError('바로가기를 만들지 못했습니다. 이 파일을 직접 실행할 수 있습니다.') from None
-    if result.returncode:raise UpdateError('바로가기를 만들지 못했습니다. 바탕화면의 같은 이름 바로가기와 쓰기 권한을 확인해 주세요.')
-    atomic(root/'shortcut-created',b'1')
-    return '바탕화면에 지후니우스 아이콘을 만들었습니다. 앞으로 그 아이콘으로 실행하세요.'
+    if context:
+        # Older installed launchers check this marker before creating a shortcut.
+        # Keep them disabled when they start a newer cached version.
+        atomic(context['root']/'shortcut-created',b'disabled')
+        write_json(context['root']/'ready.json',{'nonce':context['nonce']})
 
 def launch(origin,base_version,argv=None,icon_bytes=None):
     origin=Path(origin).resolve();store=Store(root_for(origin),origin,base_version)
@@ -360,11 +324,6 @@ def launch(origin,base_version,argv=None,icon_bytes=None):
                 store.restore_failed(current)
                 raise UpdateError('프로그램을 시작하지 못했습니다. 기존 버전과 Python 설치를 확인해 주세요.') from None
             session['pid']=process.pid;write_json(store.root/'session.json',session)
-            if icon_bytes and os.name=='nt' and not (store.root/'shortcut-created').exists():
-                def shortcut_worker():
-                    try:install_shortcut(origin,store.root,icon_bytes)
-                    except Exception:pass
-                threading.Thread(target=shortcut_worker,daemon=True).start()
             code=process.wait()
             ready=read_json(store.root/'ready.json').get('nonce')==nonce
             if not ready:

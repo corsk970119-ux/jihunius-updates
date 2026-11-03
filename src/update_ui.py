@@ -111,7 +111,6 @@ class Controller:
         elif kind=='download':
             self.staged=value;self.message='새 버전 검증을 마쳤습니다.'
             self.refresh();self.apply();return
-        elif kind=='shortcut':self.message=value
         self.refresh()
 
     def open(self):
@@ -134,8 +133,6 @@ class Controller:
         controls=ttk.Frame(frame);controls.grid(row=4,column=0,sticky='ew')
         self.check_button=ttk.Button(controls,text='다시 확인',style='Popup.TButton',command=lambda:self.check(force=True));self.check_button.pack(side='left')
         self.apply_button=ttk.Button(controls,text='업데이트 후 다시 시작',style='Selected.Mode.TButton',command=self.apply);self.apply_button.pack(side='right')
-        self.shortcut_button=ttk.Button(frame,text='바탕화면 실행 아이콘 만들기',style='Popup.TButton',command=self.shortcut)
-        self.shortcut_button.grid(row=5,column=0,sticky='w',pady=(12,0))
         dialog.bind('<Configure>',lambda event:self.status_label_wrap(frame),add='+')
         self.refresh()
 
@@ -158,12 +155,11 @@ class Controller:
         self.status.set(self.message)
         self.check_button.configure(state='disabled' if self.busy else 'normal')
         self.apply_button.configure(state='normal' if self.offered and not self.busy else 'disabled')
-        self.shortcut_button.configure(state='disabled' if self.busy else 'normal')
 
     def apply(self):
         if self.closed or self.busy or not self.offered or self.context is None:return
         if not process_alive(self.context.get('supervisor_pid')):
-            self.message='재시작 실행기 연결이 종료됐습니다. 지후니우스를 완전 종료하고 바탕화면 아이콘으로 다시 실행해 주세요.'
+            self.message='재시작 실행기 연결이 종료됐습니다. 지후니우스를 완전 종료하고 기존 실행 파일을 다시 열어 주세요.'
             self.refresh();return
         reason=block_reason(self.app,self.dialog)
         if reason:self.message=reason;self.refresh();return
@@ -174,12 +170,7 @@ class Controller:
         self.applying=True;self.message='업데이트를 적용하고 다시 시작합니다…';self.refresh()
         self.app._finish_suite_shutdown()
 
-    def shortcut(self):
-        if self.context is None:return
-        self.message='바탕화면 실행 아이콘을 만들고 있습니다…'
-        self.task('shortcut',lambda:install_shortcut(self.context['origin'],self.context['root'],self.app_icon))
-
-def attach(app,context,app_version,icon_bytes):
-    controller=Controller(app,context,app_version);controller.app_icon=icon_bytes
+def attach(app,context,app_version,icon_bytes=None):
+    controller=Controller(app,context,app_version)
     app.updates=controller
     return controller
