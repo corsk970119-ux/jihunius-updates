@@ -199,6 +199,9 @@ class CompanionManager:
                     executable = windowed
             environment = os.environ.copy()
             environment["JIHUNIUS_LAUNCH_DIR"] = str(self.origin)
+            diagnostics=sys.modules.get('jihunius_error_history')
+            recorder=getattr(diagnostics,'_recorder',None)
+            if recorder is not None:environment['JIHUNIUS_APP_VERSION']=recorder.version
             session = self.cache / 'control' / uuid.uuid4().hex
             session.mkdir(parents=True)
             nonce = uuid.uuid4().hex

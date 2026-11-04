@@ -22,7 +22,15 @@ def companion_source(root, key):
     nodes = ast.parse(source).body
     entry = next(node for node in nodes if isinstance(node, ast.If) and '__name__' in ast.unparse(node.test))
     lines = source.splitlines(keepends=True)
-    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + '\n\n']
+    errors=(root/'src/error_history.py').read_text(encoding='utf-8')
+    label={'protrusion':'돌출량','wash-log':'세척일보','special-table':'특수 돌출량'}[key]
+    diagnostics=("\nimport types as _err_types\nimport sys as _err_sys\n"
+        "_err_module = _err_types.ModuleType('jihunius_error_history')\n"
+        "_err_sys.modules['jihunius_error_history'] = _err_module\n"
+        "exec(compile("+repr(errors)+", '<error_history>', 'exec'), _err_module.__dict__)\n"
+        "if __name__ == '__main__':\n"
+        "    _err_module.install("+repr(label)+", os.environ.get('JIHUNIUS_APP_VERSION',''))\n")
+    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + '\n\n']
     result = ''.join(lines)
     compile(result, key, 'exec')
     return result.encode('utf-8')
@@ -45,6 +53,10 @@ def embed(root=ROOT):
         'SUITE_COMPANIONS': 'SUITE_COMPANIONS = ' + repr(payloads) + '\n',
         'SuiteCompanionManager': 'SuiteCompanionManager = _suite_load_support("jihunius_suite_companions", ' + repr(manager) + ').CompanionManager\n',
     }
+    errors=(root/'src/error_history.py').read_text(encoding='utf-8')
+    error_ui=(root/'src/error_history_ui.py').read_text(encoding='utf-8')
+    combined=errors+'\nSYNC_SOURCE = '+repr(errors)+'\n'+error_ui
+    replacements['SuiteErrors']='SuiteErrors = _suite_load_support("jihunius_error_history", '+repr(combined)+')\n'
     lines = source.splitlines(keepends=True)
     for name in sorted(replacements, key=lambda name: assignments[name].lineno, reverse=True):
         node = assignments[name]

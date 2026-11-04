@@ -12,6 +12,12 @@ SEED_ROWS = [{'id': 'seed-4', 'cells': ['블루다이아RC', '드릴값(위) 9.1
 SEED_NOTES = '덴티움 탑플란 메가젠스크류로 덴티움 길이값 맞추는것은 위에 수치만 -0.25 했음 잘나오면 이대로하고 아니면 치수조정해야함 \n수정된 사항은 추가 할것'
 
 
+def _diagnostic_error(message,stage):
+    import sys
+    module=sys.modules.get("jihunius_error_history")
+    if module is not None:module.capture(message,stage=stage)
+
+
 def complete_windows_ime():
     """Commit pending composition in this UI thread, without inserting text twice."""
     if os.name != 'nt':
@@ -472,7 +478,11 @@ class SpecialTableApp:
             self.editor['widget'].destroy();self.editor=None;self.render()
     def update_status(self):
         error=self.draft_error or self.last_error
-        if error:self.status.set(error+' · 미저장 '+str(len(self.pending))+'건')
+        if not error:self._diagnostic_last_error=None
+        if error:
+            if error!=getattr(self,'_diagnostic_last_error',None):_diagnostic_error(error,'공유 저장/연결')
+            self._diagnostic_last_error=error
+            self.status.set(error+' · 미저장 '+str(len(self.pending))+'건')
         elif not self.ready:self.status.set('공유폴더 연결 중…')
         elif self.pending:self.status.set(('저장 중' if self.busy else '저장 대기')+' · '+str(len(self.pending))+'건')
         else:self.status.set('총 '+str(len(self.state['rows']))+'줄 · 저장됨')

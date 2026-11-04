@@ -20,6 +20,12 @@ CONFIG_FILE = CONFIG_DIR / 'settings.json'
 DEFAULT_PARENT = r'\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈'
 DEFAULT_FOLDER = DEFAULT_PARENT + r'\세척일보'
 
+def _diagnostic_error(message,stage):
+    import sys
+    module=sys.modules.get("jihunius_error_history")
+    if module is not None:module.capture(message,stage=stage)
+
+
 def initial():
     return {'format': 1, 'id': str(uuid.uuid4()), 'tools': [''] * 9, 'days': {}, 'notes': []}
 
@@ -987,6 +993,7 @@ class App(tk.Tk):
                 if not self.busy:self.busy_since=None
                 if kind=='saved':self.pending_updates.pop(extra.get('_job_id'),None)
                 if kind in ('error','conflict','rejected','operation_error'):
+                    _diagnostic_error(value[0] if kind=='conflict' else value,str(extra[0]))
                     self._update_error_sequence += 1
                     self.pending_copy=None;self.next_cell=None
                     op=extra[1] if extra[0]=='update' else None
@@ -1048,6 +1055,7 @@ class App(tk.Tk):
                     # disable editing. Only repeated failed reads set offline.
                     if not self.busy:self.status.set('연결 확인 지연 · 화면/입력 유지 · 자동으로 다시 확인 중')
                 elif kind=='offline':
+                    _diagnostic_error(value,'공유 연결 끊김')
                     self.online=False;self.cancel_plate_drag()
                     self.status.set('연결 끊김 · 입력 보존 · 자동 연결 확인 중 · '+str(value))
                 else:
@@ -1057,7 +1065,9 @@ class App(tk.Tk):
                             self.undo_history=[];self.note_retry=None
                         self.connected=True;self.cfg['folder']=extra;self.active_folder=extra;self.pathvar.set(extra)
                         try:self.save_config()
-                        except OSError as e:self.status.set('PC 설정 저장 실패: '+str(e))
+                        except OSError as e:
+                            _diagnostic_error(e,'PC 설정 저장')
+                            self.status.set('PC 설정 저장 실패: '+str(e))
                         self.show_page('daily');self.connection.set('연결됨: '+extra+'\n데이터 ID: '+value['id'])
                     if kind=='saved':
                         if extra['kind']=='undo':

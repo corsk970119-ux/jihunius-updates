@@ -26,7 +26,18 @@ class PrivatePackageTests(unittest.TestCase):
   self.assertIn('STL_FINDER_SOURCE',keys)
   self.assertEqual(before['CARD_MODIFIER_BYTES'],after['CARD_MODIFIER_BYTES'])
   for k in keys:self.assertEqual(before[k],after[k],k)
-  self.assertEqual(hashlib.sha256((ROOT/'src/wash_log.py').read_bytes()).hexdigest(),'229a4f2544a82bf3e505f0b4ef444edf1725b889ff028a7bd4d14421a7343d61')
+  # Error hooks are observational. All original wash-log application definitions
+  # still match the last release after removing only the new diagnostic calls.
+  previous=assignments(ROOT/'releases/jihunius/2026.11.04.2/app.pyw')['SUITE_COMPANIONS']['wash-log']
+  old=zlib.decompress(base64.b64decode(previous['compressed'])).decode()
+  class StripDiagnostics(ast.NodeTransformer):
+   def visit_Expr(self,node):
+    if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=='_diagnostic_error':return None
+    return self.generic_visit(node)
+  old_defs={n.name:ast.dump(n,include_attributes=False) for n in ast.parse(old).body if isinstance(n,(ast.ClassDef,ast.FunctionDef))}
+  for n in ast.parse((ROOT/'src/wash_log.py').read_text()).body:
+   if isinstance(n,(ast.ClassDef,ast.FunctionDef)) and n.name!='_diagnostic_error':
+    self.assertEqual(ast.dump(StripDiagnostics().visit(n),include_attributes=False),old_defs[n.name],n.name)
  def test_embedded_sources_match_reviewed_sources(self):
   payloads=assignments(ROOT/'apps/jihunius/app.pyw')['SUITE_COMPANIONS']
   self.assertEqual(set(payloads),{'wash-log','protrusion','special-table'})
@@ -42,7 +53,7 @@ class PrivatePackageTests(unittest.TestCase):
    m.main();launch.assert_called_once();app.assert_not_called()
  def test_managed_production_launch_attaches_update_checks(self):
   m=load_app();root=Mock();app=Mock();lease=Mock();context={'test':True}
-  with patch.object(m.SuiteUpdater,'managed_context',return_value=context),patch.object(m.SuiteUpdater,'managed_lease',return_value=lease),patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as ready,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root):
+  with patch.object(m.SuiteUpdater,'managed_context',return_value=context),patch.object(m.SuiteUpdater,'managed_lease',return_value=lease),patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as ready,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root),patch.object(m.SuiteErrors,'install'),patch.object(m.SuiteErrors,'attach'):
    m.main();attach.assert_called_once_with(app,context,m.SUITE_APP_VERSION);ready.assert_called_once_with(context)
    root.mainloop.assert_called_once();lease.release.assert_called_once()
 

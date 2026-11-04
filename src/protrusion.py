@@ -60,6 +60,12 @@ SAVE_DELAY_MS = 500
 SYNC_TIMEOUT = 10.0
 
 
+def _diagnostic_error(message,stage):
+    import sys
+    module=sys.modules.get("jihunius_error_history")
+    if module is not None:module.capture(message,stage=stage)
+
+
 class Theme:
     BACKGROUND = "#0f0f0f"
     SURFACE = "#181a1e"
@@ -1237,6 +1243,7 @@ class DefectApp:
         self._apply_values()
 
     def _sync_failed(self, error):
+        _diagnostic_error(error, "공유 저장/연결")
         self._update_error_sequence += 1
         self.last_error = error
         self.sync_again = False

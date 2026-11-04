@@ -104,6 +104,9 @@ class Controller:
         def worker():
             try:self.events.put((kind,True,action()))
             except Exception as exc:
+                import sys
+                diagnostics=sys.modules.get('jihunius_error_history')
+                if diagnostics is not None:diagnostics.capture(exc,feature='업데이트',stage=kind)
                 msg=str(exc) if isinstance(exc,UpdateError) else '업데이트 처리에 실패했습니다. 기존 버전은 계속 사용할 수 있습니다.'
                 self.events.put((kind,False,msg))
         threading.Thread(target=worker,daemon=True).start()
@@ -225,6 +228,9 @@ class Controller:
         self.save_timer=self.root.after(100,self.poll_companion_save)
 
     def abort_apply(self,message):
+        import sys
+        diagnostics=sys.modules.get('jihunius_error_history')
+        if diagnostics is not None:diagnostics.capture(message,feature='업데이트',stage='적용 전 저장/종료')
         self._download_apply=False
         self.app._suite_children.cancel_update_save()
         if self.save_timer is not None:
