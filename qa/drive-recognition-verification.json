@@ -1,0 +1,30 @@
+{
+  "scope_changed": [
+    "IntegrationApp.check_card_modifier",
+    "IntegrationApp.display_drive_snapshot",
+    "IntegrationApp.drain_events",
+    "IntegrationApp.finish_drive_listing",
+    "IntegrationApp.finish_drive_refresh",
+    "IntegrationApp.refresh_destination",
+    "SUITE_APP_VERSION",
+    "read_drive_snapshot",
+    "select_destination"
+  ],
+  "other_functions_and_embedded_payloads_unchanged": true,
+  "controlled_latency": {
+    "before": {
+      "listing_visible_ms": 603.04,
+      "metadata_delay_injected_ms": 600
+    },
+    "after": {
+      "listing_visible_ms": 1.62,
+      "metadata_delay_injected_ms": 600
+    }
+  },
+  "tests": {
+    "passed": 155,
+    "skipped": 0,
+    "environment": "Python 3.12 / actual Tk with Xvfb"
+  },
+  "native_windows_usb_timing_verified": false
+}

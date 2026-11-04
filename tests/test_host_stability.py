@@ -194,11 +194,22 @@ class HostStabilityTests(unittest.TestCase):
         self.assertTrue(app.handover_read_error)
         self.assertIn('1건', app.handover_status.get())
 
+    def capture_refresh(self, app):
+        events = []
+        while True:
+            try: event = app.events.get(timeout=2)
+            except queue.Empty: self.fail('drive refresh must deliver a background result')
+            self.assertIn(event[0], ('drive_listing', 'drive_refreshed'))
+            events.append(event)
+            if event[0] == 'drive_refreshed': return events
+
+    def apply_refresh(self, app, events):
+        for event in events:
+            if event[0] == 'drive_listing': app.finish_drive_listing(*event[1:])
+            else: app.finish_drive_refresh(*event[1:])
+
     def deliver(self, app):
-        try: event = app.events.get(timeout=2)
-        except queue.Empty: self.fail('drive refresh must deliver a background result')
-        self.assertEqual(event[0], 'drive_refreshed')
-        app.finish_drive_refresh(*event[1:])
+        self.apply_refresh(app, self.capture_refresh(app))
 
     def test_poll_returns_without_waiting_for_drive_io_and_coalesces_repeats(self):
         app = host(self.module)
@@ -418,10 +429,10 @@ class HostStabilityTests(unittest.TestCase):
         app = host(self.module)
         app.program_path_dialog = SimpleNamespace(winfo_exists=lambda: True,lift=lambda:None,focus_set=lambda:None)
         with patch.object(self.module, 'select_destination', return_value=self.root):
-            app.start_empty(); ready = app.events.get(timeout=2)
+            app.start_empty(); ready = self.capture_refresh(app)
             app.configure_program_path()
             self.assertIsNone(app.drive_action_pending)
-            app.finish_drive_refresh(*ready[1:])
+            self.apply_refresh(app, ready)
             self.assertFalse(app.busy);self.assertTrue(app.events.empty())
 
     def test_timeout_clears_request_while_the_single_reader_is_still_pending(self):
@@ -446,8 +457,7 @@ class HostStabilityTests(unittest.TestCase):
                      patch.object(self.module, 'empty_fixed_drive', side_effect=lambda path: calls.append(path)):
                     app.start_empty()
                     self.assertIsNotNone(app.drive_action_pending)
-                    ready = app.events.get(timeout=2)
-                    self.assertEqual(ready[0], 'drive_refreshed')
+                    ready = self.capture_refresh(app)
                     if action == 'manual': app.refresh_drive_manual()
                     elif action == 'job': app.start_job('other', lambda: None)
                     elif action == 'tray':
@@ -456,7 +466,7 @@ class HostStabilityTests(unittest.TestCase):
                         with patch.object(self.module, 'defer_ime_commit', return_value=True):
                             (app.close if action == 'close' else app.request_complete_exit)()
                     self.assertIsNone(app.drive_action_pending)
-                    app.finish_drive_refresh(*ready[1:])
+                    self.apply_refresh(app, ready)
                     if action == 'manual': self.deliver(app)
                     self.assertEqual(calls, [])
 
@@ -466,7 +476,7 @@ class HostStabilityTests(unittest.TestCase):
                 app = host(self.module)
                 with patch.object(self.module, 'select_destination', return_value=self.root):
                     app.start_empty()
-                    ready = app.events.get(timeout=2)
+                    ready = self.capture_refresh(app)
                     self.assertIsNotNone(app.drive_action_pending)
                     if action == 'add_dialog': app.choose_drive_files()
                     elif action == 'add': app.start_drive_add([self.root / 'sample'])
@@ -475,7 +485,7 @@ class HostStabilityTests(unittest.TestCase):
                     elif action == 'rename': app.start_rename()
                     elif action == 'drop': app.receive_drive_drop([self.root / 'sample'], None, False)
                     self.assertIsNone(app.drive_action_pending)
-                    app.finish_drive_refresh(*ready[1:])
+                    self.apply_refresh(app, ready)
                     self.assertFalse(app.busy)
                     self.assertTrue(app.events.empty())
 

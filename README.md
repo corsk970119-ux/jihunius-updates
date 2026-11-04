@@ -1,6 +1,6 @@
 # 지후니우스 공개 업데이트
 
-현재 배포: **2026.11.04.1**. 특수 돌출량 표를 추가했습니다. 상시 편집·우클릭 줄 삭제·PC 간 공유를 지원하며, 기존 업무 자동화는 유지합니다.
+현재 배포: **2026.11.04.2**. 드라이브 목록을 카드 정보 확인보다 먼저 표시하고, 이동식 드라이브가 아닌 경로의 불필요한 접근을 줄였습니다. 특수 돌출량의 상시 편집·우클릭 줄 삭제·PC 간 공유와 기존 업무 자동화는 유지합니다.
 
 ## 처음 사용
 
@@ -50,7 +50,7 @@
 변경 내용을 UTF-8 텍스트로 작성한 뒤 아래 명령으로 새 버전을 준비합니다.
 
 ```sh
-python tools/prepare_release.py 2026.11.04.1 --notes docs/changes.txt
+python tools/prepare_release.py 2026.11.04.2 --notes docs/changes.txt
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
