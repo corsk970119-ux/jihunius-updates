@@ -58,6 +58,8 @@ STATES = {'RUN': '가공 중', 'WAIT': '대기', 'HOLD': '일시정지',
 EVENT_NAMES = {'baseline': '시작 기준', 'program': '번호 변경 +1', 'state': '상태 변경',
                'reference': '사이트 카운터 변경', 'defect': '불량 +1', 'rotate': '소재 교체',
                'rotate_early':'소재 중도교체',
+               'switch14':'14파이 전환 · 원소재 보관', 'return_original':'원소재 복귀 · 14파이 보관',
+               'switch_undo':'소재 전환 취소',
                'gap': '수집 중단', 'resume': '재연결 기준', 'defect_undo': '불량 입력 취소',
                'rotate_undo': '소재 교체 취소', 'material_type':'소재 종류 지정', 'next_type':'다음 소재 예약',
                'program_skip':'집계 제외 번호', 'count_baseline':'유효 번호 기준', 'program_return':'같은 작업번호 복귀'}
@@ -161,13 +163,13 @@ class Store:
         self.migration_backup = None
         try:
             version = self.db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, 1, 2, 3):
+            if version not in (0, 1, 2, 3, 4):
                 raise RuntimeError('더 새로운 프로그램으로 만든 데이터입니다. 최신 프로그램을 사용해주세요.')
             self.db.execute('PRAGMA foreign_keys=ON')
-            if version < 3:
+            if version < 4:
                 old_tables = self.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('materials','machines','events')").fetchall()
                 if old_tables:
-                    backup = Path(str(self.path) + '.pre-v3.bak')
+                    backup = Path(str(self.path) + '.pre-v4.bak')
                     if not backup.exists():
                         temporary = Path(str(backup) + '.' + uuid.uuid4().hex + '.tmp')
                         target = None
@@ -235,7 +237,19 @@ class Store:
             columns = {r['name'] for r in self.db.execute('PRAGMA table_info(materials)')}
             if 'early_end' not in columns:
                 self.db.execute('ALTER TABLE materials ADD COLUMN early_end INTEGER NOT NULL DEFAULT 0 CHECK(early_end IN (0,1))')
-            self.db.execute('PRAGMA user_version=3')
+            self.db.execute('''CREATE TABLE IF NOT EXISTS parked_materials(
+              machine INTEGER PRIMARY KEY REFERENCES machines(machine),
+              material_id INTEGER NOT NULL UNIQUE REFERENCES materials(id),
+              role TEXT NOT NULL CHECK(role IN ('original','14')),
+              next_type TEXT REFERENCES stock(type_id))''')
+            self.db.execute('''CREATE TABLE IF NOT EXISTS material_switch_actions(
+              event_id INTEGER PRIMARY KEY REFERENCES events(id),
+              held_before INTEGER REFERENCES materials(id),role_before TEXT,
+              held_next_before TEXT REFERENCES stock(type_id),active_next_before TEXT REFERENCES stock(type_id),
+              created_new INTEGER NOT NULL CHECK(created_new IN (0,1)))''')
+            self.db.execute("""CREATE INDEX IF NOT EXISTS switch_machine_idx ON events(machine,id)
+              WHERE kind IN ('switch14','return_original','switch_undo')""")
+            self.db.execute('PRAGMA user_version=4')
 
     def reset_records(self, reset_stock=False, at=None):
         """Back up first, then atomically start a new recording period.
@@ -292,6 +306,8 @@ class Store:
               last_seen=NULL,active_material=NULL""")
             self.db.execute('UPDATE stock_movements SET reverses=NULL')
             self.db.execute('DELETE FROM stock_movements')
+            self.db.execute('DELETE FROM parked_materials')
+            self.db.execute('DELETE FROM material_switch_actions')
             self.db.execute('DELETE FROM events')
             self.db.execute('DELETE FROM materials')
             if reset_stock:
@@ -413,6 +429,7 @@ class Store:
         type_id, at = self._type(type_id), self._at(at)
         with self.transaction():
             row = self._machine(machine)
+            self._validate_parked_replacement(machine,type_id)
             if row['next_type'] == type_id:
                 return
             self.db.execute('UPDATE machines SET next_type=? WHERE machine=?', (type_id, machine))
@@ -486,6 +503,7 @@ class Store:
             current = self.db.execute('SELECT * FROM materials WHERE id=?', (row['active_material'],)).fetchone()
             type_id = row['next_type'] or current['material_type']
             self._type(type_id)
+            self._validate_parked_replacement(machine,type_id)
             stock = self.db.execute('SELECT quantity FROM stock WHERE type_id=?', (type_id,)).fetchone()[0]
             if stock is None:
                 raise ValueError('{} 최초 보관 재고를 먼저 등록해주세요.'.format(MATERIAL_TYPES[type_id]))
@@ -504,19 +522,107 @@ class Store:
             self.db.execute('UPDATE machines SET active_material=?,next_type=? WHERE machine=?', (new, type_id, machine))
         return row['active_material']
 
+    def _validate_parked_replacement(self,machine,type_id):
+        held=self.db.execute('SELECT role FROM parked_materials WHERE machine=?',(machine,)).fetchone()
+        if not held:return
+        if held['role']=='original' and type_id!='14':
+            raise ValueError('원소재가 보관 중입니다. 원소재로 복귀한 뒤 다음 소재를 선택해주세요.')
+        if held['role']=='14' and type_id=='14':
+            raise ValueError('보관한 14파이가 있습니다. 14파이 교체 버튼으로 전환한 뒤 새 봉 교체를 진행해주세요.')
+
+    def switch_revision(self,machine):
+        return self.db.execute("""SELECT MAX(id) FROM events WHERE machine=?
+          AND kind IN ('switch14','return_original','switch_undo')""",(machine,)).fetchone()[0]
+
+    def switch_14(self,machine,at=None):
+        """Swap physical rods without ending either; only a new 14 mm rod uses stock."""
+        at=self._at(at)
+        with self.transaction():
+            row=self._machine(machine)
+            if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
+                raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
+            if row['state'] not in ('WAIT','HOLD','ALARM','STOP'):
+                raise ValueError('머신이 멈춘 상태에서 소재를 전환해주세요.')
+            current=self.db.execute('SELECT * FROM materials WHERE id=?',(row['active_material'],)).fetchone()
+            if current is None or current['material_type'] is None:
+                raise ValueError('현재 사용 소재를 지정한 뒤 전환해주세요.')
+            if current['ended'] is not None or current['merged_into'] is not None:
+                raise ValueError('현재 소재 기록을 확인해주세요.')
+            held=self.db.execute('SELECT * FROM parked_materials WHERE machine=?',(machine,)).fetchone()
+            returning=bool(held and held['role']=='original')
+            if returning and current['material_type']!='14':raise ValueError('임시 소재가 14파이가 아닙니다. 소재 기록을 확인해주세요.')
+            if not returning and current['material_type']=='14':raise ValueError('복귀할 원소재가 없습니다. 현재 14파이는 기존 소재교체로 관리해주세요.')
+            if held:
+                target=self.db.execute('SELECT * FROM materials WHERE id=?',(held['material_id'],)).fetchone()
+                if (target is None or target['machine']!=machine or target['ended'] is not None
+                        or target['merged_into'] is not None or target['id']==current['id']
+                        or (target['material_type']=='14')==returning):
+                    raise ValueError('보관 소재 기록을 확인해주세요. 전환하지 않았습니다.')
+                new=target['id'];next_type=held['next_type'] or target['material_type']
+            else:
+                if self.db.execute("UPDATE stock SET quantity=quantity-1 WHERE type_id='14' AND quantity>=1").rowcount!=1:
+                    raise ValueError('Ø14 보관 재고가 없습니다. 최초 재고 등록 또는 입고를 확인해주세요.')
+                new=self.db.execute('INSERT INTO materials(machine,started,start_program,material_type) VALUES(?,?,?,?)',
+                    (machine,at,row['program'],'14')).lastrowid
+                next_type='14'
+            action=self._event(row,at,'return_original' if returning else 'switch14',next_material=new,
+                note='현재 봉 보관 · 기존 봉 누적 집계 재개 · 재고 차감 없음' if held else '원소재 보관 · 새 Ø14 봉 투입 · Ø14 재고 1봉 차감')
+            self.db.execute('INSERT INTO material_switch_actions VALUES(?,?,?,?,?,?)',
+                (action,held['material_id'] if held else None,held['role'] if held else None,
+                 held['next_type'] if held else None,row['next_type'],int(held is None)))
+            self.db.execute('DELETE FROM parked_materials WHERE machine=?',(machine,))
+            self.db.execute('INSERT INTO parked_materials VALUES(?,?,?,?)',
+                (machine,current['id'],'14' if returning else 'original',row['next_type']))
+            if held is None:self._movement('14',at,'consume',-1,'{}호기 임시 Ø14 새 봉 투입'.format(machine),new,action)
+            self.db.execute('UPDATE machines SET active_material=?,next_type=? WHERE machine=?',(new,next_type,machine))
+        return new
+
+    def _undo_switch(self,row,action,at):
+        context=self.db.execute('SELECT * FROM material_switch_actions WHERE event_id=?',(action['id'],)).fetchone()
+        held=self.db.execute('SELECT * FROM parked_materials WHERE machine=?',(row['machine'],)).fetchone()
+        if not context or not held or held['material_id']!=action['material_id'] or row['active_material']!=action['next_material']:
+            raise ValueError('소재 전환 경계가 바뀌어 취소할 수 없습니다.')
+        if self.db.execute("""SELECT 1 FROM events WHERE machine=? AND id>? AND
+          (auto_delta!=0 OR defect_delta!=0 OR kind IN ('next_type','material_type')) LIMIT 1""",(row['machine'],action['id'])).fetchone():
+            raise ValueError('전환 후 가공·입력 기록이 있습니다. 취소 대신 소재 전환 버튼으로 복귀해주세요.')
+        consumed=self.db.execute("SELECT * FROM stock_movements WHERE event_id=? AND kind='consume'",(action['id'],)).fetchone()
+        if consumed and self.db.execute("SELECT 1 FROM stock_movements WHERE type_id=? AND kind='adjust' AND id>? LIMIT 1",
+                (consumed['type_id'],consumed['id'])).fetchone():
+            raise ValueError('전환 이후 재고 실사 조정이 있어 취소할 수 없습니다.')
+        self.db.execute('DELETE FROM parked_materials WHERE machine=?',(row['machine'],))
+        if context['held_before'] is not None:
+            self.db.execute('INSERT INTO parked_materials VALUES(?,?,?,?)',
+                (row['machine'],context['held_before'],context['role_before'],context['held_next_before']))
+        if context['created_new']:
+            self.db.execute('UPDATE materials SET merged_into=? WHERE id=?',(action['material_id'],action['next_material']))
+        self.db.execute('UPDATE machines SET active_material=?,next_type=? WHERE machine=?',
+            (action['material_id'],context['active_next_before'],row['machine']))
+        # Undo means the switch was entered by mistake: an unobserved interval
+        # may belong to the restored rod, just as with regular replacement undo.
+        gap=int(self.db.execute("SELECT 1 FROM events WHERE machine=? AND id>? AND kind IN ('gap','resume') LIMIT 1",
+            (row['machine'],action['id'])).fetchone() is not None)
+        self.db.execute('UPDATE materials SET gap=MAX(gap,?) WHERE id=?',(gap,action['material_id']))
+        event=self._event(dict(row,active_material=action['material_id']),at,'switch_undo',note='소재 전환 #{} 취소'.format(action['id']))
+        if consumed:
+            self.db.execute('UPDATE stock SET quantity=quantity+1 WHERE type_id=?',(consumed['type_id'],))
+            self._movement(consumed['type_id'],at,'reverse',1,'소재 전환 취소',action['next_material'],event,consumed['id'])
+
     def undo_label(self, machine):
         self._machine(machine)
-        row = self.db.execute("SELECT kind FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
-        return {'rotate': '마지막 소재교체 취소', 'rotate_early':'마지막 중도교체 취소', 'defect': '마지막 불량 +1 취소'}.get(row['kind'], '') if row else ''
+        row = self.db.execute("SELECT kind FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
+        return {'rotate': '마지막 소재교체 취소', 'rotate_early':'마지막 중도교체 취소', 'defect': '마지막 불량 +1 취소',
+                'switch14':'마지막 14파이 전환 취소','return_original':'마지막 원소재 복귀 취소'}.get(row['kind'], '') if row else ''
 
     def undo(self, machine, at=None):
         at = self._at(at)
         with self.transaction():
             row = self._machine(machine)
-            action = self.db.execute("SELECT * FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
+            action = self.db.execute("SELECT * FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
             if not action:
                 raise ValueError('취소할 수동 입력이 없습니다.')
-            if action['kind'] == 'defect':
+            if action['kind'] in ('switch14','return_original'):
+                self._undo_switch(row,action,at)
+            elif action['kind'] == 'defect':
                 correction = dict(row, active_material=action['material_id'])
                 self._event(correction, at, 'defect_undo', defects=-action['defect_delta'], note='입력 #{} 취소'.format(action['id']))
             else:
@@ -551,6 +657,11 @@ class Store:
             row.update(auto=totals[0], defects=totals[1], total=totals[0], material_type=mat['material_type'],
                        partial=bool(mat['partial']), gap=bool(mat['gap']), started=mat['started'])
         row.update(good=max(0,row['total']-row['defects']),defect_excess=max(0,row['defects']-row['total']))
+        held=self.db.execute('''SELECT p.*,m.material_type,m.partial,m.gap,
+          COALESCE((SELECT SUM(auto_delta) FROM events WHERE material_id=m.id),0) AS total,
+          COALESCE((SELECT SUM(defect_delta) FROM events WHERE material_id=m.id),0) AS defects
+          FROM parked_materials p JOIN materials m ON m.id=p.material_id WHERE p.machine=?''',(machine,)).fetchone()
+        row['parked']=dict(held,good=max(0,held['total']-held['defects'])) if held else None
         return row
 
     def history(self, machine=None, limit=500):
@@ -681,7 +792,7 @@ class Store:
                     daily=[daily[key] for key in sorted(daily)],
                     basis='소모 봉: 기간 내 사용을 끝낸 봉(정상 소진+중도파기). 양품·불량 합계는 해당 봉의 전체 관측 기록입니다. '
                           '봉당 평균: 중도파기를 포함하고 중간 시작·수집 공백·불량초과 봉은 제외합니다. '
-                          '사용 중인 봉은 종료 후 반영됩니다. 기간 관측 가공·불량 입력은 발생일/입력일 기준 별도 수치입니다.')
+                          '사용 중·보관 중인 봉은 종료 후 반영됩니다. 기간 관측 가공·불량 입력은 발생일/입력일 기준 별도 수치입니다.')
 
     def validate_export_path(self, path):
         target=Path(path).resolve()
@@ -1059,6 +1170,7 @@ def make_rounded_button(tk, parent, **options):
 
 class Application:
     dashboard_actions=True
+    temporary14_actions=False
     def __init__(self, root, store, folder, collector_factory=Collector, jobs_factory=DatabaseJobs):
         import tkinter as tk
         from tkinter import ttk, font
@@ -1201,8 +1313,8 @@ class Application:
                    color=PALETTE['muted'],anchor='w').pack(fill='x',padx=8,pady=(10,8))
         board = self.tk.Frame(self.current_tab,bg=PALETTE['bg'])
         board.pack(fill='both',expand=True,padx=4)
-        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ())
-        heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ())
+        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ()) + ((166,) if self.temporary14_actions else ())
+        heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ()) + (('임시 소재 전환',) if self.temporary14_actions else ())
         for j,(width,heading) in enumerate(zip(widths,heads)):
             board.grid_columnconfigure(j,minsize=width,weight=1 if j==5 else 0)
             self.label(board,heading,color=PALETTE['muted'],bg=PALETTE['bg']).grid(row=0,column=j,sticky='nsew',pady=(0,1),ipady=8)
@@ -1224,10 +1336,12 @@ class Application:
                     widget.bind('<Button-1>',lambda e,m=n:self.material_dialog(m))
                 widgets[key]=widget
             actions=((6,'rotate','소재교체',self.rotate),(7,'defect','불량 +1',self.defect)) if self.dashboard_actions else ()
+            if self.temporary14_actions:actions+=((len(widths)-1,'switch14','14파이 교체',self.switch_14),)
             for j,key,text,fn in actions:
                 box = self.tk.Frame(row_card,bg=bg)
                 box.grid(row=0,column=j,sticky='nsew',padx=(0,7) if j==7 else 0,pady=2)
                 button = self.button(box,text,lambda m=n,f=fn:f(m),primary=key=='rotate',width=7)
+                if key=='switch14':button.configure(width=12,padx=9)
                 if key=='defect':button.configure(bg=PALETTE['danger'],activebackground=PALETTE['danger_active'],disabledforeground='#e3a3a3')
                 button.pack(expand=True,padx=4,pady=0)
                 button.bind('<Button-3>',lambda e,m=n:self.context(e,m))
@@ -1577,7 +1691,7 @@ class Application:
         self.period_observed=self.label(panel,'기간 중 수집 · 조회 대기',size=9,color=PALETTE['muted'],anchor='w')
         self.period_observed.grid(row=6,column=0,sticky='ew',pady=(7,4))
         self.period_hint=self.label(panel,
-            '봉당 평균: 이 기간에 사용을 끝낸 봉의 처음부터 끝까지 수량으로 계산합니다. 사용 중인 봉은 종료 후 반영됩니다.\n가공량이 적어도 교체한 봉은 1봉으로 포함하며, 중간 시작·수집 공백·불량초과 봉은 평균에서 제외합니다.',
+            '봉당 평균: 이 기간에 사용을 끝낸 봉의 처음부터 끝까지 수량으로 계산합니다. 사용 중·보관 중인 봉은 종료 후 반영됩니다.\n가공량이 적어도 교체한 봉은 1봉으로 포함하며, 중간 시작·수집 공백·불량초과 봉은 평균에서 제외합니다.',
             color=PALETTE['muted'],size=9,anchor='w',justify='left',wraplength=900)
         self.period_hint.grid(row=7,column=0,sticky='ew')
         panel.bind('<Configure>',lambda e:self.period_hint.configure(wraplength=max(400,e.width-10)))

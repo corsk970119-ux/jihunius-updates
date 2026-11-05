@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import material_counter as core
 
 class CommandStore(core.Store):
-    WRITES = {'defect','rotate','undo','assign_material','set_next_type',
+    WRITES = {'defect','rotate','switch_14','undo','assign_material','set_next_type',
               'register_stock','receive_stock','adjust_stock','reset_records'}
     def __init__(self, path):
         super().__init__(path)
@@ -35,9 +35,9 @@ class CommandStore(core.Store):
         return self.db.execute("SELECT value FROM sync_meta WHERE key='epoch'").fetchone()[0]
     def expectations(self, n):
         r=self.snapshot(n)
-        action=self.db.execute("SELECT id FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect') AND undone=0 ORDER BY id DESC LIMIT 1",(n,)).fetchone()
+        action=self.db.execute("SELECT id FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1",(n,)).fetchone()
         return dict(material=r['active_material'],next_type=r['next_type'],
-                    material_type=r['material_type'],undo=action[0] if action else None)
+                    material_type=r['material_type'],undo=action[0] if action else None,switch_revision=self.switch_revision(n))
     def stock_expectations(self, kind):
         return dict(stock=self.db.execute('SELECT MAX(id) FROM stock_movements WHERE type_id=?',(kind,)).fetchone()[0])
     def reset_records(self, reset_stock=False, at=None):
@@ -77,18 +77,20 @@ class CommandStore(core.Store):
         if time.time()>r['expires']:raise ValueError('요청 유효 시간이 지났습니다. 반영되지 않았으니 최신 상태를 확인한 뒤 다시 입력해주세요.')
         name,args,expected=r['method'],r['args'],r['expected']
         if name not in self.WRITES:raise ValueError('허용되지 않은 입력입니다.')
-        lengths={'defect':1,'rotate':2,'undo':1,'assign_material':2,'set_next_type':2,
+        lengths={'defect':1,'rotate':2,'switch_14':1,'undo':1,'assign_material':2,'set_next_type':2,
                  'register_stock':2,'receive_stock':2,'adjust_stock':3,'reset_records':1}
         if name=='rotate' and len(args)==1:args=args+[False]
         if len(args)!=lengths[name]:raise ValueError('입력 항목 수가 올바르지 않습니다.')
-        if name in ('defect','rotate','undo','assign_material','set_next_type'):
+        if name in ('defect','rotate','switch_14','undo','assign_material','set_next_type'):
             now=self.expectations(args[0])
             keys=['material']
-            if name in ('rotate','set_next_type'):keys+=['next_type','material_type']
+            if name in ('rotate','switch_14','set_next_type'):keys+=['next_type','material_type']
             if name=='assign_material':keys+=['material_type']
             if name=='undo':keys+=['undo']
             if any(k not in expected or now[k]!=expected[k] for k in keys):
                 raise ValueError('다른 PC에서 소재 또는 입력 기록이 변경되었습니다. 최신 내용을 확인한 뒤 다시 입력해주세요.')
+            if now['switch_revision']!=expected.get('switch_revision'):
+                raise ValueError('소재 전환 기록이 변경되었습니다. 최신 내용을 확인한 뒤 다시 입력해주세요.')
         elif name=='reset_records':
             if type(args[0]) is not bool:raise ValueError('초기화 범위가 올바르지 않습니다.')
             if expected.get('revision')!=self.revision():raise ValueError('다른 PC 또는 수집으로 기록이 변경되었습니다. 최신 내용을 확인한 뒤 다시 삭제해주세요.')
@@ -287,7 +289,8 @@ class Authority:
         return dict(rows=rows,inventory=self.store.inventory(),live=sorted(self.store.live),
                     stock_revisions={k:self.store.stock_expectations(k) for k in core.MATERIAL_TYPES},
                     collection=self.collection,owner=self.owner,epoch=self.store.epoch(),
-                    revision=revision,detail=self.server_detail,failure=self.failure,errors=self.errors,at=time.time())
+                    revision=revision,detail=self.server_detail,failure=self.failure,errors=self.errors,at=time.time(),
+                    capabilities=['temporary14'])
     def _run(self):
         try:self.store=CommandStore(self.path)
         except Exception as exc:self.error=exc;self.ready.set();return
@@ -304,7 +307,7 @@ class Authority:
                     if method=='state':result=self.state()
                     elif method=='_collection':self._switch(args);result=None
                     elif self.failure:raise RuntimeError(self.failure)
-                    elif args.get('method')=='rotate':
+                    elif args.get('method') in ('rotate','switch_14'):
                         self.store.validate_command(args)
                         old=self.store.previous(args)[1]
                         if old is not None:result=old

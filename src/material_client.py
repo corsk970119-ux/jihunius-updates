@@ -112,7 +112,7 @@ class ClientSession:
         return request['id']
     def busy_machines(self):
         return {x['request']['args'][0] for x in self.outbox.items()
-                if x['request']['method'] in ('defect','rotate','undo','assign_material','set_next_type')}
+                if x['request']['method'] in ('defect','rotate','switch_14','undo','assign_material','set_next_type')}
     def view(self):
         client=self.coordinator.client
         if client is None:raise ConnectionError('수집 PC에 연결되지 않았습니다.')
@@ -208,7 +208,7 @@ class CachedStore(core.Store):
         self.histories={};self.event_lists={};self.movement_list=[]
         self.rows={n:dict(machine=n,program='',state='',part_count='',last_seen=None,active_material=None,
             initial_type=None,next_type=None,auto=0,defects=0,total=0,partial=False,gap=False,started=None,
-            material_type=None,good=0,defect_excess=0,undo_label='',expected={}) for n in core.MACHINES}
+            material_type=None,good=0,defect_excess=0,undo_label='',expected={},parked=None) for n in core.MACHINES}
     def update(self,state):self.state=state;self.rows={r['machine']:r for r in state['rows']};self.live=set(state['live'])
     def snapshot(self,n):return self.rows[n]
     def inventory(self):

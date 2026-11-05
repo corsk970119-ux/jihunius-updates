@@ -21,6 +21,7 @@ class NoCollector:
 class SyncedApplication(core.Application):
     backup_before_reset=False
     dashboard_actions=False
+    temporary14_actions=True
     def __init__(self,root,session):
         self.session=session;self.writes={};self.toggle_pending=False;self.connected=False
         self._history_loading=False;self._history_again=False;self._inventory_loading=False
@@ -132,6 +133,43 @@ class SyncedApplication(core.Application):
             self.reset_button.configure(state='normal' if self.connected and not self.resetting and not self.session.outbox.items() else 'disabled')
         if hasattr(self,'full_reset_button'):
             self.full_reset_button.configure(state='normal' if self.connected and not self.failed_storage and not self.resetting and not self.session.outbox.items() else 'disabled')
+        for n,widgets in self.rows.items():
+            row=self.store.snapshot(n);held=row.get('parked')
+            returning=bool(held and held['role']=='original')
+            widgets['switch14'].configure(text='확인 중…' if n in self.pending else ('원소재로 복귀' if returning else '14파이 교체'),
+                bg=core.PALETTE['yellow'] if returning else core.PALETTE['blue'],
+                fg=core.PALETTE['bg'] if returning else 'white',
+                state='normal' if self.can_switch_14(n,row) else 'disabled')
+            if held:
+                widgets['material'].configure(text=widgets['material'].cget('text')+'\n보관 '+core.material_label(held['material_type'])+
+                    ' · 양품 {} / 불량 {}'.format(held['good'],held['defects']))
+
+    def can_switch_14(self,n,row=None):
+        row=self.store.snapshot(n) if row is None else row
+        state=self.store.state or {};held=row.get('parked')
+        return bool(self.connected and not self._shutdown_started and state.get('collection')
+            and 'temporary14' in state.get('capabilities',[]) and self.action_availability(n,row)['rotate']
+            and row['active_material'] is not None and row['material_type']
+            and row['state'] in ('WAIT','HOLD','ALARM','STOP')
+            and (row['material_type']!='14' or (held and held['role']=='original')))
+
+    def switch_14(self,n):
+        from tkinter import messagebox
+        if getattr(self,'_switch_confirming',False) or not self.can_switch_14(n):return
+        row=self.store.snapshot(n);held=row.get('parked');expected=dict(row['expected'])
+        epoch=self.store.state['epoch'];returning=bool(held and held['role']=='original')
+        title='원소재로 복귀' if returning else '14파이 교체'
+        target=core.material_label(held['material_type']) if held else '새 Ø14'
+        message='{}호기 · {}로 전환할까요?\n현재 {} 봉의 양품·불량을 보관합니다.\n'.format(n,target,core.material_label(row['material_type']))
+        message+=('보관한 봉의 집계를 이어가며 재고는 차감하지 않습니다.' if held else '새 Ø14 재고 1봉을 차감합니다.')
+        self._switch_confirming=True
+        try:accepted=messagebox.askokcancel(title,message,parent=self.root,default='cancel')
+        finally:self._switch_confirming=False
+        if not accepted:return
+        if not self.can_switch_14(n) or (self.store.state or {}).get('epoch')!=epoch:
+            self.tell('연결 또는 소재 기록이 변경되었습니다. 최신 상태를 확인하고 다시 눌러주세요.',True);return
+        self._mutate('switch_14',[n],expected,
+            lambda value:self.tell('{}호기 {} 완료 · 보관한 봉의 기록 유지'.format(n,title)))
     def _mutate(self,method,args,expected,success=None,failure=None):
         if self._shutdown_started or self.resetting:return False
         try:
@@ -275,7 +313,7 @@ class SyncedApplication(core.Application):
             self.tell('입력 저장·조회·내보내기가 끝난 뒤 모두 초기화해주세요.',True);return
         if not messagebox.askyesno('소재사용량조사 · 모두 초기화',
                 '모든 PC가 함께 사용하는 소재사용량조사 데이터를 초기화할까요?\n\n'
-                '• 가공·불량·소재교체·입출고 기록과 현재 집계 삭제\n'
+                '• 가공·불량·소재교체·입출고 기록과 현재 집계·보관 소재 삭제\n'
                 '• 재고 수량 및 호기별 사용 소재·다음 소재 설정 초기화\n\n'
                 '자동 백업 없이 삭제하며 프로그램에서 되돌릴 수 없습니다.\n'
                 'PC 연결과 수집 ON/OFF 설정은 유지합니다.\n'
@@ -319,6 +357,9 @@ class SyncedApplication(core.Application):
             '번호가 집계 대상 4자리로 바뀔 때 가공 +1, 3999·9012·9999는 제외합니다.\n'
             '불량 +1은 기존 양품을 불량으로 변경하며 전체 가공 수는 유지됩니다.\n'
             '소재교체는 최신 정지 상태를 확인하고 새 소재 재고 1봉을 차감합니다.\n'
+            '현재집계의 14파이 교체는 원소재를 보관하고, 원소재로 복귀는 같은 봉의 누적 집계를 이어갑니다.\n'
+            '복귀 시 14파이도 보관합니다. 보관 봉 재사용은 재고를 차감하지 않으며 새 Ø14 최초 투입만 1봉 차감합니다.\n'
+            '다 쓴 봉은 메인의 소재교체로 마감합니다. 사용 중·보관 중인 봉은 마감 후 기간통계에 반영됩니다.\n'
             '가공량이 적어도 소재교체한 봉은 소모 1봉에 포함합니다. 우클릭으로 마지막 입력을 취소할 수 있습니다.\n'
             '봉당 평균은 기간 내 사용을 끝낸 완전측정 봉 기준입니다.\n'
             '중간 시작·수집 공백·불량초과 봉은 평균에서 제외하고 표시합니다.\n\n'
