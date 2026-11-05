@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import material_counter as core
 
 class CommandStore(core.Store):
-    WRITES = {'defect','rotate','switch_14','undo','assign_material','set_next_type',
+    WRITES = {'defect','rotate','switch_14','toggle_mass_mode','undo','assign_material','set_next_type',
               'register_stock','receive_stock','adjust_stock','reset_records'}
     def __init__(self, path):
         super().__init__(path)
@@ -77,14 +77,14 @@ class CommandStore(core.Store):
         if time.time()>r['expires']:raise ValueError('요청 유효 시간이 지났습니다. 반영되지 않았으니 최신 상태를 확인한 뒤 다시 입력해주세요.')
         name,args,expected=r['method'],r['args'],r['expected']
         if name not in self.WRITES:raise ValueError('허용되지 않은 입력입니다.')
-        lengths={'defect':1,'rotate':2,'switch_14':1,'undo':1,'assign_material':2,'set_next_type':2,
+        lengths={'defect':1,'rotate':2,'switch_14':1,'toggle_mass_mode':1,'undo':1,'assign_material':2,'set_next_type':2,
                  'register_stock':2,'receive_stock':2,'adjust_stock':3,'reset_records':1}
         if name=='rotate' and len(args)==1:args=args+[False]
         if len(args)!=lengths[name]:raise ValueError('입력 항목 수가 올바르지 않습니다.')
-        if name in ('defect','rotate','switch_14','undo','assign_material','set_next_type'):
+        if name in ('defect','rotate','switch_14','toggle_mass_mode','undo','assign_material','set_next_type'):
             now=self.expectations(args[0])
             keys=['material']
-            if name in ('rotate','switch_14','set_next_type'):keys+=['next_type','material_type']
+            if name in ('rotate','switch_14','toggle_mass_mode','set_next_type'):keys+=['next_type','material_type']
             if name=='assign_material':keys+=['material_type']
             if name=='undo':keys+=['undo']
             if any(k not in expected or now[k]!=expected[k] for k in keys):
@@ -290,7 +290,7 @@ class Authority:
                     stock_revisions={k:self.store.stock_expectations(k) for k in core.MATERIAL_TYPES},
                     collection=self.collection,owner=self.owner,epoch=self.store.epoch(),
                     revision=revision,detail=self.server_detail,failure=self.failure,errors=self.errors,at=time.time(),
-                    capabilities=['temporary14'])
+                    capabilities=['temporary14','mass_mode'])
     def _run(self):
         try:self.store=CommandStore(self.path)
         except Exception as exc:self.error=exc;self.ready.set();return
@@ -307,7 +307,7 @@ class Authority:
                     if method=='state':result=self.state()
                     elif method=='_collection':self._switch(args);result=None
                     elif self.failure:raise RuntimeError(self.failure)
-                    elif args.get('method') in ('rotate','switch_14'):
+                    elif args.get('method') in ('rotate','switch_14','toggle_mass_mode'):
                         self.store.validate_command(args)
                         old=self.store.previous(args)[1]
                         if old is not None:result=old

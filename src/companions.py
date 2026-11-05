@@ -37,6 +37,7 @@ class CompanionWindows:
             "IsIconic": ([wintypes.HWND], wintypes.BOOL),
             "ShowWindowAsync": ([wintypes.HWND, ctypes.c_int], wintypes.BOOL),
             "SetForegroundWindow": ([wintypes.HWND], wintypes.BOOL),
+            "AllowSetForegroundWindow": ([wintypes.DWORD], wintypes.BOOL),
             "GetLastActivePopup": ([wintypes.HWND], wintypes.HWND),
             "PostMessageW": ([wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM], wintypes.BOOL),
         }
@@ -91,6 +92,11 @@ class CompanionWindows:
         if popup and self._owns(popup, pid) and self.user.IsWindowVisible(popup):
             hwnd = popup
         return bool(self.user.SetForegroundWindow(hwnd))
+
+    def allow_foreground(self, pid):
+        if self.user is not None:
+            return bool(self.user.AllowSetForegroundWindow(pid))
+        return False
 
     def close(self, pid, title):
         if self.user is None:
@@ -226,10 +232,10 @@ class CompanionManager:
             if key not in self.running_keys():
                 return self.open(key)
             if key == 'material':
-                self.material_control('show')
-                # The clicked host owns foreground activation on Windows.
-                # The child also restores/focuses itself when consuming the command.
-                self.backend.focus(self.processes[key].pid, item['title'])
+                # Grant focus without changing visibility before the child decides
+                # whether to hide or restore. Showing first would invert a reopen.
+                self.backend.allow_foreground(self.processes[key].pid)
+                self.material_control('toggle')
                 return False
             now = time.monotonic()
             previous = self.close_requests.get(key)

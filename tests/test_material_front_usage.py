@@ -39,6 +39,20 @@ class MaterialFrontUsageTests(unittest.TestCase):
   dialog.destroy();self.app.on_close();self.root.update()
   self.assertEqual(self.root.state(),'withdrawn')
 
+ def test_toggle_hides_and_restores_without_stopping_collection(self):
+  folder=Path(self.tmp.name)/'toggle-control';folder.mkdir()
+  self.app.control_folder=str(folder);self.app.control_nonce='nonce'
+  self.root.deiconify();self.root.update()
+  self.app.toggle_collection();self.pump(lambda:self.session.state and self.session.state['collection'])
+  running=self.session.state['collection']
+  for desired in ('withdrawn','normal'):
+   token=uuid.uuid4().hex
+   atomic_json(folder/'material-control.json',dict(nonce='nonce',id=token,action='toggle',expires=time.time()+30))
+   self.app.poll_control();self.root.update()
+   self.assertEqual(self.root.state(),desired)
+   self.assertEqual(self.session.visible,desired=='normal')
+   self.assertEqual(self.session.state['collection'],running)
+
  def test_diameter_cards_match_completed_rods_and_clear_after_reset(self):
   for key in ('diameter10','diameter12','diameter14'):self.assertIn(key,self.app.period_cards)
   store=core.Store(Path(self.tmp.name)/'report-fixture.sqlite3');self.addCleanup(store.close)

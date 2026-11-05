@@ -11,12 +11,12 @@ class MaterialCompanionTests(unittest.TestCase):
   self.backend=Mock();self.process=Mock(pid=123);self.process.poll.return_value=None
   self.spawn=Mock(return_value=self.process)
   self.manager=module.CompanionManager(self.payload,self.tmp.name,_backend=self.backend,_popen=self.spawn)
- def test_material_button_shows_and_focuses_owned_window_and_exit_is_distinct(self):
+ def test_material_button_toggles_owned_window_without_restoring_before_child_and_exit_is_distinct(self):
   self.assertTrue(hasattr(self.manager,'material_control'),'Material process control missing')
   self.manager.toggle('material');self.manager.toggle('material')
   folder,nonce=self.manager.sessions['material'];control=json.loads((folder/'material-control.json').read_text())
-  self.assertEqual(control['action'],'show');self.assertEqual(control['nonce'],nonce)
-  self.backend.focus.assert_called_once_with(123,self.payload['material']['title'])
+  self.assertEqual(control['action'],'toggle');self.assertEqual(control['nonce'],nonce)
+  self.backend.focus.assert_not_called()
   self.manager.request_close_all()
   self.assertEqual(json.loads((folder/'material-control.json').read_text())['action'],'exit')
   self.backend.close.assert_not_called();self.process.kill.assert_not_called()

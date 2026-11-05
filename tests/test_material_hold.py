@@ -143,7 +143,7 @@ class MaterialHoldTests(unittest.TestCase):
   self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM materials').fetchone()[0],0)
   self.assertEqual(self.stock('14'),19);self.assertFalse(self.s.apply(pending)['ok'])
 
- def test_v3_database_migrates_without_losing_counts_and_old_writer_refuses_v4(self):
+ def test_v3_database_migrates_without_losing_counts_and_old_writer_refuses_new_schema(self):
   path=Path(__file__).resolve().parents[1]/'releases/jihunius/2026.11.06.2/app.pyw'
   assignments={n.targets[0].id:n.value for n in ast.parse(path.read_text()).body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)}
   payload=ast.literal_eval(assignments['SUITE_COMPANIONS'])['material']['compressed']
@@ -157,7 +157,7 @@ class MaterialHoldTests(unittest.TestCase):
   s.defect(2);s.close()
   s=sync.CommandStore(legacy)
   try:
-   self.assertEqual(s.db.execute('PRAGMA user_version').fetchone()[0],4)
+   self.assertEqual(s.db.execute('PRAGMA user_version').fetchone()[0],5)
    self.assertEqual((s.snapshot(2)['good'],s.snapshot(2)['defects']),(1,1))
    self.assertIsNone(s.snapshot(2)['parked']);self.assertEqual(s.inventory()[1]['quantity'],7)
    self.assertTrue(s.migration_backup.exists())

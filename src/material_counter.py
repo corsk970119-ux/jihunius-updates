@@ -60,7 +60,7 @@ EVENT_NAMES = {'baseline': '시작 기준', 'program': '번호 변경 +1', 'stat
                'reference': '사이트 카운터 변경', 'defect': '불량 +1', 'rotate': '소재 교체',
                'rotate_early':'소재 중도교체',
                'switch14':'14파이 전환 · 원소재 보관', 'return_original':'원소재 복귀 · 14파이 보관',
-               'switch_undo':'소재 전환 취소',
+               'switch_undo':'소재 전환 취소', 'mass_pause':'양산품 전환 · 집계 보관', 'mass_resume':'양산품 종료 · 집계 재개',
                'gap': '수집 중단', 'resume': '재연결 기준', 'defect_undo': '불량 입력 취소',
                'rotate_undo': '소재 교체 취소', 'material_type':'소재 종류 지정', 'next_type':'다음 소재 예약',
                'program_skip':'집계 제외 번호', 'count_baseline':'유효 번호 기준', 'program_return':'같은 작업번호 복귀'}
@@ -164,13 +164,13 @@ class Store:
         self.migration_backup = None
         try:
             version = self.db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, 1, 2, 3, 4):
+            if version not in (0, 1, 2, 3, 4, 5):
                 raise RuntimeError('더 새로운 프로그램으로 만든 데이터입니다. 최신 프로그램을 사용해주세요.')
             self.db.execute('PRAGMA foreign_keys=ON')
-            if version < 4:
+            if version < 5:
                 old_tables = self.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('materials','machines','events')").fetchall()
                 if old_tables:
-                    backup = Path(str(self.path) + '.pre-v4.bak')
+                    backup = Path(str(self.path) + '.pre-v5.bak')
                     if not backup.exists():
                         temporary = Path(str(backup) + '.' + uuid.uuid4().hex + '.tmp')
                         target = None
@@ -248,9 +248,15 @@ class Store:
               held_before INTEGER REFERENCES materials(id),role_before TEXT,
               held_next_before TEXT REFERENCES stock(type_id),active_next_before TEXT REFERENCES stock(type_id),
               created_new INTEGER NOT NULL CHECK(created_new IN (0,1)))''')
-            self.db.execute("""CREATE INDEX IF NOT EXISTS switch_machine_idx ON events(machine,id)
-              WHERE kind IN ('switch14','return_original','switch_undo')""")
-            self.db.execute('PRAGMA user_version=4')
+            columns = {r['name'] for r in self.db.execute('PRAGMA table_info(machines)')}
+            if 'mass_mode' not in columns:
+                self.db.execute('ALTER TABLE machines ADD COLUMN mass_mode INTEGER NOT NULL DEFAULT 0 CHECK(mass_mode IN (0,1))')
+            self.db.execute('DROP INDEX IF EXISTS switch_machine_idx')
+            self.db.execute("""CREATE INDEX switch_machine_idx ON events(machine,id)
+              WHERE kind IN ('switch14','return_original','switch_undo','mass_pause','mass_resume')""")
+            self.db.execute("""CREATE INDEX IF NOT EXISTS mass_machine_idx ON events(machine,id)
+              WHERE kind IN ('mass_pause','mass_resume')""")
+            self.db.execute('PRAGMA user_version=5')
 
     def reset_records(self, reset_stock=False, at=None):
         """Back up first, then atomically start a new recording period.
@@ -304,7 +310,7 @@ class Store:
                 self.db.execute('''UPDATE machines SET initial_type=COALESCE(
                   (SELECT material_type FROM materials WHERE id=machines.active_material),initial_type)''')
             self.db.execute("""UPDATE machines SET program='',state='',part_count='',
-              last_seen=NULL,active_material=NULL""")
+              last_seen=NULL,active_material=NULL,mass_mode=0""")
             self.db.execute('UPDATE stock_movements SET reverses=NULL')
             self.db.execute('DELETE FROM stock_movements')
             self.db.execute('DELETE FROM parked_materials')
@@ -411,6 +417,7 @@ class Store:
         type_id, at = self._type(type_id), self._at(at)
         with self.transaction():
             row = self._machine(machine)
+            self._require_custom_mode(row)
             if row['active_material'] is None:
                 old_type = row['initial_type']
             else:
@@ -430,6 +437,7 @@ class Store:
         type_id, at = self._type(type_id), self._at(at)
         with self.transaction():
             row = self._machine(machine)
+            self._require_custom_mode(row)
             self._validate_parked_replacement(machine,type_id)
             if row['next_type'] == type_id:
                 return
@@ -447,7 +455,10 @@ class Store:
         eligible = countable_program(sample['program'])
         changed = True
         with self.transaction():
-            if old['active_material'] is None:
+            if old['mass_mode']:
+                # Keep a live baseline for safe resume, without storing every mass job.
+                changed = any(old[key] != sample[key] for key in ('program','state','part_count'))
+            elif old['active_material'] is None:
                 row['active_material'] = self.db.execute('''INSERT INTO materials(machine,started,start_program,partial,material_type)
                   VALUES(?,?,?,1,?)''', (n, at, sample['program'], old['initial_type'])).lastrowid
                 self._event(row, at, 'baseline', note='첫 관측 번호는 기준값입니다. 이후 집계 대상 4자리로 바뀔 때 +1, 3999·9012·9999는 제외합니다.')
@@ -475,7 +486,7 @@ class Store:
             return
         row = self._machine(machine)
         with self.transaction():
-            if row['active_material'] is not None:
+            if row['active_material'] is not None and not row['mass_mode']:
                 self.db.execute('UPDATE materials SET gap=1 WHERE id=?', (row['active_material'],))
                 self._event(row, at, 'gap', note=str(reason)[:300])
         self.live.discard(machine)
@@ -484,6 +495,7 @@ class Store:
         at = self._at(at)
         with self.transaction():
             row = self.snapshot(machine)
+            self._require_custom_mode(row)
             if row['active_material'] is None:
                 raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
             if row['good']<=0:
@@ -495,6 +507,7 @@ class Store:
         if type(early) is not bool:raise ValueError('교체 구분이 올바르지 않습니다.')
         with self.transaction():
             row = self._machine(machine)
+            self._require_custom_mode(row)
             if machine not in self.live or row['last_seen'] is None or not 0 <= at-row['last_seen'] <= FRESH_SECONDS:
                 raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
             if row['state'] not in ('WAIT', 'HOLD', 'ALARM', 'STOP'):
@@ -533,13 +546,37 @@ class Store:
 
     def switch_revision(self,machine):
         return self.db.execute("""SELECT MAX(id) FROM events WHERE machine=?
-          AND kind IN ('switch14','return_original','switch_undo')""",(machine,)).fetchone()[0]
+          AND kind IN ('switch14','return_original','switch_undo','mass_pause','mass_resume')""",(machine,)).fetchone()[0]
+
+    @staticmethod
+    def _require_custom_mode(row):
+        if row['mass_mode']:
+            raise ValueError('양산품 모드입니다. 집계 재개 후 입력해주세요.')
+
+    def toggle_mass_mode(self,machine,at=None):
+        """Keep both rods and their totals intact; resume from the fresh checkpoint."""
+        at=self._at(at)
+        with self.transaction():
+            row=self._machine(machine)
+            if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
+                raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
+            if row['state'] not in ('WAIT','HOLD','ALARM','STOP'):
+                raise ValueError('머신이 멈춘 상태에서 양산품 모드를 전환해주세요.')
+            if row['active_material'] is None:
+                raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
+            paused=not row['mass_mode']
+            self.db.execute('UPDATE machines SET mass_mode=? WHERE machine=?',(int(paused),machine))
+            self._event(row,at,'mass_pause' if paused else 'mass_resume',
+                note='현재 소재·양품·불량 보관 · 양산품 집계 제외 · 재고 차감 없음' if paused else
+                     '보관한 소재의 집계 재개 · 현재 번호를 기준으로 이후 변경부터 집계 · 재고 차감 없음')
+        return paused
 
     def switch_14(self,machine,at=None):
         """Swap physical rods without ending either; only a new 14 mm rod uses stock."""
         at=self._at(at)
         with self.transaction():
             row=self._machine(machine)
+            self._require_custom_mode(row)
             if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
                 raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
             if row['state'] not in ('WAIT','HOLD','ALARM','STOP'):
@@ -609,8 +646,11 @@ class Store:
             self._movement(consumed['type_id'],at,'reverse',1,'소재 전환 취소',action['next_material'],event,consumed['id'])
 
     def undo_label(self, machine):
-        self._machine(machine)
-        row = self.db.execute("SELECT kind FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
+        if self._machine(machine)['mass_mode']:return ''
+        row = self.db.execute("""SELECT kind FROM events WHERE machine=?
+          AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0
+          AND id>COALESCE((SELECT MAX(id) FROM events WHERE machine=? AND kind IN ('mass_pause','mass_resume')),0)
+          ORDER BY id DESC LIMIT 1""", (machine,machine)).fetchone()
         return {'rotate': '마지막 소재교체 취소', 'rotate_early':'마지막 중도교체 취소', 'defect': '마지막 불량 +1 취소',
                 'switch14':'마지막 14파이 전환 취소','return_original':'마지막 원소재 복귀 취소'}.get(row['kind'], '') if row else ''
 
@@ -618,9 +658,12 @@ class Store:
         at = self._at(at)
         with self.transaction():
             row = self._machine(machine)
+            self._require_custom_mode(row)
             action = self.db.execute("SELECT * FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
             if not action:
                 raise ValueError('취소할 수동 입력이 없습니다.')
+            if self.db.execute("SELECT 1 FROM events WHERE machine=? AND id>? AND kind IN ('mass_pause','mass_resume') LIMIT 1",(machine,action['id'])).fetchone():
+                raise ValueError('양산품 모드 전환 이전의 입력은 취소할 수 없습니다. 현재 소재 기록을 확인해주세요.')
             if action['kind'] in ('switch14','return_original'):
                 self._undo_switch(row,action,at)
             elif action['kind'] == 'defect':
@@ -1172,6 +1215,7 @@ def make_rounded_button(tk, parent, **options):
 class Application:
     dashboard_actions=True
     temporary14_actions=False
+    mass_mode_actions=False
     def __init__(self, root, store, folder, collector_factory=Collector, jobs_factory=DatabaseJobs):
         import tkinter as tk
         from tkinter import ttk, font
@@ -1314,8 +1358,8 @@ class Application:
                    color=PALETTE['muted'],anchor='w').pack(fill='x',padx=8,pady=(10,8))
         board = self.tk.Frame(self.current_tab,bg=PALETTE['bg'])
         board.pack(fill='both',expand=True,padx=4)
-        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ()) + ((166,) if self.temporary14_actions else ())
-        heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ()) + (('임시 소재 전환',) if self.temporary14_actions else ())
+        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ()) + ((166,) if self.temporary14_actions else ()) + ((166,) if self.mass_mode_actions else ())
+        heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ()) + (('임시 소재 전환',) if self.temporary14_actions else ()) + (('양산품 모드',) if self.mass_mode_actions else ())
         for j,(width,heading) in enumerate(zip(widths,heads)):
             board.grid_columnconfigure(j,minsize=width,weight=1 if j==5 else 0)
             self.label(board,heading,color=PALETTE['muted'],bg=PALETTE['bg']).grid(row=0,column=j,sticky='nsew',pady=(0,1),ipady=8)
@@ -1337,12 +1381,13 @@ class Application:
                     widget.bind('<Button-1>',lambda e,m=n:self.material_dialog(m))
                 widgets[key]=widget
             actions=((6,'rotate','소재교체',self.rotate),(7,'defect','불량 +1',self.defect)) if self.dashboard_actions else ()
-            if self.temporary14_actions:actions+=((len(widths)-1,'switch14','14파이 교체',self.switch_14),)
+            if self.temporary14_actions:actions+=((len(widths)-1-int(self.mass_mode_actions),'switch14','14파이 교체',self.switch_14),)
+            if self.mass_mode_actions:actions+=((len(widths)-1,'mass_mode','양산품 교체',self.toggle_mass_mode),)
             for j,key,text,fn in actions:
                 box = self.tk.Frame(row_card,bg=bg)
                 box.grid(row=0,column=j,sticky='nsew',padx=(0,7) if j==7 else 0,pady=2)
                 button = self.button(box,text,lambda m=n,f=fn:f(m),primary=key=='rotate',width=7)
-                if key=='switch14':button.configure(width=12,padx=9)
+                if key in ('switch14','mass_mode'):button.configure(width=12,padx=9)
                 if key=='defect':button.configure(bg=PALETTE['danger'],activebackground=PALETTE['danger_active'],disabledforeground='#e3a3a3')
                 button.pack(expand=True,padx=4,pady=0)
                 button.bind('<Button-3>',lambda e,m=n:self.context(e,m))
@@ -2093,7 +2138,7 @@ class Application:
         now=time.time() if now is None else now
         age=None if row['last_seen'] is None else now-row['last_seen']
         fresh=n in self.store.live and age is not None and 0<=age<=FRESH_SECONDS
-        ready=n not in self.pending and not self.failed_storage and not self.resetting
+        ready=n not in self.pending and not self.failed_storage and not self.resetting and not row.get('mass_mode',False)
         return dict(rotate=bool(ready and fresh),defect=bool(ready and row['good']>0))
 
     def tell(self,text,error=False):

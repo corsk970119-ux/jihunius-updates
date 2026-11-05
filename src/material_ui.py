@@ -22,6 +22,7 @@ class SyncedApplication(core.Application):
     backup_before_reset=False
     dashboard_actions=False
     temporary14_actions=True
+    mass_mode_actions=True
     def __init__(self,root,session):
         self.session=session;self.writes={};self.toggle_pending=False;self.connected=False
         self._history_loading=False;self._history_again=False;self._inventory_loading=False
@@ -135,14 +136,46 @@ class SyncedApplication(core.Application):
             self.full_reset_button.configure(state='normal' if self.connected and not self.failed_storage and not self.resetting and not self.session.outbox.items() else 'disabled')
         for n,widgets in self.rows.items():
             row=self.store.snapshot(n);held=row.get('parked')
+            paused=bool(row.get('mass_mode'))
             returning=bool(held and held['role']=='original')
             widgets['switch14'].configure(text='확인 중…' if n in self.pending else ('원소재로 복귀' if returning else '14파이 교체'),
                 bg=core.PALETTE['yellow'] if returning else core.PALETTE['blue'],
                 fg=core.PALETTE['bg'] if returning else 'white',
                 state='normal' if self.can_switch_14(n,row) else 'disabled')
+            widgets['mass_mode'].configure(text='확인 중…' if n in self.pending else ('집계 재개' if paused else '양산품 교체'),
+                bg=core.PALETTE['yellow'] if paused else core.PALETTE['blue'],
+                fg=core.PALETTE['bg'] if paused else 'white',
+                state='normal' if self.can_toggle_mass_mode(n,row) else 'disabled')
+            if paused:
+                widgets['program'].configure(text=('O'+row['program'] if row['program'] else '—')+'\n양산품 · 집계 중지',fg=core.PALETTE['yellow'])
+            widgets['material'].configure(cursor='arrow' if paused else 'hand2')
             if held:
                 widgets['material'].configure(text=widgets['material'].cget('text')+'\n보관 '+core.material_label(held['material_type'])+
                     ' · 양품 {} / 불량 {}'.format(held['good'],held['defects']))
+
+    def can_toggle_mass_mode(self,n,row=None):
+        row=self.store.snapshot(n) if row is None else row
+        state=self.store.state or {}
+        return bool(self.connected and not self._shutdown_started and state.get('collection')
+            and 'mass_mode' in state.get('capabilities',[])
+            and self.action_availability(n,dict(row,mass_mode=False))['rotate']
+            and row['active_material'] is not None and row['state'] in ('WAIT','HOLD','ALARM','STOP'))
+
+    def toggle_mass_mode(self,n):
+        from tkinter import messagebox
+        if getattr(self,'_switch_confirming',False) or not self.can_toggle_mass_mode(n):return
+        row=self.store.snapshot(n);expected=dict(row['expected']);epoch=self.store.state['epoch']
+        paused=bool(row.get('mass_mode'));title='집계 재개' if paused else '양산품 교체'
+        message=('원래 소재를 다시 장착한 상태인가요?\n보관한 양품·불량 수량에서 집계를 이어갑니다.' if paused else
+                 '현재 소재와 양품·불량을 보관하고 이 호기의 집계를 멈춥니다.\n양산품 작업은 소재사용량에 합산하지 않습니다.')
+        self._switch_confirming=True
+        try:accepted=messagebox.askokcancel(title,'{}호기\n{}\n재고는 차감하지 않습니다.'.format(n,message),parent=self.root,default='cancel')
+        finally:self._switch_confirming=False
+        if not accepted:return
+        if not self.can_toggle_mass_mode(n) or (self.store.state or {}).get('epoch')!=epoch:
+            self.tell('연결 또는 소재 기록이 변경되었습니다. 최신 상태를 확인하고 다시 눌러주세요.',True);return
+        self._mutate('toggle_mass_mode',[n],expected,
+            lambda value:self.tell('{}호기 {} 완료 · 현재 소재의 누적 기록 유지'.format(n,title)))
 
     def can_switch_14(self,n,row=None):
         row=self.store.snapshot(n) if row is None else row
@@ -220,6 +253,8 @@ class SyncedApplication(core.Application):
     def material_dialog(self,n):
         if n in self.pending or self.failed_storage or self.resetting:return
         row=self.store.snapshot(n);initial=not row['material_type'];expected=dict(row['expected'])
+        if row.get('mass_mode'):
+            self.tell('양산품 모드입니다. 집계 재개 후 소재를 설정해주세요.',True);return
         dialog=self.tk.Toplevel(self.root);dialog.title('{}호기 소재 지정'.format(n))
         dialog.configure(bg=core.PALETTE['bg']);dialog.resizable(False,False);dialog.transient(self.root)
         self.label(dialog,'{}호기 · {}'.format(n,'현재 사용 소재' if initial else '다음 교체 소재'),size=14,bold=True).pack(padx=24,pady=(20,10))
@@ -359,6 +394,7 @@ class SyncedApplication(core.Application):
             '소재교체는 최신 정지 상태를 확인하고 새 소재 재고 1봉을 차감합니다.\n'
             '현재집계의 14파이 교체는 원소재를 보관하고, 원소재로 복귀는 같은 봉의 누적 집계를 이어갑니다.\n'
             '복귀 시 14파이도 보관합니다. 보관 봉 재사용은 재고를 차감하지 않으며 새 Ø14 최초 투입만 1봉 차감합니다.\n'
+            '양산품 교체는 해당 호기의 소재·수량을 보관하고 집계만 멈춥니다. 원래 소재를 장착한 뒤 집계 재개를 누르세요.\n'
             '다 쓴 봉은 메인의 소재교체로 마감합니다. 사용 중·보관 중인 봉은 마감 후 기간통계에 반영됩니다.\n'
             '가공량이 적어도 소재교체한 봉은 소모 1봉에 포함합니다. 우클릭으로 마지막 입력을 취소할 수 있습니다.\n'
             '봉당 평균은 기간 내 사용을 끝낸 완전측정 봉 기준입니다.\n'
