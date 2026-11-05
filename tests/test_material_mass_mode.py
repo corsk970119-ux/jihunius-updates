@@ -55,11 +55,11 @@ class MassModeTests(unittest.TestCase):
   self.s.defect(1,self.at+.3);self.s.undo(1,self.at+.4)
   self.assertEqual(self.s.snapshot(1)['defects'],1)
 
- def test_requires_fresh_stopped_state_on_both_sides(self):
-  self.feed(state='RUN')
+ def test_requires_fresh_known_state_on_both_sides(self):
+  self.feed(state='UNKNOWN')
   self.assertTrue(callable(getattr(self.s,'toggle_mass_mode',None)))
   with self.assertRaises(ValueError):self.s.toggle_mass_mode(1,self.at+.2)
-  self.feed();self.mode();self.feed(state='RUN')
+  self.feed();self.mode();self.feed(state='UNKNOWN')
   with self.assertRaises(ValueError):self.mode()
   self.feed();self.s.live.clear()
   with self.assertRaises(ValueError):self.mode()

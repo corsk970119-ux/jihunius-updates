@@ -560,8 +560,8 @@ class Store:
             row=self._machine(machine)
             if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
                 raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
-            if row['state'] not in ('WAIT','HOLD','ALARM','STOP'):
-                raise ValueError('머신이 멈춘 상태에서 양산품 모드를 전환해주세요.')
+            if row['state'] not in ('RUN','WAIT','HOLD','ALARM','STOP'):
+                raise ValueError('머신 상태를 확인하지 못했습니다. 연결 상태를 확인해주세요.')
             if row['active_material'] is None:
                 raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
             paused=not row['mass_mode']
@@ -579,8 +579,8 @@ class Store:
             self._require_custom_mode(row)
             if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
                 raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
-            if row['state'] not in ('WAIT','HOLD','ALARM','STOP'):
-                raise ValueError('머신이 멈춘 상태에서 소재를 전환해주세요.')
+            if row['state'] not in ('RUN','WAIT','HOLD','ALARM','STOP'):
+                raise ValueError('머신 상태를 확인하지 못했습니다. 연결 상태를 확인해주세요.')
             current=self.db.execute('SELECT * FROM materials WHERE id=?',(row['active_material'],)).fetchone()
             if current is None or current['material_type'] is None:
                 raise ValueError('현재 사용 소재를 지정한 뒤 전환해주세요.')

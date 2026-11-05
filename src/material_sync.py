@@ -290,7 +290,7 @@ class Authority:
                     stock_revisions={k:self.store.stock_expectations(k) for k in core.MATERIAL_TYPES},
                     collection=self.collection,owner=self.owner,epoch=self.store.epoch(),
                     revision=revision,detail=self.server_detail,failure=self.failure,errors=self.errors,at=time.time(),
-                    capabilities=['temporary14','mass_mode'])
+                    capabilities=['temporary14','mass_mode','running_switch'])
     def _run(self):
         try:self.store=CommandStore(self.path)
         except Exception as exc:self.error=exc;self.ready.set();return

@@ -28,7 +28,7 @@ class MaterialUITests(unittest.TestCase):
    time.sleep(.01)
   self.fail('UI state not reached')
  def test_beta_title_and_pc_switch_survive_hide(self):
-  self.assertEqual(self.root.title(),'소재사용량조사(Beta)')
+  self.assertEqual(self.root.title(),'소재 사용량 조사(Beta)')
   self.assertIn('OFF',self.app.collection_button.cget('text'))
   self.app.toggle_collection()
   self.pump(lambda:self.session.state and self.session.state['collection'])

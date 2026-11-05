@@ -11,7 +11,7 @@ from material_client import ClientSession,CachedStore,ReportJobs,DEFAULT_SHARE
 from material_sync import atomic_json,read_json
 from material_quick import QuickBridge
 
-TITLE='소재사용량조사(Beta)'
+TITLE='소재 사용량 조사(Beta)'
 
 class NoCollector:
     def __init__(self,*args):pass
@@ -159,7 +159,8 @@ class SyncedApplication(core.Application):
         return bool(self.connected and not self._shutdown_started and state.get('collection')
             and 'mass_mode' in state.get('capabilities',[])
             and self.action_availability(n,dict(row,mass_mode=False))['rotate']
-            and row['active_material'] is not None and row['state'] in ('WAIT','HOLD','ALARM','STOP'))
+            and row['active_material'] is not None and row['state'] in ('RUN','WAIT','HOLD','ALARM','STOP')
+            and (row['state']!='RUN' or 'running_switch' in state.get('capabilities',[])))
 
     def toggle_mass_mode(self,n):
         from tkinter import messagebox
@@ -183,7 +184,8 @@ class SyncedApplication(core.Application):
         return bool(self.connected and not self._shutdown_started and state.get('collection')
             and 'temporary14' in state.get('capabilities',[]) and self.action_availability(n,row)['rotate']
             and row['active_material'] is not None and row['material_type']
-            and row['state'] in ('WAIT','HOLD','ALARM','STOP')
+            and row['state'] in ('RUN','WAIT','HOLD','ALARM','STOP')
+            and (row['state']!='RUN' or 'running_switch' in state.get('capabilities',[]))
             and (row['material_type']!='14' or (held and held['role']=='original')))
 
     def switch_14(self,n):
@@ -346,8 +348,8 @@ class SyncedApplication(core.Application):
         if not self.connected or self.failed_storage or self.resetting:return
         if self.session.outbox.items() or self.job_callbacks or self.writes:
             self.tell('입력 저장·조회·내보내기가 끝난 뒤 모두 초기화해주세요.',True);return
-        if not messagebox.askyesno('소재사용량조사 · 모두 초기화',
-                '모든 PC가 함께 사용하는 소재사용량조사 데이터를 초기화할까요?\n\n'
+        if not messagebox.askyesno('소재 사용량 조사 · 모두 초기화',
+                '모든 PC가 함께 사용하는 소재 사용량 조사 데이터를 초기화할까요?\n\n'
                 '• 가공·불량·소재교체·입출고 기록과 현재 집계·보관 소재 삭제\n'
                 '• 재고 수량 및 호기별 사용 소재·다음 소재 설정 초기화\n\n'
                 '자동 백업 없이 삭제하며 프로그램에서 되돌릴 수 없습니다.\n'
@@ -393,6 +395,7 @@ class SyncedApplication(core.Application):
             '불량 +1은 기존 양품을 불량으로 변경하며 전체 가공 수는 유지됩니다.\n'
             '소재교체는 최신 정지 상태를 확인하고 새 소재 재고 1봉을 차감합니다.\n'
             '현재집계의 14파이 교체는 원소재를 보관하고, 원소재로 복귀는 같은 봉의 누적 집계를 이어갑니다.\n'
+            '14파이·양산품 모드 전환은 가공 중에도 가능합니다. 최신 번호까지 기존 집계에 반영하고 이후 변화부터 전환을 적용합니다.\n'
             '복귀 시 14파이도 보관합니다. 보관 봉 재사용은 재고를 차감하지 않으며 새 Ø14 최초 투입만 1봉 차감합니다.\n'
             '양산품 교체는 해당 호기의 소재·수량을 보관하고 집계만 멈춥니다. 원래 소재를 장착한 뒤 집계 재개를 누르세요.\n'
             '다 쓴 봉은 메인의 소재교체로 마감합니다. 사용 중·보관 중인 봉은 마감 후 기간통계에 반영됩니다.\n'

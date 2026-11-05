@@ -73,11 +73,11 @@ class MaterialHoldTests(unittest.TestCase):
   self.assertIsNone(self.s.snapshot(1)['parked']);self.assertEqual(self.stock('14'),20)
   self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM materials').fetchone()[0],2)
 
- def test_switch_requires_stopped_live_machine_and_stock_only_for_first_load(self):
+ def test_switch_requires_known_live_machine_and_stock_only_for_first_load(self):
   self.s.adjust_stock('14',0,'fixture',self.at)
   self.assertTrue(callable(getattr(self.s,'switch_14',None)))
   with self.assertRaises(ValueError):self.switch()
-  self.s.receive_stock('14',1,self.at);self.feed(state='RUN')
+  self.s.receive_stock('14',1,self.at);self.feed(state='UNKNOWN')
   with self.assertRaises(ValueError):self.switch()
   self.feed();self.switch();self.assertEqual(self.stock('14'),0)
   self.switch();self.switch();self.assertEqual(self.stock('14'),0)

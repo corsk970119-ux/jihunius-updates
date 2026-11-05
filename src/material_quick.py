@@ -42,7 +42,7 @@ class QuickChannel:
         self.state={};self.checked_at=0
     def rotation_context(self,n):
         if not self.state.get('connected') or time.monotonic()-self.checked_at>6:
-            raise ValueError('소재사용량조사 연결을 확인한 뒤 입력해주세요.')
+            raise ValueError('소재 사용량 조사 연결을 확인한 뒤 입력해주세요.')
         row=next(r for r in self.state['rows'] if r['machine']==n)
         if row.get('busy') or any(v['request']['args'][0]==n for v in self.pending.values()):
             raise ValueError('이 호기는 저장 확인 중입니다.')
@@ -54,7 +54,7 @@ class QuickChannel:
         if method not in ('defect','rotate') or type(n) is not int or not 1<=n<=9:raise ValueError('잘못된 소재 입력입니다.')
         state=self.state
         if not state.get('connected') or time.monotonic()-self.checked_at>6:
-            raise ValueError('소재사용량조사 연결을 확인한 뒤 입력해주세요.')
+            raise ValueError('소재 사용량 조사 연결을 확인한 뒤 입력해주세요.')
         if any(v['request']['args'][0]==n for v in self.pending.values()):raise ValueError('이 호기는 저장 확인 중입니다.')
         if confirmed is not None and confirmed!=self.rotation_context(n):
             raise ValueError('확인 중 소재 정보가 변경되었습니다. 최신 내용을 확인한 뒤 다시 눌러주세요.')
@@ -143,7 +143,7 @@ class QuickPanel:
         tk,ttk=app.tk,app.ttk
         self.frame=ttk.Frame(parent,style='RoundedCard.TFrame',padding=(14,10))
         title=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky='ew',pady=(0,6))
-        ttk.Label(title,text='소재사용량조사',style='Section.TLabel').pack(side='left')
+        ttk.Label(title,text='소재 사용량 조사',style='Section.TLabel').pack(side='left')
         self.message=tk.StringVar(value='')
         self.caption=ttk.Label(title,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9))
         self.caption.pack(side='right')

@@ -23,7 +23,7 @@ def companion_source(root, key):
     entry = next(node for node in nodes if isinstance(node, ast.If) and '__name__' in ast.unparse(node.test))
     lines = source.splitlines(keepends=True)
     errors=(root/'src/error_history.py').read_text(encoding='utf-8')
-    label={'protrusion':'돌출량','wash-log':'세척일보','special-table':'특수 돌출량','material':'소재사용량조사(Beta)'}[key]
+    label={'protrusion':'돌출량','wash-log':'세척일보','special-table':'특수 돌출량','material':'소재 사용량 조사(Beta)'}[key]
     diagnostics=("\nimport types as _err_types\nimport sys as _err_sys\n"
         "_err_module = _err_types.ModuleType('jihunius_error_history')\n"
         "_err_sys.modules['jihunius_error_history'] = _err_module\n"
@@ -49,7 +49,7 @@ def embed(root=ROOT):
     assignments = {node.targets[0].id: node for node in tree.body
                    if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)}
     payloads = ast.literal_eval(assignments['SUITE_COMPANIONS'].value)
-    payloads.setdefault('material',{})['title']='소재사용량조사(Beta)'
+    payloads.setdefault('material',{})['title']='소재 사용량 조사(Beta)'
     for key in payloads:
         data = companion_source(root, key)
         payloads[key].update(sha256=hashlib.sha256(data).hexdigest(),
@@ -57,6 +57,7 @@ def embed(root=ROOT):
     manager = (root / 'src/companion_update.py').read_text(encoding='utf-8') + '\n' + (root / 'src/companions.py').read_text(encoding='utf-8')
     compile(manager, 'companions', 'exec')
     replacements = {
+        'SuiteWindowState': 'SuiteWindowState = _suite_load_support("jihunius_window_state", ' + repr((root/'src/companion_update.py').read_text(encoding='utf-8') + '\n' + (root/'src/window_state.py').read_text(encoding='utf-8')) + ')\n',
         'SUITE_COMPANIONS': 'SUITE_COMPANIONS = ' + repr(payloads) + '\n',
         'SuiteCompanionManager': 'SuiteCompanionManager = _suite_load_support("jihunius_suite_companions", ' + repr(manager) + ').CompanionManager\n',
         'SuiteMaterialQuick': 'SuiteMaterialQuick = _suite_load_support("jihunius_material_quick", ' + repr((root/'src/material_quick.py').read_text(encoding='utf8')) + ')\n',

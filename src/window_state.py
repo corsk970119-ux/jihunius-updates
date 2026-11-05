@@ -1,4 +1,4 @@
-"""Per-PC companion window placement. Embedded after companion_update.py.
+"""Per-PC main and companion window placement. Embedded after companion_update.py.
 
 Windows uses the matching Get/SetWindowPlacement APIs so workspace coordinates
 are never confused with screen coordinates on multiple monitors or taskbars.
@@ -99,7 +99,7 @@ class _TkPlacement:
 
 class CompanionWindowState:
     def __init__(self, root, key, backend=None):
-        if key not in ('protrusion', 'wash-log', 'special-table', 'material'): raise ValueError('Unknown companion')
+        if key not in ('jihunius', 'protrusion', 'wash-log', 'special-table', 'material'): raise ValueError('Unknown window')
         self.root = root
         base = _CuPath(_cu_os.environ.get('LOCALAPPDATA') or _CuPath.home())
         self.path = base / 'JihuniusSuite' / 'window-state' / (key + '.json')
