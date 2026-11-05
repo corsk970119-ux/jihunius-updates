@@ -40,7 +40,7 @@ class PrivatePackageTests(unittest.TestCase):
     self.assertEqual(ast.dump(StripDiagnostics().visit(n),include_attributes=False),old_defs[n.name],n.name)
  def test_embedded_sources_match_reviewed_sources(self):
   payloads=assignments(ROOT/'apps/jihunius/app.pyw')['SUITE_COMPANIONS']
-  self.assertEqual(set(payloads),{'wash-log','protrusion','special-table'})
+  self.assertEqual(set(payloads),{'wash-log','protrusion','special-table','material'})
   for key,payload in payloads.items():
    data=zlib.decompress(base64.b64decode(payload['compressed']))
    self.assertEqual(data,companion_source(ROOT,key),key)

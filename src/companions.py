@@ -121,7 +121,7 @@ class CompanionManager:
         self.cache = base / "JihuniusSuite" / "companions"
 
     def _descriptor(self, key):
-        if key not in ("protrusion", "wash-log", "special-table") or key not in self.payloads:
+        if key not in ("protrusion", "wash-log", "special-table", "material") or key not in self.payloads:
             raise ValueError("알 수 없는 프로그램입니다.")
         item = self.payloads[key]
         data, digest = item.get("data"), item.get("sha256")
@@ -171,9 +171,11 @@ class CompanionManager:
         session = self.sessions.pop(key, None)
         if session is None: return
         try:
-            for name in ('request.json', 'response.json'):
+            for name in ('request.json', 'response.json', 'material-control.json', 'material-status.json'):
                 try: (session[0] / name).unlink()
                 except FileNotFoundError: pass
+            for pattern in ('material-quick-*.json','material-result-*.json'):
+                for path in session[0].glob(pattern):path.unlink()
             session[0].rmdir()
         except OSError: pass
 
@@ -183,7 +185,7 @@ class CompanionManager:
                 return False
             return self.backend.focus(self.processes[key].pid, self.payloads[key]["title"])
 
-    def open(self, key):
+    def open(self, key, hidden=False):
         with self._lock:
             if self.update_save is not None:
                 raise RuntimeError('업데이트 전 저장을 진행 중입니다. 잠시 기다려 주세요.')
@@ -198,6 +200,9 @@ class CompanionManager:
                 if windowed.is_file():
                     executable = windowed
             environment = os.environ.copy()
+            if key == 'material':
+                environment['JIHUNIUS_MATERIAL_HIDDEN'] = '1' if hidden else '0'
+
             environment["JIHUNIUS_LAUNCH_DIR"] = str(self.origin)
             diagnostics=sys.modules.get('jihunius_error_history')
             recorder=getattr(diagnostics,'_recorder',None)
@@ -220,6 +225,9 @@ class CompanionManager:
             item = self._descriptor(key)
             if key not in self.running_keys():
                 return self.open(key)
+            if key == 'material':
+                self.material_control('toggle')
+                return False
             now = time.monotonic()
             previous = self.close_requests.get(key)
             if previous is not None and now - previous < 2:
@@ -304,5 +312,28 @@ class CompanionManager:
                 process = self.processes[key]
                 # Reap immediately before addressing native windows (PID ownership).
                 if process.poll() is None:
-                    self.backend.close(process.pid, self.payloads[key]["title"])
+                    if key == 'material':self.material_control('exit')
+                    else:self.backend.close(process.pid, self.payloads[key]["title"])
             return self.running_keys()
+
+    def material_control(self, action):
+        session, nonce = self.sessions['material']
+        _cu_write(session / 'material-control.json', dict(nonce=nonce,id=uuid.uuid4().hex,
+                  action=action,expires=time.time()+30))
+
+    def material_visible(self):
+        if 'material' not in self.running_keys(): return False
+        session,nonce=self.sessions['material']
+        record=_cu_read(session/'material-status.json')
+        return bool(record.get('nonce')==nonce and record.get('visible'))
+
+    def start_material_owner(self):
+        base=Path(os.environ.get('LOCALAPPDATA') or str(Path.home()/'.local'/'share'))
+        record=_cu_read(base/'MaterialCounter'/'sync-settings.json')
+        owner=record.get('owner')
+        if not isinstance(owner,dict) or owner.get('owner_id')!=record.get('pc_id'):return False
+        return self.open('material',hidden=True)
+
+    def start_material_client(self):
+        if 'material' in self.running_keys():return False
+        return self.open('material',hidden=True)

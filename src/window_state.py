@@ -99,7 +99,7 @@ class _TkPlacement:
 
 class CompanionWindowState:
     def __init__(self, root, key, backend=None):
-        if key not in ('protrusion', 'wash-log', 'special-table'): raise ValueError('Unknown companion')
+        if key not in ('protrusion', 'wash-log', 'special-table', 'material'): raise ValueError('Unknown companion')
         self.root = root
         base = _CuPath(_cu_os.environ.get('LOCALAPPDATA') or _CuPath.home())
         self.path = base / 'JihuniusSuite' / 'window-state' / (key + '.json')
