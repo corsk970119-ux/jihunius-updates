@@ -224,7 +224,7 @@ class SyncedApplication(core.Application):
         dialog.configure(bg=core.PALETTE['bg']);dialog.resizable(False,False);dialog.transient(self.root)
         self.label(dialog,'{}호기 · {}'.format(n,'현재 사용 소재' if initial else '다음 교체 소재'),size=14,bold=True).pack(padx=24,pady=(20,10))
         self.label(dialog,'최초 소재 지정은 재고를 차감하지 않습니다.' if initial else '다음 소재교체부터 적용됩니다.',color=core.PALETTE['muted']).pack(padx=24,pady=6)
-        value=core.MATERIAL_TYPES.get(row.get('next_type') or row['material_type'],next(iter(core.MATERIAL_TYPES.values())))
+        value=core.MATERIAL_TYPES.get(row.get('next_type') or row['material_type'],core.MATERIAL_TYPES[core.DEFAULT_MATERIAL_TYPE])
         chosen=self.tk.StringVar(value=value)
         combo=self.ttk.Combobox(dialog,style='Round.TCombobox',values=list(core.MATERIAL_TYPES.values()),textvariable=chosen,state='readonly',width=22)
         combo.pack(padx=24,pady=10)

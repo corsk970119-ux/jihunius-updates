@@ -47,6 +47,7 @@ GAP_SECONDS = 15.0
 EXCLUDED_PROGRAMS = frozenset(('3999', '9012', '9999'))
 MACHINES = tuple(range(1, 10))
 MATERIAL_TYPES = {'10Z': 'Ø10 Z급', '10B': 'Ø10 B급', '12': 'Ø12', '14': 'Ø14'}
+DEFAULT_MATERIAL_TYPE = '10B'
 MOVEMENT_NAMES = {'initial':'최초 재고', 'register':'최초 재고', 'receive':'입고', 'adjust':'실사 조정',
                   'consume':'소재 사용', 'return':'교체 취소', 'cancel':'교체 취소',
                   'reversal':'교체 취소', 'reverse':'교체 취소'}
@@ -1590,7 +1591,7 @@ class Application:
         dialog.transient(self.root)
         self.label(dialog,'{}호기 · {}'.format(n,'사용 중인 소재 지정' if initial else '다음에 넣을 소재 선택'),size=13,bold=True).pack(padx=22,pady=(18,10))
         self.label(dialog,('이미 기계에 들어 있는 소재입니다.\n현재 재고는 차감하지 않습니다.' if initial else '현재 기록: '+material_label(row['material_type'])+'\n선택한 소재는 다음 소재교체부터 적용됩니다.'),color=PALETTE['muted']).pack(padx=22,pady=(0,12))
-        chosen=self.tk.StringVar(value=material_label(row.get('next_type') or row.get('material_type')) if (row.get('next_type') or row.get('material_type')) else next(iter(MATERIAL_TYPES.values())))
+        chosen=self.tk.StringVar(value=material_label(row.get('next_type') or row.get('material_type') or DEFAULT_MATERIAL_TYPE))
         combo=self.ttk.Combobox(dialog,style='Round.TCombobox',textvariable=chosen,values=list(MATERIAL_TYPES.values()),state='readonly',width=22)
         combo.pack(padx=22,pady=6)
         def save():
