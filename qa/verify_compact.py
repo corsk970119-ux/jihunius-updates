@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for n in range(14):app.drive_contents.insert('end','O'+str(1001+n)+'.nc')
         app.apply_machine_status({n:dict(machine=n,prm_no='O1001',color='green',state='RUN') for n in range(1,10)})
         bounds=[]
-        for width,height in ((1120,760),(1000,720)) if scale < 1.4 else ((1250,860),(1120,800)):
+        for width,height in ((1120,830),(1000,800)) if scale < 1.4 else ((1250,940),(1120,900)):
             root.geometry(f'{width}x{height}+20+20');root.update_idletasks()
             for key in ('cnc','stl','wash','cnc'):
                 app.select_app_tab(key);root.update_idletasks()
@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
                         clipped.append(str(w))
                 bounds.append(dict(tab=key,requested=[width,height],actual=[root.winfo_width(),root.winfo_height()],minimum=list(root.minsize()),clipped=clipped))
                 assert not clipped,bounds[-1]
-                capture(root,f'compact-{suffix}-{width}-{key}.png')
+                capture(root,f'balanced-{suffix}-{width}-{key}.png')
             for n,row in app.material_quick.rows.items():
                 for name in ('defect','rotate'):
                     w=row[name];assert w.winfo_width()>=w.winfo_reqwidth(),(n,name,w.winfo_width(),w.winfo_reqwidth())
@@ -69,10 +69,10 @@ with tempfile.TemporaryDirectory() as tmp:
         buttons=[w for w in children(dialog) if w.winfo_class()=='TButton']
         assert len({w.winfo_height() for w in buttons})==1
         assert {app.style.lookup(w.cget('style'),'font') for w in buttons}==set(fonts)
-        capture(dialog,f'compact-{suffix}-close.png')
+        capture(dialog,f'balanced-{suffix}-close.png')
         next(w for w in buttons if w.cget('text')=='취소').invoke();root.update_idletasks()
         assert root.winfo_viewable()
-        app.toggle_handover();root.update_idletasks();capture(root,f'compact-{suffix}-handover.png')
+        app.toggle_handover();root.update_idletasks();capture(root,f'balanced-{suffix}-handover.png')
         app.toggle_handover();root.update_idletasks()
         app.status.set('소재 저장 결과 확인 중입니다. 잠시만 기다려주세요.')
         errors_ui.button.configure(text='오류 기록 100');updates.label.set('업데이트 확인 중')

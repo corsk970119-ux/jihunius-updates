@@ -141,21 +141,21 @@ class QuickPanel:
     def __init__(self,app,parent):
         self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={};self.confirming=False
         tk,ttk=app.tk,app.ttk
-        self.frame=ttk.Frame(parent,style='RoundedCard.TFrame',padding=(12,8))
-        title=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky='ew',pady=(0,4))
+        self.frame=ttk.Frame(parent,style='RoundedCard.TFrame',padding=(14,10))
+        title=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky='ew',pady=(0,6))
         ttk.Label(title,text='소재사용량조사',style='Section.TLabel').pack(side='left')
         self.message=tk.StringVar(value='')
         self.caption=ttk.Label(title,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9))
         self.caption.pack(side='right')
         for name in ('Danger','Secondary'):
-            app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,6),font=('맑은 고딕',10,'bold'))
+            app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,7),font=('맑은 고딕',10,'bold'))
         for n in range(1,10):
             self.frame.columnconfigure(n-1,weight=1,uniform='material-quick')
             cell=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);cell.grid(row=1,column=n-1,sticky='nsew',padx=3)
             cell.columnconfigure(0,weight=1)
-            name=ttk.Label(cell,text=str(n)+'호기',style='Card.TLabel',font=('맑은 고딕',10,'bold'),anchor='center');name.grid(row=0,column=0,sticky='ew',pady=(0,4))
+            name=ttk.Label(cell,text=str(n)+'호기',style='Card.TLabel',font=('맑은 고딕',10,'bold'),anchor='center');name.grid(row=0,column=0,sticky='ew',pady=(0,6))
             defect=ttk.Button(cell,text='불량',style='QuickMaterial.Danger.TButton',width=8,
-                command=lambda machine=n:self.submit('defect',machine));defect.grid(row=1,column=0,sticky='ew',pady=(0,4))
+                command=lambda machine=n:self.submit('defect',machine));defect.grid(row=1,column=0,sticky='ew',pady=(0,6))
             rotate=ttk.Button(cell,text='소재교체',style='QuickMaterial.Secondary.TButton',width=8,
                 command=lambda machine=n:self.submit('rotate',machine));rotate.grid(row=2,column=0,sticky='ew')
             defect.configure(state='disabled');rotate.configure(state='disabled')

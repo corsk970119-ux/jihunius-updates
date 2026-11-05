@@ -25,7 +25,15 @@ class PrivatePackageTests(unittest.TestCase):
   self.assertIn('WASH_MES_SOURCE',keys);self.assertIn('WASH_POP_SOURCE',keys)
   self.assertIn('STL_FINDER_SOURCE',keys)
   self.assertEqual(before['CARD_MODIFIER_BYTES'],after['CARD_MODIFIER_BYTES'])
-  for k in keys:self.assertEqual(before[k],after[k],k)
+  for k in keys:
+   if k=='WASH_POP_SOURCE':
+    # Only the completion-dialog reader/wait was intentionally changed.
+    allowed={'save_dialog_messages','save_dialog_button','save_checked_pop'}
+    old=ast.parse(before[k]);new=ast.parse(after[k])
+    for tree in (old,new):
+     tree.body=[n for n in tree.body if not (isinstance(n,ast.FunctionDef) and n.name in allowed)]
+    self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
+   else:self.assertEqual(before[k],after[k],k)
   # Error hooks are observational. All original wash-log application definitions
   # still match the last release after removing only the new diagnostic calls.
   previous=assignments(ROOT/'releases/jihunius/2026.11.04.2/app.pyw')['SUITE_COMPANIONS']['wash-log']
