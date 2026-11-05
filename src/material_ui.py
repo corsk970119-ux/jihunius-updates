@@ -20,6 +20,7 @@ class NoCollector:
 
 class SyncedApplication(core.Application):
     backup_before_reset=False
+    dashboard_actions=False
     def __init__(self,root,session):
         self.session=session;self.writes={};self.toggle_pending=False;self.connected=False
         self._history_loading=False;self._history_again=False;self._inventory_loading=False
@@ -329,6 +330,14 @@ class SyncedApplication(core.Application):
         placement=getattr(self,'placement',None)
         if placement:placement.flush()
         self.root.withdraw();self.session.visible=False
+    def show_front(self):
+        if self.closed or self._shutdown_started:return
+        self.root.deiconify();self.session.visible=True
+        self.root.update_idletasks()
+        self.root.lift()
+        modal=self.root.grab_current()
+        target=modal.winfo_toplevel() if modal is not None else self.root
+        target.lift();target.focus_force()
     def poll_control(self):
         if self.closed:return
         try:
@@ -336,9 +345,10 @@ class SyncedApplication(core.Application):
             command=read_json(Path(self.control_folder)/'material-control.json',{})
             if command.get('nonce')==self.control_nonce and command.get('id')!=self._control_id and command.get('expires',0)>time.time():
                 self._control_id=command['id']
-                if command.get('action')=='toggle':
-                    if self.root.state()=='withdrawn':
-                        self.root.deiconify();self.root.lift();self.session.visible=True
+                if command.get('action')=='show':
+                    self.show_front()
+                elif command.get('action')=='toggle':
+                    if self.root.state()=='withdrawn':self.show_front()
                     else:self.on_close()
                 elif command.get('action')=='exit':
                     if self.root.grab_current() is not None:
@@ -409,7 +419,7 @@ def boot():
         app=SyncedApplication(root,session)
         if hasattr(core,'CompanionWindowState'):app.placement=core.CompanionWindowState(root,'material')
         if hasattr(core,'CompanionUpdateBridge'):app.update_bridge=core.CompanionUpdateBridge(root,MaterialUpdateAdapter(app))
-        if os.environ.get('JIHUNIUS_MATERIAL_HIDDEN')!='1':root.deiconify()
+        if os.environ.get('JIHUNIUS_MATERIAL_HIDDEN')!='1':root.after_idle(app.show_front)
         else:session.visible=False
         root.mainloop()
     except Exception as exc:

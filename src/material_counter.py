@@ -1057,6 +1057,7 @@ def make_rounded_button(tk, parent, **options):
 
 
 class Application:
+    dashboard_actions=True
     def __init__(self, root, store, folder, collector_factory=Collector, jobs_factory=DatabaseJobs):
         import tkinter as tk
         from tkinter import ttk, font
@@ -1199,8 +1200,8 @@ class Application:
                    color=PALETTE['muted'],anchor='w').pack(fill='x',padx=8,pady=(10,8))
         board = self.tk.Frame(self.current_tab,bg=PALETTE['bg'])
         board.pack(fill='both',expand=True,padx=4)
-        widths = (62,78,88,64,60,144,108,104)
-        heads = ('호기','상태','작업번호','양품','불량','사용 소재','', '')
+        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ())
+        heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ())
         for j,(width,heading) in enumerate(zip(widths,heads)):
             board.grid_columnconfigure(j,minsize=width,weight=1 if j==5 else 0)
             self.label(board,heading,color=PALETTE['muted'],bg=PALETTE['bg']).grid(row=0,column=j,sticky='nsew',pady=(0,1),ipady=8)
@@ -1221,7 +1222,8 @@ class Application:
                     widget.configure(cursor='hand2')
                     widget.bind('<Button-1>',lambda e,m=n:self.material_dialog(m))
                 widgets[key]=widget
-            for j,key,text,fn in ((6,'rotate','소재교체',self.rotate),(7,'defect','불량 +1',self.defect)):
+            actions=((6,'rotate','소재교체',self.rotate),(7,'defect','불량 +1',self.defect)) if self.dashboard_actions else ()
+            for j,key,text,fn in actions:
                 box = self.tk.Frame(row_card,bg=bg)
                 box.grid(row=0,column=j,sticky='nsew',padx=(0,7) if j==7 else 0,pady=2)
                 button = self.button(box,text,lambda m=n,f=fn:f(m),primary=key=='rotate',width=7)
@@ -1231,7 +1233,7 @@ class Application:
                 widgets[key]=button
             board.grid_rowconfigure(n,weight=1,minsize=47)
             self.rows[n]=widgets
-        self.bottom_hint=self.label(self.current_tab,'소재교체: 소모 1봉으로 집계    |    소재명 클릭: 다음 소재    |    우클릭: 취소',
+        self.bottom_hint=self.label(self.current_tab,('소재교체: 소모 1봉으로 집계' if self.dashboard_actions else '소재교체·불량 입력: 지후니우스 메인 하단')+'    |    소재명 클릭: 다음 소재    |    우클릭: 취소',
                    color=PALETTE['muted'],anchor='w',size=9)
         self.bottom_hint.pack(side='bottom',before=board,fill='x',padx=8,pady=8)
         self._history_build()
@@ -1523,10 +1525,14 @@ class Application:
         for i,(key,title,color,detail) in enumerate((
                 ('good','봉당 양품',PALETTE['green'],'양품 합계 ÷ 평균 대상 봉'),
                 ('defects','봉당 불량',PALETTE['red'],'불량 합계 ÷ 평균 대상 봉'),
-                ('consumed','소모 소재',PALETTE['text'],'소재교체로 사용을 끝낸 봉'))):
-            cards.grid_columnconfigure(i,weight=1,uniform='period_cards')
+                ('consumed','소모 소재',PALETTE['text'],'소재교체로 사용을 끝낸 봉'),
+                ('diameter10','Ø10 사용 소재',PALETTE['text'],'Z급 · B급 합산'),
+                ('diameter12','Ø12 사용 소재',PALETTE['text'],'기간 내 사용을 끝낸 봉'),
+                ('diameter14','Ø14 사용 소재',PALETTE['text'],'기간 내 사용을 끝낸 봉'))):
+            column=i%3
+            cards.grid_columnconfigure(column,weight=1,uniform='period_cards')
             card=self.rounded_panel(cards,border=PALETTE['line'])
-            card.grid(row=0,column=i,sticky='nsew',padx=(0 if i==0 else 4,0 if i==2 else 4))
+            card.grid(row=i//3,column=column,sticky='nsew',padx=(0 if column==0 else 4,0 if column==2 else 4),pady=(0 if i<3 else 8,0))
             self.label(card,title,bold=True,size=10,bg=PALETTE['card'],anchor='w').pack(fill='x',padx=12,pady=(11,0))
             value=self.label(card,'—',bold=True,size=22,color=color,bg=PALETTE['card'],anchor='w')
             value.pack(fill='x',padx=12)
@@ -1624,6 +1630,11 @@ class Application:
         self.period_cards['defects'][0].configure(text=average_text(total['avg_defects_per_rod'])+(' 개' if total['avg_defects_per_rod'] is not None else ''))
         self.period_cards['consumed'][0].configure(text='{:,} 봉'.format(total['consumed_rods']))
         self.period_cards['consumed'][1].configure(text='소재교체로 사용을 끝낸 봉')
+        by_type={row['type_id']:row['consumed_rods'] for row in report['by_type']}
+        for diameter,kinds in (('10',('10Z','10B')),('12',('12',)),('14',('14',))):
+            value,note=self.period_cards['diameter'+diameter]
+            value.configure(text='{:,} 봉'.format(sum(by_type.get(kind,0) for kind in kinds)))
+            note.configure(text='Z급 {:,}봉 · B급 {:,}봉'.format(by_type.get('10Z',0),by_type.get('10B',0)) if diameter=='10' else '기간 내 사용을 끝낸 봉')
         self.period_cards['good'][1].configure(text='양품 {:,}개 ÷ {:,}봉'.format(total['eligible_good'],total['eligible_rods']) if total['eligible_rods'] else '평균을 계산할 측정 봉 없음')
         self.period_cards['defects'][1].configure(text='불량 {:,}개 ÷ {:,}봉'.format(total['eligible_defects'],total['eligible_rods']) if total['eligible_rods'] else '평균을 계산할 측정 봉 없음')
         self.period_summary.configure(text='소모 {:,}봉 중 평균 대상 {:,}봉  ·  평균 제외 {:,}봉 (중간 시작 / 수집 공백 / 불량초과)'.format(
@@ -1865,9 +1876,10 @@ class Application:
             else:
                 caption+='\n'+(' · '.join(flags) if flags else (datetime.fromtimestamp(row['started']).strftime('%m/%d %H:%M') if row['started'] else '첫 데이터 대기'))
             widgets['material'].configure(text=caption,fg=PALETTE['yellow'] if row['gap'] else ('#60a5fa' if not row['material_type'] else PALETTE['text']))
-            pending=n in self.pending
-            widgets['rotate'].configure(text='확인 중…' if pending else '소재교체',state='normal' if fresh and not pending and not self.failed_storage and not self.resetting else 'disabled')
-            widgets['defect'].configure(state='normal' if row['good']>0 and not pending and not self.failed_storage and not self.resetting else 'disabled')
+            if self.dashboard_actions:
+                actions=self.action_availability(n,row,now)
+                widgets['rotate'].configure(text='확인 중…' if n in self.pending else '소재교체',state='normal' if actions['rotate'] else 'disabled')
+                widgets['defect'].configure(state='normal' if actions['defect'] else 'disabled')
         self.summary.configure(text='최근 응답 {} / 9호기   |   진행 중 양품 {:,}개   |   가공 {:,}회   |   불량 {:,}개'.format(online,good,total,defects))
         if self.failed_storage:
             self.footer.configure(text='저장 오류로 수집 중단 · 저장 공간/권한을 확인한 뒤 프로그램을 다시 실행해주세요.',fg=PALETTE['red'])
@@ -1876,6 +1888,14 @@ class Application:
             self.footer.configure(text='연결 대기 · {} · {}'.format(HOST,detail[:65]),fg=PALETTE['yellow'])
         else:
             self.footer.configure(text='이 PC에 자동 저장  ·  3초 간격 조회  ·  최소화해도 수집 계속',fg=PALETTE['muted'])
+
+    def action_availability(self,n,row=None,now=None):
+        row=self.store.snapshot(n) if row is None else row
+        now=time.time() if now is None else now
+        age=None if row['last_seen'] is None else now-row['last_seen']
+        fresh=n in self.store.live and age is not None and 0<=age<=FRESH_SECONDS
+        ready=n not in self.pending and not self.failed_storage and not self.resetting
+        return dict(rotate=bool(ready and fresh),defect=bool(ready and row['good']>0))
 
     def tell(self,text,error=False):
         self.notice.configure(text=text,fg=PALETTE['red'] if error else PALETTE['green'])
@@ -2042,9 +2062,10 @@ class Application:
         self.failed_storage=True
         self.collector.close()
         self.pending.clear()
-        for widgets in self.rows.values():
-            widgets['rotate'].configure(state='disabled')
-            widgets['defect'].configure(state='disabled')
+        if self.dashboard_actions:
+            for widgets in self.rows.values():
+                widgets['rotate'].configure(state='disabled')
+                widgets['defect'].configure(state='disabled')
         for qty,receive,adjust in self.stock_cards.values():
             receive.configure(state='disabled');adjust.configure(state='disabled')
         self.footer.configure(text='저장 오류로 수집 중단 · 저장 공간/권한을 확인한 뒤 다시 실행해주세요.',fg=PALETTE['red'])

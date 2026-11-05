@@ -38,12 +38,12 @@ class MaterialUITests(unittest.TestCase):
   self.assertTrue(self.session.coordinator.authority.collection)
  def test_disconnected_actions_are_disabled_and_reports_do_not_claim_saved(self):
   self.root.update()
-  self.assertEqual(str(self.app.rows[1]['defect'].cget('state')),'disabled')
+  self.assertFalse(self.app.action_availability(1)['defect'])
   self.app.defect(1)
   self.assertEqual(self.session.outbox.items(),[])
  def test_layout_fits_original_minimum_size(self):
   self.root.geometry('1000x790');self.root.update()
-  for w in (self.app.collection_button,self.app.full_reset_button,self.app.rows[9]['defect'],self.app.footer):
+  for w in (self.app.collection_button,self.app.full_reset_button,self.app.rows[9]['material'],self.app.footer):
    self.assertGreater(w.winfo_width(),5)
    self.assertLessEqual(w.winfo_rootx()+w.winfo_width(),self.root.winfo_rootx()+self.root.winfo_width())
    self.assertLessEqual(w.winfo_rooty()+w.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())

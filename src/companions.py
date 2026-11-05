@@ -226,7 +226,10 @@ class CompanionManager:
             if key not in self.running_keys():
                 return self.open(key)
             if key == 'material':
-                self.material_control('toggle')
+                self.material_control('show')
+                # The clicked host owns foreground activation on Windows.
+                # The child also restores/focuses itself when consuming the command.
+                self.backend.focus(self.processes[key].pid, item['title'])
                 return False
             now = time.monotonic()
             previous = self.close_requests.get(key)

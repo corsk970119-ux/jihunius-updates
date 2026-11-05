@@ -48,6 +48,10 @@ class QuickBridgeTests(unittest.TestCase):
   for program in ('1004','1005'):
    authority.samples.put(('sample','192.168.1.1',1,dict(machine=1,program=program,state='STOP',part_count='0'),time.time(),None,None))
   self.pump(lambda:self.app.store.snapshot(1)['good']==1)
+  self.assertNotIn('defect',self.app.rows[1])
+  self.assertNotIn('rotate',self.app.rows[1])
+  self.assertTrue(self.app.quick_bridge.status()['rows'][0]['can_defect'])
+  self.assertTrue(self.app.quick_bridge.status()['rows'][0]['can_rotate'])
   self.app.on_close()
   manager=SimpleNamespace(sessions={'material':(folder,'nonce')},running_keys=lambda:['material'])
   channel=QuickChannel(manager,Path(self.tmp.name)/'host-inputs.json')
@@ -59,6 +63,7 @@ class QuickBridgeTests(unittest.TestCase):
   self.pump(completed,6)
   self.assertTrue(results[-1]['result']['ok'])
   self.pump(lambda:self.app.store.snapshot(1)['defects']==1)
+  self.assertFalse(self.app.quick_bridge.status()['rows'][0]['can_defect'])
   self.assertEqual(self.root.state(),'withdrawn')
   atomic_json(folder/('material-quick-'+token+'.json'),dict(nonce='nonce',**item))
   self.pump(lambda:(folder/('material-result-'+token+'.json')).exists(),6)
