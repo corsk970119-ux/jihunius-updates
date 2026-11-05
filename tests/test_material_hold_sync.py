@@ -28,13 +28,15 @@ class MaterialHoldServiceTests(unittest.TestCase):
   self.assertEqual((row['parked']['material_id'],row['parked']['good']),(fourteen,2))
   self.assertEqual(self.c.call('state')['inventory'][3]['quantity'],2)
 
- def test_checkpoint_rejects_unknown_machine_state_and_collection_off_blocks_switch(self):
+ def test_unknown_state_and_collection_off_allow_explicit_manual_switch(self):
   self.setup_rods();before=self.c.call('state')['rows'][0]['active_material']
   def running(n,token):
    self.a.samples.put(('sample','192.168.1.10',1,dict(machine=n,program='1002',state='UNKNOWN',part_count='0'),time.time(),token,None))
   self.a.collector.checkpoint=running
   result=self.c.call('command',self.command('switch_14'))
-  self.assertFalse(result['ok']);self.assertEqual(self.c.call('state')['rows'][0]['active_material'],before)
+  self.assertTrue(result['ok']);self.assertEqual(self.c.call('state')['rows'][0]['parked']['material_id'],before)
+  self.assertTrue(self.c.call('state')['rows'][0]['gap'])
   self.a.set_collection(False)
-  self.assertFalse(self.c.call('command',self.command('switch_14'))['ok'])
-  self.assertEqual(self.c.call('state')['inventory'][3]['quantity'],3)
+  self.assertTrue(self.c.call('command',self.command('switch_14'))['ok'])
+  self.assertEqual(self.c.call('state')['rows'][0]['active_material'],before)
+  self.assertEqual(self.c.call('state')['inventory'][3]['quantity'],2)

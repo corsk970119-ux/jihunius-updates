@@ -38,6 +38,39 @@ class QuickBridgeTests(unittest.TestCase):
  setUp=reset_ui.FullResetUITests.setUp
  cleanup=reset_ui.FullResetUITests.cleanup
  pump=reset_ui.FullResetUITests.pump
+ def test_main_inputs_work_with_collection_off_and_popup_hidden(self):
+  from material_quick import QuickChannel,QuickBridge
+  folder=Path(self.tmp.name)/'off-control';folder.mkdir()
+  self.app.control_folder=str(folder);self.app.control_nonce='nonce'
+  self.app.quick_bridge=QuickBridge(self.app,folder,'nonce');self.app.poll_control()
+  authority=self.session.coordinator.authority
+  for program in ('1004','1005'):
+   authority.samples.put(('sample','192.168.1.1',1,dict(machine=1,program=program,state='RUN',part_count='0'),time.time(),None,None))
+  self.pump(lambda:self.app.store.snapshot(1)['good']==1)
+  authority.set_collection(False)
+  self.pump(lambda:not self.app.store.state['collection'])
+  status=self.app.quick_bridge.status()['rows'][0]
+  self.assertTrue(status['can_defect'])
+  self.assertTrue(status['can_rotate'],'Manual replacement must remain available with collection OFF')
+  self.app.on_close()
+  manager=SimpleNamespace(sessions={'material':(folder,'nonce')},running_keys=lambda:['material'])
+  channel=QuickChannel(manager,Path(self.tmp.name)/'off-inputs.json')
+  self.pump(lambda:channel.poll()[0].get('connected'))
+  results=[]
+  def completed():
+   _,items=channel.poll();results.extend(items);return bool(results)
+  channel.submit('defect',1);channel.poll();self.pump(completed,6)
+  self.assertTrue(results[-1]['result']['ok'],results)
+  self.pump(lambda:self.app.store.snapshot(1)['defects']==1)
+  original=self.app.store.snapshot(1)['active_material'];results.clear()
+  self.pump(lambda:bool(channel.poll()[0].get('rows')) and channel.state['rows'][0].get('can_rotate'))
+  channel.submit('rotate',1,confirmed=channel.rotation_context(1));channel.poll();self.pump(completed,6)
+  self.assertTrue(results[-1]['result']['ok'],results)
+  self.pump(lambda:self.app.store.snapshot(1)['active_material']!=original)
+  self.assertEqual(self.app.store.inventory()[0]['quantity'],18)
+  self.assertEqual(self.root.state(),'withdrawn')
+  self.assertFalse(self.app.store.state['collection'])
+
  def test_hidden_popup_accepts_main_buttons_with_receipt_deduplication(self):
   from material_quick import QuickChannel,QuickBridge
   folder=Path(self.tmp.name)/'control';folder.mkdir()

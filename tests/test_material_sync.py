@@ -110,7 +110,8 @@ class ServiceTests(unittest.TestCase):
   self.a.set_collection(False)
   state=self.c.call('state');self.assertFalse(state['collection']);self.assertFalse(state['live'])
   self.assertTrue(self.c.call('command',self.command())['ok'])
-  self.assertFalse(self.c.call('command',self.command('rotate',[1,False]))['ok'])
+  self.assertTrue(self.c.call('command',self.command('rotate',[1,False]))['ok'])
+  self.assertTrue(self.c.call('state')['rows'][0]['gap'])
  def test_wrong_token_cannot_read_or_write(self):
   wrong=sync.RPCClient('127.0.0.1',self.a.port,'b'*64)
   with self.assertRaises(PermissionError):wrong.call('state')

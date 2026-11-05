@@ -131,7 +131,7 @@ class QuickBridge:
             rows.append(dict(machine=n,good=row['good'],defects=row['defects'],material_type=row['material_type'],
                 next_type=row['next_type'],expected=row['expected'],busy=n in busy,
                 can_defect=connected and n not in busy and actions['defect'],
-                can_rotate=connected and n not in busy and bool(row['material_type']) and bool(state['collection'])
+                can_rotate=connected and n not in busy and bool(row['material_type'])
                     and actions['rotate']))
         return dict(connected=connected,rows=rows,client=session.coordinator.settings['pc_id'],
                     owner=(session.coordinator.owner or {}).get('owner_id'),epoch=state['epoch'] if state else '',

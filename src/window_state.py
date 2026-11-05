@@ -1,7 +1,8 @@
 """Per-PC main and companion window placement. Embedded after companion_update.py.
 
-Windows uses the matching Get/SetWindowPlacement APIs so workspace coordinates
-are never confused with screen coordinates on multiple monitors or taskbars.
+Windows restores workspace coordinates with SetWindowPlacement. A normal
+window is captured from its visible rectangle because snapped windows can keep
+an older unsnapped rectangle in GetWindowPlacement.
 https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwindowplacement
 """
 
@@ -33,7 +34,13 @@ class _WindowsPlacement:
                         ('ptMinPosition', w.POINT), ('ptMaxPosition', w.POINT),
                         ('rcNormalPosition', w.RECT)]
 
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [('cbSize', w.DWORD), ('rcMonitor', w.RECT),
+                        ('rcWork', w.RECT), ('dwFlags', w.DWORD)]
+
         self.Placement = Placement
+        self.MonitorInfo = MonitorInfo
+        self.Rect = w.RECT
         self.user = ctypes.WinDLL('user32', use_last_error=True)
         self.user.GetAncestor.argtypes = [w.HWND, w.UINT]
         self.user.GetAncestor.restype = w.HWND
@@ -41,6 +48,16 @@ class _WindowsPlacement:
             function = getattr(self.user, name)
             function.argtypes = [w.HWND, ctypes.POINTER(Placement)]
             function.restype = w.BOOL
+        self.user.IsWindowVisible.argtypes = [w.HWND]
+        self.user.IsWindowVisible.restype = w.BOOL
+        self.user.GetWindowRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
+        self.user.GetWindowRect.restype = w.BOOL
+        self.user.MonitorFromWindow.argtypes = [w.HWND, w.DWORD]
+        self.user.MonitorFromWindow.restype = w.HANDLE
+        self.user.GetMonitorInfoW.argtypes = [w.HANDLE, ctypes.POINTER(MonitorInfo)]
+        self.user.GetMonitorInfoW.restype = w.BOOL
+        self.user.GetWindowLongW.argtypes = [w.HWND, ctypes.c_int]
+        self.user.GetWindowLongW.restype = w.LONG
 
     def handle(self):
         hwnd = self.user.GetAncestor(self.root.winfo_id(), 2)
@@ -48,13 +65,33 @@ class _WindowsPlacement:
         return hwnd
 
     def capture(self):
+        hwnd = self.handle()
+        if not self.user.IsWindowVisible(hwnd): return None
         placement = self.Placement()
         placement.length = self.ctypes.sizeof(placement)
-        if not self.user.GetWindowPlacement(self.handle(), self.ctypes.byref(placement)):
+        if not self.user.GetWindowPlacement(hwnd, self.ctypes.byref(placement)):
             raise OSError('Cannot read window placement')
         # Never record minimized/hidden coordinates or reopen a hidden window.
         if placement.showCmd not in (1, 3): return None
         rect = placement.rcNormalPosition
+        if placement.showCmd == 1:
+            # Aero Snap may leave rcNormalPosition at the old, unsnapped size.
+            # Use the same DPI context for capture/restore, including frame bounds.
+            rect = self.Rect()
+            if not self.user.GetWindowRect(hwnd, self.ctypes.byref(rect)):
+                raise OSError('Cannot read visible window bounds')
+            if not self.user.GetWindowLongW(hwnd, -20) & 0x80:  # WS_EX_TOOLWINDOW
+                monitor = self.user.MonitorFromWindow(hwnd, 2)
+                info = self.MonitorInfo()
+                info.cbSize = self.ctypes.sizeof(info)
+                if not monitor or not self.user.GetMonitorInfoW(monitor, self.ctypes.byref(info)):
+                    raise OSError('Cannot read monitor work area')
+                # GetWindowRect is in screen coordinates; SetWindowPlacement
+                # expects workspace coordinates for a normal top-level window.
+                dx = info.rcWork.left - info.rcMonitor.left
+                dy = info.rcWork.top - info.rcMonitor.top
+                rect.left -= dx; rect.right -= dx
+                rect.top -= dy; rect.bottom -= dy
         return _window_record({'schema': 1, 'backend': self.kind,
             'normal': [rect.left, rect.top, rect.right, rect.bottom],
             'zoomed': placement.showCmd == 3}, self.kind)

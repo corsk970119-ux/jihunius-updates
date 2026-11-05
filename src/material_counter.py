@@ -495,23 +495,18 @@ class Store:
         at = self._at(at)
         with self.transaction():
             row = self.snapshot(machine)
-            self._require_custom_mode(row)
             if row['active_material'] is None:
                 raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
             if row['good']<=0:
                 raise ValueError('불량으로 바꿀 양품이 없습니다. 가공 수집 후 입력해주세요.')
             self._event(row, at, 'defect', defects=1, note='기존 양품 -1 · 불량 +1 · 전체 가공 횟수는 유지')
 
-    def rotate(self, machine, at=None, early=False):
+    def rotate(self, machine, at=None, early=False, manual=False):
         at = self._at(at)
         if type(early) is not bool:raise ValueError('교체 구분이 올바르지 않습니다.')
         with self.transaction():
             row = self._machine(machine)
-            self._require_custom_mode(row)
-            if machine not in self.live or row['last_seen'] is None or not 0 <= at-row['last_seen'] <= FRESH_SECONDS:
-                raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
-            if row['state'] not in ('WAIT', 'HOLD', 'ALARM', 'STOP'):
-                raise ValueError('머신이 멈춘 상태에서 소재를 교체해주세요.')
+            self._require_switch_sample(row, machine, at, manual)
             if row['active_material'] is None:
                 raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
             current = self.db.execute('SELECT * FROM materials WHERE id=?', (row['active_material'],)).fetchone()
@@ -534,6 +529,7 @@ class Store:
                                     note='{} · {} 보관 재고 1봉 사용{}'.format(label,MATERIAL_TYPES[type_id], ' · 이전 봉 중도파기 1봉, 봉당 양품·불량 평균에 포함' if early else ''))
             self._movement(type_id, at, 'consume', -1, '{}호기 {}'.format(machine,label), new, action_id)
             self.db.execute('UPDATE machines SET active_material=?,next_type=? WHERE machine=?', (new, type_id, machine))
+            if manual:self._manual_switch_boundary(row,at)
         return row['active_material']
 
     def _validate_parked_replacement(self,machine,type_id):
@@ -553,15 +549,28 @@ class Store:
         if row['mass_mode']:
             raise ValueError('양산품 모드입니다. 집계 재개 후 입력해주세요.')
 
-    def toggle_mass_mode(self,machine,at=None):
+    def _require_switch_sample(self,row,machine,at,manual):
+        if type(manual) is not bool:raise ValueError('수동 입력 구분이 올바르지 않습니다.')
+        if manual:return
+        if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
+            raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
+        if row['state'] not in ('RUN','WAIT','HOLD','ALARM','STOP'):
+            raise ValueError('머신 상태를 확인하지 못했습니다. 연결 상태를 확인해주세요.')
+
+    def _manual_switch_boundary(self,row,at):
+        # No telemetry means an explicit operator boundary, never an inferred count.
+        # Include the ended rod plus both currently open/parked rods.
+        self.db.execute('UPDATE materials SET gap=1 WHERE machine=? AND (id=? OR ended IS NULL)',
+                        (row['machine'],row['active_material']))
+        self._event(row,at,'gap',note='수동 소재 입력 경계 · 실시간 설비 확인 없이 반영 · 다음 관측은 새 기준으로 시작')
+        self.live.discard(row['machine'])
+
+    def toggle_mass_mode(self,machine,at=None,manual=False):
         """Keep both rods and their totals intact; resume from the fresh checkpoint."""
         at=self._at(at)
         with self.transaction():
             row=self._machine(machine)
-            if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
-                raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
-            if row['state'] not in ('RUN','WAIT','HOLD','ALARM','STOP'):
-                raise ValueError('머신 상태를 확인하지 못했습니다. 연결 상태를 확인해주세요.')
+            self._require_switch_sample(row,machine,at,manual)
             if row['active_material'] is None:
                 raise ValueError('이 호기의 첫 데이터를 받은 뒤 사용할 수 있습니다.')
             paused=not row['mass_mode']
@@ -569,18 +578,15 @@ class Store:
             self._event(row,at,'mass_pause' if paused else 'mass_resume',
                 note='현재 소재·양품·불량 보관 · 양산품 집계 제외 · 재고 차감 없음' if paused else
                      '보관한 소재의 집계 재개 · 현재 번호를 기준으로 이후 변경부터 집계 · 재고 차감 없음')
+            if manual:self._manual_switch_boundary(row,at)
         return paused
 
-    def switch_14(self,machine,at=None):
+    def switch_14(self,machine,at=None,manual=False):
         """Swap physical rods without ending either; only a new 14 mm rod uses stock."""
         at=self._at(at)
         with self.transaction():
             row=self._machine(machine)
-            self._require_custom_mode(row)
-            if machine not in self.live or row['last_seen'] is None or not 0<=at-row['last_seen']<=FRESH_SECONDS:
-                raise ValueError('최신 머신 상태를 읽지 못했습니다. 연결 후 다시 눌러주세요.')
-            if row['state'] not in ('RUN','WAIT','HOLD','ALARM','STOP'):
-                raise ValueError('머신 상태를 확인하지 못했습니다. 연결 상태를 확인해주세요.')
+            self._require_switch_sample(row,machine,at,manual)
             current=self.db.execute('SELECT * FROM materials WHERE id=?',(row['active_material'],)).fetchone()
             if current is None or current['material_type'] is None:
                 raise ValueError('현재 사용 소재를 지정한 뒤 전환해주세요.')
@@ -613,6 +619,7 @@ class Store:
                 (machine,current['id'],'14' if returning else 'original',row['next_type']))
             if held is None:self._movement('14',at,'consume',-1,'{}호기 임시 Ø14 새 봉 투입'.format(machine),new,action)
             self.db.execute('UPDATE machines SET active_material=?,next_type=? WHERE machine=?',(new,next_type,machine))
+            if manual:self._manual_switch_boundary(row,at)
         return new
 
     def _undo_switch(self,row,action,at):
@@ -646,7 +653,7 @@ class Store:
             self._movement(consumed['type_id'],at,'reverse',1,'소재 전환 취소',action['next_material'],event,consumed['id'])
 
     def undo_label(self, machine):
-        if self._machine(machine)['mass_mode']:return ''
+        self._machine(machine)
         row = self.db.execute("""SELECT kind FROM events WHERE machine=?
           AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0
           AND id>COALESCE((SELECT MAX(id) FROM events WHERE machine=? AND kind IN ('mass_pause','mass_resume')),0)
@@ -658,7 +665,6 @@ class Store:
         at = self._at(at)
         with self.transaction():
             row = self._machine(machine)
-            self._require_custom_mode(row)
             action = self.db.execute("SELECT * FROM events WHERE machine=? AND kind IN ('rotate','rotate_early','defect','switch14','return_original') AND undone=0 ORDER BY id DESC LIMIT 1", (machine,)).fetchone()
             if not action:
                 raise ValueError('취소할 수동 입력이 없습니다.')
@@ -972,9 +978,11 @@ class Collector:
         generation = worker['generation']
         while not self.stop.is_set() and not worker['stop'].is_set():
             record, error = None, ''
+            requested_at = time.monotonic()
             try:
                 result = self.request('monitoring_ajax_this_machine.php', {'ajax_selector':'callUpdateMachineOne','ncgateIP':ip})
                 record = parse_sample(result)
+                record['_requested_monotonic'] = requested_at
                 with self.lock:
                     owner = self.routes.get(record['machine'])
                     if owner and owner != ip and owner in self.workers:

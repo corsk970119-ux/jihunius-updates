@@ -17,7 +17,9 @@ class RunningSwitchStoreTests(unittest.TestCase):
   row=self.s.snapshot(1)
   self.assertEqual((row['active_material'],row['good'],row['parked']['good']),(self.original,3,2))
   self.assertEqual(self.stock('14'),19)
-  with self.assertRaises(ValueError):self.s.rotate(1,self.at+.2)
+  self.s.rotate(1,self.at+.2)
+  self.assertEqual(self.s.snapshot(1)['good'],0)
+  self.assertEqual(self.stock('10Z'),18)
  def test_running_pause_resume_uses_current_program_as_baseline_without_extra_count(self):
   self.feed(4,state='RUN');self.s.toggle_mass_mode(1,self.at+.1)
   self.feed(5,state='RUN');self.s.toggle_mass_mode(1,self.at+.1)
@@ -31,7 +33,7 @@ class RunningSwitchServiceTests(unittest.TestCase):
  setUp=service.ServiceTests.setUp
  feed=service.ServiceTests.feed
  command=service.ServiceTests.command
- def test_running_checkpoint_applies_both_switches_but_stale_or_missing_sample_never_does(self):
+ def test_running_checkpoint_and_manual_fallback_preserve_rod_counts(self):
   self.a.set_collection(True);self.feed('1001');self.feed('1002')
   self.assertTrue(self.c.call('command',self.command('register_stock',['14',3]))['ok'])
   self.program='1003'
@@ -50,12 +52,13 @@ class RunningSwitchServiceTests(unittest.TestCase):
   def stale(n,token):
    self.a.samples.put(('sample','192.168.1.10',1,dict(machine=n,program='7001',state='RUN',part_count='0'),time.time()-30,token,None))
   self.a.collector.checkpoint=stale
-  self.assertFalse(self.c.call('command',self.command('switch_14'))['ok'])
-  self.assertEqual(self.c.call('state')['rows'][0]['material_type'],'14')
+  self.assertTrue(self.c.call('command',self.command('switch_14'))['ok'])
+  self.assertEqual(self.c.call('state')['rows'][0]['material_type'],'10Z')
+  self.assertTrue(self.c.call('state')['rows'][0]['gap'])
   def missing(n,token):self.a.samples.put(('sample','192.168.1.10',1,None,time.time(),token,'unavailable'))
   self.a.collector.checkpoint=missing
-  self.assertFalse(self.c.call('command',self.command('toggle_mass_mode'))['ok'])
-  self.assertFalse(self.c.call('state')['rows'][0]['mass_mode'])
+  self.assertTrue(self.c.call('command',self.command('toggle_mass_mode'))['ok'])
+  self.assertTrue(self.c.call('state')['rows'][0]['mass_mode'])
 
 
 class RunningSwitchUITests(unittest.TestCase):

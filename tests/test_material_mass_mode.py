@@ -45,9 +45,9 @@ class MassModeTests(unittest.TestCase):
   self.s.switch_14(1,self.at+.3);self.assertEqual(self.s.snapshot(1)['good'],3)
   self.assertEqual(self.stock('14'),19)
 
- def test_paused_writes_and_undo_across_mode_boundary_are_rejected(self):
+ def test_paused_configuration_and_undo_across_mode_boundary_are_rejected(self):
   self.feed(3);self.s.defect(1,self.at+.1);self.mode()
-  for method,args in (('defect',[1]),('rotate',[1]),('switch_14',[1]),('undo',[1]),
+  for method,args in (('undo',[1]),
                       ('set_next_type',[1,'12']),('assign_material',[1,'10Z'])):
    with self.subTest(method=method),self.assertRaises(ValueError):getattr(self.s,method)(*args,at=self.at+.3)
   self.assertEqual(self.s.undo_label(1),'');self.mode()

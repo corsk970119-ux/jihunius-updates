@@ -126,6 +126,8 @@ class SyncedApplication(core.Application):
             self.footer.configure(text='연결 확인 · '+self._connection_error[:115],fg=core.PALETTE['yellow'])
         elif self.session.outbox.items():
             self.footer.configure(text='저장 확인 대기 {}건 · 수집 PC: {} · 확인 전에는 다시 입력하지 마세요.'.format(len(self.session.outbox.items()),owner),fg=core.PALETTE['yellow'])
+        elif 'manual_material_edits' not in (state or {}).get('capabilities',[]):
+            self.footer.configure(text='수집 담당 PC의 지후니우스를 업데이트하면 수집 ON/OFF와 관계없이 소재 입력을 함께 사용할 수 있습니다.',fg=core.PALETTE['yellow'])
         else:
             stamp=datetime.fromtimestamp(state['at']).strftime('%H:%M:%S') if state else '—'
             self.footer.configure(text='동기화 '+stamp+'  ·  수집 PC: '+owner+'  ·  담당 PC 수집 '+('ON' if state['collection'] else 'OFF'),fg=core.PALETTE['muted'])
@@ -153,14 +155,23 @@ class SyncedApplication(core.Application):
                 widgets['material'].configure(text=widgets['material'].cget('text')+'\n보관 '+core.material_label(held['material_type'])+
                     ' · 양품 {} / 불량 {}'.format(held['good'],held['defects']))
 
+    def action_availability(self,n,row=None,now=None):
+        row=self.store.snapshot(n) if row is None else row
+        state=self.store.state or {}
+        ready=(self.connected and not self._shutdown_started and not self.failed_storage
+               and not self.resetting and n not in self.pending)
+        manual='manual_material_edits' in state.get('capabilities',[])
+        # Manual entries use the shared owner, not the telemetry ON/OFF switch.
+        # Fresh telemetry is obtained by the owner when available.
+        return dict(rotate=bool(ready and manual),
+                    defect=bool(ready and row['good']>0 and (manual or not row.get('mass_mode'))))
+
     def can_toggle_mass_mode(self,n,row=None):
         row=self.store.snapshot(n) if row is None else row
         state=self.store.state or {}
-        return bool(self.connected and not self._shutdown_started and state.get('collection')
-            and 'mass_mode' in state.get('capabilities',[])
-            and self.action_availability(n,dict(row,mass_mode=False))['rotate']
-            and row['active_material'] is not None and row['state'] in ('RUN','WAIT','HOLD','ALARM','STOP')
-            and (row['state']!='RUN' or 'running_switch' in state.get('capabilities',[])))
+        return bool('mass_mode' in state.get('capabilities',[])
+            and self.action_availability(n,row)['rotate']
+            and row['active_material'] is not None)
 
     def toggle_mass_mode(self,n):
         from tkinter import messagebox
@@ -181,11 +192,8 @@ class SyncedApplication(core.Application):
     def can_switch_14(self,n,row=None):
         row=self.store.snapshot(n) if row is None else row
         state=self.store.state or {};held=row.get('parked')
-        return bool(self.connected and not self._shutdown_started and state.get('collection')
-            and 'temporary14' in state.get('capabilities',[]) and self.action_availability(n,row)['rotate']
+        return bool('temporary14' in state.get('capabilities',[]) and self.action_availability(n,row)['rotate']
             and row['active_material'] is not None and row['material_type']
-            and row['state'] in ('RUN','WAIT','HOLD','ALARM','STOP')
-            and (row['state']!='RUN' or 'running_switch' in state.get('capabilities',[]))
             and (row['material_type']!='14' or (held and held['role']=='original')))
 
     def switch_14(self,n):
@@ -387,22 +395,22 @@ class SyncedApplication(core.Application):
         from tkinter import messagebox
         messagebox.showinfo(TITLE+' 사용 안내',
             '수집 담당 PC 한 대에서만 이 PC 수집을 ON으로 사용합니다.\n'
-            '서브 PC는 OFF 상태에서 조회·불량·소재교체·재고 입력을 합니다.\n'
+            '두 PC 모두 수집 ON/OFF와 관계없이 불량·소재교체·14파이·양산품 전환을 입력할 수 있습니다.\n'
             '입력 결과는 담당 PC에 저장된 뒤 두 PC에 표시됩니다.\n'
             '수집 담당 PC와 지후니우스가 실행되어 있어야 동기화할 수 있습니다.\n\n'
             '보관 재고 등록 → 호기별 사용 소재 지정 순서로 시작합니다.\n'
             '번호가 집계 대상 4자리로 바뀔 때 가공 +1, 3999·9012·9999는 제외합니다.\n'
             '불량 +1은 기존 양품을 불량으로 변경하며 전체 가공 수는 유지됩니다.\n'
-            '소재교체는 최신 정지 상태를 확인하고 새 소재 재고 1봉을 차감합니다.\n'
+            '소재교체는 현재 봉을 마감하고 새 소재 재고 1봉을 차감합니다.\n'
             '현재집계의 14파이 교체는 원소재를 보관하고, 원소재로 복귀는 같은 봉의 누적 집계를 이어갑니다.\n'
-            '14파이·양산품 모드 전환은 가공 중에도 가능합니다. 최신 번호까지 기존 집계에 반영하고 이후 변화부터 전환을 적용합니다.\n'
+            '설비 응답이 있으면 최신 번호까지 반영합니다. 응답이 없으면 수동 경계를 기록하고 다음 첫 관측은 기준값으로만 사용합니다.\n'
             '복귀 시 14파이도 보관합니다. 보관 봉 재사용은 재고를 차감하지 않으며 새 Ø14 최초 투입만 1봉 차감합니다.\n'
             '양산품 교체는 해당 호기의 소재·수량을 보관하고 집계만 멈춥니다. 원래 소재를 장착한 뒤 집계 재개를 누르세요.\n'
             '다 쓴 봉은 메인의 소재교체로 마감합니다. 사용 중·보관 중인 봉은 마감 후 기간통계에 반영됩니다.\n'
             '가공량이 적어도 소재교체한 봉은 소모 1봉에 포함합니다. 우클릭으로 마지막 입력을 취소할 수 있습니다.\n'
             '봉당 평균은 기간 내 사용을 끝낸 완전측정 봉 기준입니다.\n'
             '중간 시작·수집 공백·불량초과 봉은 평균에서 제외하고 표시합니다.\n\n'
-            '연결이 끊기면 마지막 수신 자료를 표시하고 새 입력을 막습니다.\n'
+            '저장 담당 PC와 연결이 끊기면 마지막 수신 자료를 표시하고 새 입력을 막습니다.\n'
             '저장 확인 대기인 입력은 재연결 후 같은 번호로 결과를 확인하므로 다시 입력하지 마세요.\n'
             '창을 닫으면 숨겨지며 수집은 계속됩니다. 지후니우스 완전 종료 시 함께 종료됩니다.',parent=self.root)
     def on_close(self):
@@ -490,6 +498,17 @@ class MaterialUpdateAdapter:
 def boot():
     import tkinter as tk
     from tkinter import messagebox
+    # The integrated entry point bypasses core.main(). Give this process its own
+    # taskbar identity so Windows uses the existing graph window icon.
+    if os.name == 'nt':
+        try:
+            import ctypes
+            identify = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+            identify.argtypes = [ctypes.c_wchar_p]
+            identify.restype = ctypes.c_long
+            identify('Jihunius.MaterialCounter')
+        except (AttributeError, OSError):
+            pass
     folder=core.default_folder();folder.mkdir(parents=True,exist_ok=True)
     root=tk.Tk();root.withdraw();lock=None;session=None
     try:

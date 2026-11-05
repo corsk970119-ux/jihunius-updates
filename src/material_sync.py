@@ -107,7 +107,7 @@ class CommandStore(core.Store):
             self.db.execute('INSERT INTO sync_receipts VALUES(?,?,?,?,?,?)',
                 (r['id'],digest,time.time(),r['client'],r['method'],json.dumps(result,ensure_ascii=False)))
             return result
-    def apply(self,r):
+    def apply(self,r,manual=False):
         self.validate_command(r)
         with self.transaction():
             digest,old=self.previous(r)
@@ -117,7 +117,9 @@ class CommandStore(core.Store):
                 with self.transaction():
                     if name=='reset_records':
                         self._reset_data(args[0],time.time());self.live.clear();value=None
-                    else:value=self.rotate(args[0],early=args[1]) if name=='rotate' else getattr(self,name)(*args)
+                    elif name=='rotate':value=self.rotate(args[0],early=args[1],manual=manual)
+                    elif name in ('switch_14','toggle_mass_mode'):value=getattr(self,name)(*args,manual=manual)
+                    else:value=getattr(self,name)(*args)
                 result=dict(ok=True,value=value)
             except ValueError as exc:
                 result=dict(ok=False,error=str(exc))
@@ -153,7 +155,7 @@ class Authority:
         self.commands=queue.Queue(64);self.samples=queue.Queue()
         self.stopping=threading.Event();self.ready=threading.Event()
         self.error=None;self.failure='';self.collection=False;self.collector=None
-        self.pending={};self.sources={};self.server_detail='데이터 수집 OFF';self.errors={}
+        self.pending={};self.sources={};self.manual_boundaries={};self.server_detail='데이터 수집 OFF';self.errors={}
         self.server=None;self.lock=None;self.thread=None
         self.read_slots=threading.BoundedSemaphore(2);self.read_timeout=6.0
     def start(self):
@@ -290,7 +292,7 @@ class Authority:
                     stock_revisions={k:self.store.stock_expectations(k) for k in core.MATERIAL_TYPES},
                     collection=self.collection,owner=self.owner,epoch=self.store.epoch(),
                     revision=revision,detail=self.server_detail,failure=self.failure,errors=self.errors,at=time.time(),
-                    capabilities=['temporary14','mass_mode','running_switch'])
+                    capabilities=['temporary14','mass_mode','running_switch','manual_material_edits'])
     def _run(self):
         try:self.store=CommandStore(self.path)
         except Exception as exc:self.error=exc;self.ready.set();return
@@ -300,7 +302,7 @@ class Authority:
                 try:self._drain()
                 except Exception as exc:self._storage_failure(exc)
                 for key,entry in list(self.pending.items()):
-                    if time.monotonic()-entry['started']>6:self._finish_rotation(key,'최신 머신 상태를 확인하지 못해 소재교체를 반영하지 않았습니다.')
+                    if time.monotonic()-entry['started']>6:self._finish_rotation(key,'최신 머신 상태 확인 시간 초과')
                 try:method,args,answer=self.commands.get(timeout=.03)
                 except queue.Empty:continue
                 try:
@@ -313,7 +315,8 @@ class Authority:
                         if old is not None:result=old
                         else:
                             self.store.check(args)
-                            if not self.collection:raise ValueError('수집 PC의 데이터 수집을 ON으로 켠 뒤 소재교체를 눌러주세요.')
+                            if not self.collection:
+                                result=self._apply_manual(args);answer.put((True,result));continue
                             key=args['id']
                             if key in self.pending:
                                 if self.pending[key]['request']!=args:raise ValueError('중복 요청 내용이 다릅니다.')
@@ -349,13 +352,13 @@ class Authority:
                     self._drain(complete=True)
                     for n in list(self.store.live):self.store.disconnected(n,reason='프로그램 종료')
                 except Exception:pass
-            for key in list(self.pending):self._finish_rotation(key,'프로그램이 종료되어 교체를 반영하지 않았습니다.')
+            for key in list(self.pending):self._finish_rotation(key,'프로그램이 종료되어 교체를 반영하지 않았습니다.',allow_manual=False)
             self.store.close()
     def _storage_failure(self,exc):
         self.failure='소재 저장 오류: '+str(exc)[:160]
         if self.collector:self.collector.close()
         self.collection=False;self.store.live.clear()
-        for key in list(self.pending):self._finish_rotation(key,self.failure)
+        for key in list(self.pending):self._finish_rotation(key,self.failure,allow_manual=False)
     def _drain(self,complete=False):
         processed=0
         while complete or processed<100:
@@ -367,6 +370,11 @@ class Authority:
             old=self.sources.get(ip)
             if kind=='removed' and old and old[1]!=generation:continue
             machine=record['machine'] if record else (old[0] if old else None)
+            boundary=self.manual_boundaries.get(machine)
+            if record and boundary is not None:
+                started=record.get('_requested_monotonic')
+                if (started is not None and started<=boundary[0]) or (started is None and at<=boundary[1]):
+                    continue  # A pre-edit request cannot seed or count against the new rod.
             if record and old and old[0]!=machine:self.store.disconnected(old[0],at,'머신 주소의 호기 번호 변경')
             if record:
                 self.sources[ip]=(machine,generation);self.store.observe(record,at);self.errors.pop(machine,None)
@@ -382,10 +390,22 @@ class Authority:
         for n in list(self.store.live):
             seen=self.store._machine(n)['last_seen']
             if seen is None or not 0<=now-seen<=core.GAP_SECONDS:self.store.disconnected(n,now,'응답 지연')
-    def _finish_rotation(self,key,error=None):
+    def _apply_manual(self,request):
+        result=self.store.apply(request,manual=True)
+        if result.get('ok'):
+            self.manual_boundaries[request['args'][0]]=(time.monotonic(),time.time())
+        return result
+
+    def _finish_rotation(self,key,error=None,allow_manual=True):
         entry=self.pending.pop(key,None)
         if not entry:return
-        try:result=self.store.reject(entry['request'],error) if error else self.store.apply(entry['request'])
+        try:
+            request=entry['request'];machine=request['args'][0];row=self.store._machine(machine)
+            fresh=(not error and machine in self.store.live and row['last_seen'] is not None
+                   and 0<=time.time()-row['last_seen']<=core.FRESH_SECONDS
+                   and row['state'] in ('RUN','WAIT','HOLD','ALARM','STOP'))
+            if not allow_manual:result=self.store.reject(request,error or '요청을 반영하지 않았습니다.')
+            else:result=self.store.apply(request) if fresh else self._apply_manual(request)
         except Exception as exc:
             for answer in entry['answers']:answer.put((False,exc))
             raise
