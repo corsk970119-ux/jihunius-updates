@@ -14,7 +14,7 @@ class HistoryUI:
         style.map('ErrorHistory.TCheckbutton',background=[('active','#101722')],foreground=[('active','#ffffff')])
         style.configure('ErrorHistory.TLabel',background='#101722',foreground='#91a4be',font=('맑은 고딕',9))
         self.service=Service(_recorder.path,folder,helper_source)
-        self.button=app.ttk.Button(app.title_label.master,text='오류 기록',style='Popup.TButton',command=self.open)
+        self.button=app.ttk.Button(getattr(app,'header_actions',app.title_label.master),text='오류 기록',style='Popup.TButton',command=self.open)
         self.button.pack(side='right',padx=(6,0))
         self.timer=self.root.after(500,self.poll)
         self.root.bind('<Destroy>',self.destroyed,add='+')

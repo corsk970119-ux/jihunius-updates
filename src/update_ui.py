@@ -45,7 +45,7 @@ class Controller:
         if self.current is None:
             self.message='자동 업데이트 실행기 연결을 확인하지 못했습니다. 트레이 메뉴에서 완전 종료한 뒤 원래 지후니우스.pyw 파일을 다시 실행해 주세요.'
         self.label=app.tk.StringVar(value='업데이트' if self.current is not None else '자동 확인 꺼짐')
-        self.button=app.ttk.Button(app.title_label.master,textvariable=self.label,style='Popup.TButton',command=self.open)
+        self.button=app.ttk.Button(getattr(app,'header_actions',app.title_label.master),textvariable=self.label,style='Popup.TButton',command=self.open)
         self.button.pack(side='right',padx=(12,0))
         self._restore=app.restore_from_tray
         def restore(cancel_exit=True):
