@@ -35,6 +35,7 @@ with tempfile.TemporaryDirectory() as tmp:
   previous_right=0
   for n,widgets in app.material_quick.rows.items():
    assert widgets['name'].cget('text')==str(n)+'호기'
+   assert widgets['defect'].cget('text')=='불량'
    assert widgets['defect'].winfo_rooty()<widgets['rotate'].winfo_rooty()
    assert widgets['cell'].winfo_rootx()>=previous_right
    previous_right=widgets['cell'].winfo_rootx()+widgets['cell'].winfo_width()
@@ -76,6 +77,13 @@ with tempfile.TemporaryDirectory() as tmp:
  assert app.period_cards['diameter10'][0].cget('text')=='3 봉'
  assert app.period_cards['diameter12'][0].cget('text')=='1 봉'
  assert app.period_cards['diameter14'][0].cget('text')=='2 봉'
+ root.geometry('1000x790+50+50');app.period_preset('month');pump(root,1)
+ for w in app.period_controls.winfo_children():
+  assert w.winfo_width()>=w.winfo_reqwidth(),(str(w),w.winfo_width(),w.winfo_reqwidth())
+  assert w.winfo_rootx()+w.winfo_width()<=root.winfo_rootx()+root.winfo_width()
+ shot(root,'material-month.png')
+ app.open_period_month();pump(root,.2);shot(root,'material-month-picker.png')
+ app._month_dialog.destroy()
  for widgets in app.rows.values():assert 'rotate' not in widgets and 'defect' not in widgets
  app.on_close();assert root.state()=='withdrawn';assert authority.collection
  sub.close();sub.thread.join(10);app.shutdown()

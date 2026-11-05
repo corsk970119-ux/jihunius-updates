@@ -18,6 +18,7 @@ Windows에서 이 파일을 더블클릭. 지후니우스와 별도 실행/별�
 """
 
 import argparse
+import calendar
 import csv
 import ctypes
 from contextlib import contextmanager
@@ -1501,6 +1502,7 @@ class Application:
         panel.grid_rowconfigure(5,weight=1,minsize=160)
         bar=self.tk.Frame(panel,bg=PALETTE['bg'])
         bar.grid(row=0,column=0,sticky='ew',pady=(0,5))
+        self.period_controls=bar
         now=datetime.now()
         self.date_from=self.tk.StringVar(value=now.replace(day=1).strftime('%Y-%m-%d'))
         self.date_to=self.tk.StringVar(value=now.strftime('%Y-%m-%d'))
@@ -1509,6 +1511,18 @@ class Application:
             entry.pack(side='left',ipady=3,padx=(0,5))
             entry.bind('<Return>',lambda e:self.refresh_period())
             if variable is self.date_from:self.label(bar,'~').pack(side='left',padx=(0,5))
+        self.period_previous_button=self.button(bar,'<',lambda:self.shift_period_month(-1))
+        self.period_previous_button.configure(padx=6)
+        self.period_previous_button.pack(side='left',padx=(3,2))
+        self.period_month_button=self.button(bar,'월 선택',self.open_period_month)
+        self.period_month_button.configure(padx=8,width=11)
+        self.period_month_button.pack(side='left')
+        self.period_next_button=self.button(bar,'>',lambda:self.shift_period_month(1))
+        self.period_next_button.configure(padx=6)
+        self.period_next_button.pack(side='left',padx=(2,5))
+        for variable in (self.date_from,self.date_to):
+            variable.trace_add('write',lambda *args:self._period_month_label())
+        self._period_month_label()
         self.period_machine=self.tk.StringVar(value='전체 호기')
         machines=self.ttk.Combobox(bar,style='Round.TCombobox',textvariable=self.period_machine,values=['전체 호기']+['{}호기'.format(n) for n in MACHINES],width=9,state='readonly')
         machines.pack(side='left',padx=4)
@@ -1656,9 +1670,79 @@ class Application:
         elif not total['eligible_rods']:
             self.period_summary.configure(text='소모 {:,}봉 모두 측정이 불완전하여 봉당 평균을 계산하지 않았습니다. 양품·불량 관측 합계는 표에 보존됩니다.'.format(total['consumed_rods']),fg=PALETTE['yellow'])
 
+    def _period_month_anchor(self):
+        for variable in (self.date_from,self.date_to):
+            try:return datetime.strptime(variable.get().strip(),'%Y-%m-%d')
+            except ValueError:pass
+        return datetime.now()
+
+    def _period_month_label(self):
+        text='월 선택'
+        try:
+            begin=datetime.strptime(self.date_from.get().strip(),'%Y-%m-%d')
+            end=datetime.strptime(self.date_to.get().strip(),'%Y-%m-%d')
+            if begin.day==1 and (begin.year,begin.month)==(end.year,end.month) and end.day==calendar.monthrange(begin.year,begin.month)[1]:
+                text='{}년 {}월'.format(begin.year,begin.month)
+        except ValueError:pass
+        self.period_month_button.configure(text=text)
+
+    def select_period_month(self,year,month):
+        # Keep the inclusive last day in the fields; period_range supplies the
+        # next midnight to the existing asynchronous report query.
+        if not 1<=year<=9998 or not 1<=month<=12:return
+        last=calendar.monthrange(year,month)[1]
+        self.date_from.set('{:04d}-{:02d}-01'.format(year,month))
+        self.date_to.set('{:04d}-{:02d}-{:02d}'.format(year,month,last))
+        self.refresh_period()
+
+    def shift_period_month(self,offset):
+        anchor=self._period_month_anchor()
+        year,month=divmod(anchor.year*12+anchor.month-1+offset,12)
+        self.select_period_month(year,month+1)
+
+    def open_period_month(self):
+        existing=getattr(self,'_month_dialog',None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift();existing.focus_force();return
+        anchor=self._period_month_anchor()
+        dialog=self.tk.Toplevel(self.root);self._month_dialog=dialog
+        dialog.title('월 선택');dialog.configure(bg=PALETTE['bg'])
+        dialog.transient(self.root);dialog.resizable(False,False)
+        year=self.tk.IntVar(value=min(anchor.year,9998))
+        header=self.tk.Frame(dialog,bg=PALETTE['bg']);header.pack(fill='x',padx=16,pady=(14,8))
+        def move_year(offset):
+            value=year.get()+offset
+            if 1<=value<=9998:year.set(value);paint()
+        previous=self.button(header,'<',lambda:move_year(-1));previous.pack(side='left')
+        caption=self.label(header,bold=True,size=13);caption.pack(side='left',expand=True)
+        following=self.button(header,'>',lambda:move_year(1));following.pack(side='right')
+        months=self.tk.Frame(dialog,bg=PALETTE['bg']);months.pack(padx=16,pady=(0,14))
+        def choose(month):
+            value=year.get();dialog.destroy();self.select_period_month(value,month)
+        self._month_buttons=[]
+        for month in range(1,13):
+            button=self.button(months,str(month)+'월',lambda value=month:choose(value))
+            button.configure(width=5)
+            button.grid(row=(month-1)//4,column=(month-1)%4,padx=3,pady=3)
+            self._month_buttons.append(button)
+        def paint():
+            caption.configure(text=str(year.get())+'년')
+            previous.configure(state='normal' if year.get()>1 else 'disabled')
+            following.configure(state='normal' if year.get()<9998 else 'disabled')
+            for month,button in enumerate(self._month_buttons,1):
+                button.configure(bg=PALETTE['blue'] if (year.get(),month)==(anchor.year,anchor.month) else PALETTE['card'])
+        paint()
+        dialog.bind('<Escape>',lambda event:dialog.destroy())
+        dialog.update_idletasks()
+        x=self.root.winfo_rootx()+(self.root.winfo_width()-dialog.winfo_reqwidth())//2
+        y=self.root.winfo_rooty()+(self.root.winfo_height()-dialog.winfo_reqheight())//2
+        dialog.geometry('+{}+{}'.format(x,y))
+        dialog.grab_set();self._month_buttons[anchor.month-1].focus_set()
+
     def period_preset(self,kind):
         now=datetime.now()
-        self.date_from.set((now if kind=='today' else now.replace(day=1)).strftime('%Y-%m-%d'))
+        if kind=='month':self.select_period_month(now.year,now.month);return
+        self.date_from.set(now.strftime('%Y-%m-%d'))
         self.date_to.set(now.strftime('%Y-%m-%d'))
         self.refresh_period()
 

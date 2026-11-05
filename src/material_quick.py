@@ -40,12 +40,23 @@ class QuickChannel:
                     or type(item['request']['args'][0]) is not int or not 1<=item['request']['args'][0]<=9):
                 raise ValueError('소재 빠른 입력의 확인 대기 파일이 올바르지 않습니다.')
         self.state={};self.checked_at=0
-    def submit(self,method,n):
+    def rotation_context(self,n):
+        if not self.state.get('connected') or time.monotonic()-self.checked_at>6:
+            raise ValueError('소재사용량조사 연결을 확인한 뒤 입력해주세요.')
+        row=next(r for r in self.state['rows'] if r['machine']==n)
+        if row.get('busy') or any(v['request']['args'][0]==n for v in self.pending.values()):
+            raise ValueError('이 호기는 저장 확인 중입니다.')
+        if not row.get('can_rotate'):raise ValueError('소재교체가 가능한 상태인지 확인해주세요.')
+        return (self.state['owner'],self.state['epoch'],
+                *(row['expected'][key] for key in ('material','next_type','material_type')))
+    def submit(self,method,n,confirmed=None):
         if method not in ('defect','rotate') or type(n) is not int or not 1<=n<=9:raise ValueError('잘못된 소재 입력입니다.')
         state=self.state
         if not state.get('connected') or time.monotonic()-self.checked_at>6:
             raise ValueError('소재사용량조사 연결을 확인한 뒤 입력해주세요.')
         if any(v['request']['args'][0]==n for v in self.pending.values()):raise ValueError('이 호기는 저장 확인 중입니다.')
+        if confirmed is not None and confirmed!=self.rotation_context(n):
+            raise ValueError('확인 중 소재 정보가 변경되었습니다. 최신 내용을 확인한 뒤 다시 눌러주세요.')
         row=next(r for r in state['rows'] if r['machine']==n)
         token=uuid.uuid4().hex
         request=dict(id=token,client=state['client'],epoch=state['epoch'],method=method,
@@ -127,7 +138,7 @@ class QuickBridge:
 
 class QuickPanel:
     def __init__(self,app,parent):
-        self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={}
+        self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={};self.confirming=False
         tk,ttk=app.tk,app.ttk
         self.frame=ttk.Frame(parent,style='RoundedCard.TFrame',padding=(14,12))
         title=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky='ew',pady=(0,10))
@@ -142,7 +153,7 @@ class QuickPanel:
             cell=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);cell.grid(row=1,column=n-1,sticky='nsew',padx=3)
             cell.columnconfigure(0,weight=1)
             name=ttk.Label(cell,text=str(n)+'호기',style='Card.TLabel',font=('맑은 고딕',11,'bold'),anchor='center');name.grid(row=0,column=0,sticky='ew',pady=(0,6))
-            defect=ttk.Button(cell,text='불량 +1',style='QuickMaterial.Danger.TButton',width=8,
+            defect=ttk.Button(cell,text='불량',style='QuickMaterial.Danger.TButton',width=8,
                 command=lambda machine=n:self.submit('defect',machine));defect.grid(row=1,column=0,sticky='ew',pady=(0,5))
             rotate=ttk.Button(cell,text='소재교체',style='QuickMaterial.Secondary.TButton',width=8,
                 command=lambda machine=n:self.submit('rotate',machine));rotate.grid(row=2,column=0,sticky='ew')
@@ -156,9 +167,21 @@ class QuickPanel:
         self.message.set(str(message)[:90]);self.message_until=time.monotonic()+6
         self.caption.configure(foreground='#f08c9a' if error else '#91d8b3')
     def submit(self,method,n):
-        if self.channel is None:return
+        if self.channel is None or self.confirming:return
         try:
-            self.channel.submit(method,n);self.notice('{}호기 저장 확인 중…'.format(n));self.poll()
+            confirmed=None
+            if method=='rotate':
+                from tkinter import messagebox
+                self.poll();confirmed=self.channel.rotation_context(n)
+                self.confirming=True
+                try:
+                    accepted=messagebox.askokcancel('소재교체 확인',
+                        '{}호기 소재를 교체할까요?\n현재 봉의 기록을 마감하고 새 소재 재고 1봉을 차감합니다.'.format(n),
+                        parent=self.app.root,default='cancel')
+                finally:self.confirming=False
+                if not accepted:return
+                self.poll()
+            self.channel.submit(method,n,confirmed=confirmed);self.notice('{}호기 저장 확인 중…'.format(n));self.poll()
         except (OSError,ValueError,KeyError,StopIteration) as exc:self.notice(str(exc),True)
     def poll(self):
         if self.channel is None:return
