@@ -12,7 +12,7 @@ class QuickConfirmationTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=tk.Tk();self.addCleanup(self.cleanup)
-  self.panel=QuickPanel(SimpleNamespace(tk=tk,ttk=ttk,root=self.root,style=ttk.Style(self.root)),self.root)
+  self.panel=QuickPanel(SimpleNamespace(tk=tk,ttk=ttk,window=self.root,style=ttk.Style(self.root)),self.root)
   self.folder=Path(self.tmp.name);self.row=dict(machine=1,can_rotate=True,can_defect=True,busy=False,
     expected=dict(material=5,next_type='10Z',material_type='10Z'),material_type='10Z',next_type='10Z')
   self.status=dict(nonce='nonce',at=time.time(),quick=dict(connected=True,client='pc',owner='owner',epoch='e',at=time.time(),rows=[self.row]))

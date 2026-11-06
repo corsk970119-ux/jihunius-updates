@@ -178,7 +178,7 @@ class QuickPanel:
                 try:
                     accepted=messagebox.askokcancel('소재교체 확인',
                         '{}호기 소재를 교체할까요?\n현재 봉의 기록을 마감하고 새 소재 재고 1봉을 차감합니다.'.format(n),
-                        parent=self.app.root,default='cancel')
+                        parent=self.frame.winfo_toplevel(),default='cancel')
                 finally:self.confirming=False
                 if not accepted:return
                 self.poll()
