@@ -189,7 +189,7 @@ class QuickPanel:
         try:state,results=self.channel.poll()
         except (OSError,ValueError,KeyError) as exc:state={};results=[];self.notice(str(exc),True)
         for item in results:
-            r=item['result'];label='불량 +1' if item['method']=='defect' else '소재교체'
+            r=item['result'];label='양품 −1 / 불량 +1' if item['method']=='defect' else '소재교체'
             self.notice('{}호기 {} 저장 완료'.format(item['machine'],label) if r.get('ok') else '{}호기: {}'.format(item['machine'],r.get('error','저장 실패')),not r.get('ok'))
         pending={v['request']['args'][0] for v in self.channel.pending.values()}
         available=bool(state.get('connected'))

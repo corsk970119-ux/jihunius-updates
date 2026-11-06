@@ -157,7 +157,7 @@ class MaterialHoldTests(unittest.TestCase):
   s.defect(2);s.close()
   s=sync.CommandStore(legacy)
   try:
-   self.assertEqual(s.db.execute('PRAGMA user_version').fetchone()[0],5)
+   self.assertEqual(s.db.execute('PRAGMA user_version').fetchone()[0],6)
    self.assertEqual((s.snapshot(2)['good'],s.snapshot(2)['defects']),(1,1))
    self.assertIsNone(s.snapshot(2)['parked']);self.assertEqual(s.inventory()[1]['quantity'],7)
    self.assertTrue(s.migration_backup.exists())
