@@ -1366,7 +1366,10 @@ class Application:
                    color=PALETTE['muted'],anchor='w').pack(fill='x',padx=8,pady=(10,8))
         board = self.tk.Frame(self.current_tab,bg=PALETTE['bg'])
         board.pack(fill='both',expand=True,padx=4)
-        widths = (62,78,88,64,60,144) + ((108,104) if self.dashboard_actions else ()) + ((166,) if self.temporary14_actions else ()) + ((166,) if self.mass_mode_actions else ())
+        from tkinter import font as tkfont
+        text_font=tkfont.Font(root=self.root,font=(self.font,10))
+        program_width=max(88,text_font.measure('양산품 · 집계 중지')+8)
+        widths = (62,78,program_width,64,60,144) + ((108,104) if self.dashboard_actions else ()) + ((166,) if self.temporary14_actions else ()) + ((166,) if self.mass_mode_actions else ())
         heads = ('호기','상태','작업번호','양품','불량','사용 소재') + (('', '') if self.dashboard_actions else ()) + (('임시 소재 전환',) if self.temporary14_actions else ()) + (('양산품 모드',) if self.mass_mode_actions else ())
         for j,(width,heading) in enumerate(zip(widths,heads)):
             board.grid_columnconfigure(j,minsize=width,weight=1 if j==5 else 0)
@@ -1376,13 +1379,14 @@ class Application:
             bg = PALETTE['card'] if n%2 else '#172130'
             row_card=self.rounded_panel(board,fill=bg,radius=11)
             row_card.grid(row=n,column=0,columnspan=len(widths),sticky='nsew',pady=(0,4))
-            for j,width in enumerate(widths):row_card.grid_columnconfigure(j,minsize=width,weight=1 if j==5 else 0)
-            row_card.grid_rowconfigure(0,weight=1)
+            # All headings and machine cells belong to ONE grid. Independent
+            # row grids grow differently for paused programs and larger counts.
+            # Keep the rounded card underneath as decoration only.
             widgets = {}
             for j,key in enumerate(('machine','state','program','total','defects','material')):
                 options = dict(size=18 if key=='total' else 10,bold=key in ('machine','total'),bg=bg)
-                widget = self.label(row_card,'{}호기'.format(n) if key=='machine' else '—',**options)
-                widget.grid(row=0,column=j,sticky='nsew',padx=(8,0) if j==0 else 0,pady=5,ipady=1)
+                widget = self.label(board,'{}호기'.format(n) if key=='machine' else '—',**options)
+                widget.grid(row=n,column=j,sticky='nsew',padx=(8,0) if j==0 else 0,pady=(5,9),ipady=1)
                 widget.bind('<Button-3>',lambda e,m=n:self.context(e,m))
                 if key=='material':
                     widget.configure(cursor='hand2')
@@ -1392,8 +1396,8 @@ class Application:
             if self.temporary14_actions:actions+=((len(widths)-1-int(self.mass_mode_actions),'switch14','14파이 교체',self.switch_14),)
             if self.mass_mode_actions:actions+=((len(widths)-1,'mass_mode','양산품 교체',self.toggle_mass_mode),)
             for j,key,text,fn in actions:
-                box = self.tk.Frame(row_card,bg=bg)
-                box.grid(row=0,column=j,sticky='nsew',padx=(0,7) if j==7 else 0,pady=2)
+                box = self.tk.Frame(board,bg=bg)
+                box.grid(row=n,column=j,sticky='nsew',padx=(0,7) if j==7 else 0,pady=(2,6))
                 button = self.button(box,text,lambda m=n,f=fn:f(m),primary=key=='rotate',width=7)
                 if key in ('switch14','mass_mode'):button.configure(width=12,padx=9)
                 if key=='defect':button.configure(bg=PALETTE['danger'],activebackground=PALETTE['danger_active'],disabledforeground='#e3a3a3')
