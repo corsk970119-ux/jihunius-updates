@@ -222,6 +222,8 @@ class CompanionManager:
             process = self._popen([str(executable), str(payload)], cwd=str(self.origin), env=environment)
             self.processes[key] = process
             self.sessions[key] = (session, nonce)
+            if key == 'material' and not hidden:
+                self.backend.allow_foreground(process.pid)
             return True
 
     def toggle(self, key):

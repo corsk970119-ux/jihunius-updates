@@ -96,11 +96,11 @@ class ClientSession:
         self.thread=threading.Thread(target=self._run,name='material-sync',daemon=True)
         self.thread.start()
     def toggle(self,enabled):self.tasks.put_nowait(('toggle',enabled))
-    def command(self,method,args,expected):
+    def command(self,method,args,expected,epoch=None):
         state=self.state
         if not state or time.monotonic()-self.received_at>6 or self.coordinator.client is None:
             raise ValueError('수집 PC의 최신 자료를 받은 뒤 입력해주세요.')
-        r=dict(id=uuid.uuid4().hex,client=self.coordinator.settings['pc_id'],epoch=state['epoch'],
+        r=dict(id=uuid.uuid4().hex,client=self.coordinator.settings['pc_id'],epoch=state['epoch'] if epoch is None else epoch,
                method=method,args=args,expected=expected,expires=state['at']+30)
         return self.submit_request(self.coordinator.owner['owner_id'],r)
     def submit_request(self,owner,request):

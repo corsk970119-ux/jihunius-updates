@@ -29,6 +29,7 @@ class SyncedApplication(core.Application):
         self._last_revision=None;self._shutdown_started=False;self._connection_error='수집 PC 연결 대기'
         self._report_revision=None;self._report_scope=''
         self._ui_timer=None;self._control_id=None;self._control_timer=None;self._control_status=None
+        self._front_timer=None
         self.quick_bridge=None
         folder=session.coordinator.folder
         super().__init__(root,CachedStore(folder/'counter.sqlite3'),folder,
@@ -213,10 +214,10 @@ class SyncedApplication(core.Application):
             self.tell('연결 또는 소재 기록이 변경되었습니다. 최신 상태를 확인하고 다시 눌러주세요.',True);return
         self._mutate('switch_14',[n],expected,
             lambda value:self.tell('{}호기 {} 완료 · 보관한 봉의 기록 유지'.format(n,title)))
-    def _mutate(self,method,args,expected,success=None,failure=None):
+    def _mutate(self,method,args,expected,success=None,failure=None,epoch=None):
         if self._shutdown_started or self.resetting:return False
         try:
-            token=self.session.command(method,args,expected)
+            token=self.session.command(method,args,expected,**({'epoch':epoch} if epoch is not None else {}))
             self.writes[token]=(success or (lambda value:self.tell('수집 PC에 저장했습니다.')),failure)
             self.pending={n:('',time.time(),False) for n in self.session.busy_machines()}
             self.tell('수집 PC에 저장 결과를 확인하고 있습니다.');self.refresh()
@@ -263,12 +264,19 @@ class SyncedApplication(core.Application):
     def material_dialog(self,n):
         if n in self.pending or self.failed_storage or self.resetting:return
         row=self.store.snapshot(n);initial=not row['material_type'];expected=dict(row['expected'])
+        epoch=self.store.state['epoch'];retry_context=False
         if row.get('mass_mode'):
             self.tell('양산품 모드입니다. 집계 재개 후 소재를 설정해주세요.',True);return
         dialog=self.tk.Toplevel(self.root);dialog.title('{}호기 소재 지정'.format(n))
         dialog.configure(bg=core.PALETTE['bg']);dialog.resizable(False,False);dialog.transient(self.root)
-        self.label(dialog,'{}호기 · {}'.format(n,'현재 사용 소재' if initial else '다음 교체 소재'),size=14,bold=True).pack(padx=24,pady=(20,10))
-        self.label(dialog,'최초 소재 지정은 재고를 차감하지 않습니다.' if initial else '다음 소재교체부터 적용됩니다.',color=core.PALETTE['muted']).pack(padx=24,pady=6)
+        heading=self.label(dialog,'',size=14,bold=True);heading.pack(padx=24,pady=(20,10))
+        hint=self.label(dialog,'',color=core.PALETTE['muted'],wraplength=330);hint.pack(padx=24,pady=6)
+        def show_context(latest):
+            heading.configure(text='{}호기 · {}'.format(n,'현재 사용 소재' if initial else '다음 교체 소재'))
+            hint.configure(text='최초 소재 지정은 재고를 차감하지 않습니다.' if initial else
+                '현재: {} · 다음: {}\n다음 소재교체부터 적용됩니다.'.format(core.material_label(latest['material_type']),
+                    core.material_label(latest.get('next_type') or latest['material_type'])))
+        show_context(row)
         value=core.MATERIAL_TYPES.get(row.get('next_type') or row['material_type'],core.MATERIAL_TYPES[core.DEFAULT_MATERIAL_TYPE])
         chosen=self.tk.StringVar(value=value)
         combo=self.ttk.Combobox(dialog,style='Round.TCombobox',values=list(core.MATERIAL_TYPES.values()),textvariable=chosen,state='readonly',width=22)
@@ -278,11 +286,31 @@ class SyncedApplication(core.Application):
             self.tell('{}호기 소재 설정 저장 완료'.format(n))
             if dialog.winfo_exists():dialog.destroy()
         def failed(error):
+            nonlocal retry_context
+            retry_context=True
             self.tell(error,True)
             if dialog.winfo_exists():status.configure(text=error);apply.configure(state='normal');dialog.protocol('WM_DELETE_WINDOW',dialog.destroy)
         def save():
+            nonlocal initial,expected,epoch,retry_context
+            if (not self.connected or self.failed_storage or self.resetting or self._shutdown_started
+                    or n in self.pending or time.monotonic()-self.session.received_at>6):
+                status.configure(text='최신 연결 또는 저장 결과를 기다리고 있습니다. 잠시 뒤 다시 눌러주세요.');return
+            latest=self.store.snapshot(n);current=dict(latest['expected']);current_epoch=self.store.state['epoch']
+            keys=('material','material_type','next_type','switch_revision')
+            changed=current_epoch!=epoch or any(current.get(k)!=expected.get(k) for k in keys)
+            first_sample=(initial and current_epoch==epoch and expected.get('material') is None
+                and current.get('material') is not None and current.get('material_type') is None
+                and all(current.get(k)==expected.get(k) for k in ('material_type','next_type','switch_revision')))
+            if changed or retry_context:
+                expected=current;epoch=current_epoch;initial=not latest['material_type']
+                show_context(latest)
+                review=retry_context or not first_sample;retry_context=False
+                if review:
+                    status.configure(text='최신 소재 정보를 불러왔습니다. 위 내용과 선택을 확인한 뒤 적용을 다시 눌러주세요.');return
+            if latest.get('mass_mode'):
+                status.configure(text='양산품 모드입니다. 집계 재개 후 소재를 설정해주세요.');return
             kind=next(k for k,v in core.MATERIAL_TYPES.items() if v==chosen.get())
-            if self._mutate('assign_material' if initial else 'set_next_type',[n,kind],expected,ready,failed):
+            if self._mutate('assign_material' if initial else 'set_next_type',[n,kind],expected,ready,failed,epoch=epoch):
                 apply.configure(state='disabled');status.configure(text='저장 확인 중…');dialog.protocol('WM_DELETE_WINDOW',lambda:None)
         apply=self.button(dialog,'적용',save,primary=True);apply.pack(pady=(6,20))
         dialog.grab_set();combo.focus_set()
@@ -416,6 +444,8 @@ class SyncedApplication(core.Application):
             '창을 닫으면 숨겨지며 수집은 계속됩니다. 지후니우스 완전 종료 시 함께 종료됩니다.',parent=self.root)
     def on_close(self):
         if self.root.grab_current() is not None:return
+        if self._front_timer is not None:
+            self.root.after_cancel(self._front_timer);self._front_timer=None
         placement=getattr(self,'placement',None)
         if placement:placement.flush()
         self.root.withdraw();self.session.visible=False
@@ -427,6 +457,28 @@ class SyncedApplication(core.Application):
         modal=self.root.grab_current()
         target=modal.winfo_toplevel() if modal is not None else self.root
         target.lift();target.focus_force()
+        if self._front_timer is not None:self.root.after_cancel(self._front_timer)
+        # Activation follows Tk mapping and saved-placement restoration. A
+        # one-shot callback avoids keeping a hidden or background window on top.
+        self._front_timer=self.root.after_idle(self._focus_front)
+    def _focus_front(self):
+        self._front_timer=None
+        if self.closed or self._shutdown_started or self.root.state() in ('withdrawn','iconic'):return
+        placement=getattr(self,'placement',None)
+        if placement is not None and not getattr(placement,'ready',True):placement.restore()
+        modal=self.root.grab_current()
+        target=modal.winfo_toplevel() if modal is not None else self.root
+        target.lift();target.focus_force()
+        if os.name=='nt':
+            try:
+                import ctypes
+                from ctypes import wintypes as w
+                user=ctypes.WinDLL('user32',use_last_error=True)
+                user.GetAncestor.argtypes=[w.HWND,w.UINT];user.GetAncestor.restype=w.HWND
+                user.SetForegroundWindow.argtypes=[w.HWND];user.SetForegroundWindow.restype=w.BOOL
+                hwnd=user.GetAncestor(target.winfo_id(),2)
+                if hwnd:user.SetForegroundWindow(hwnd)
+            except (AttributeError,OSError):pass
     def poll_control(self):
         if self.closed:return
         try:
@@ -437,7 +489,7 @@ class SyncedApplication(core.Application):
                 if command.get('action')=='show':
                     self.show_front()
                 elif command.get('action')=='toggle':
-                    if self.root.state()=='withdrawn':self.show_front()
+                    if self.root.state() in ('withdrawn','iconic'):self.show_front()
                     else:self.on_close()
                 elif command.get('action')=='exit':
                     if self.root.grab_current() is not None:
@@ -452,7 +504,7 @@ class SyncedApplication(core.Application):
     def _destroyed(self,event):
         if event.widget is not self.root:return
         self.closed=True;self.session.close();self.jobs.close()
-        for timer in (self._ui_timer,self._control_timer):
+        for timer in (self._ui_timer,self._control_timer,self._front_timer):
             if timer:
                 try:self.root.after_cancel(timer)
                 except Exception:pass

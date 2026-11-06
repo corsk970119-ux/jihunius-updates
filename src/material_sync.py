@@ -84,6 +84,13 @@ class CommandStore(core.Store):
         if name in ('defect','rotate','switch_14','toggle_mass_mode','undo','assign_material','set_next_type'):
             now=self.expectations(args[0])
             keys=['material']
+            # The first telemetry sample creates the initial, still-unassigned
+            # rod. It is not a concurrent replacement and must not block a
+            # dialog opened before that sample. Type/mode/epoch checks remain.
+            if (name=='assign_material' and 'material' in expected and expected['material'] is None
+                    and now['material'] is not None and 'material_type' in expected
+                    and expected['material_type'] is None and now['material_type'] is None):
+                keys=[]
             if name in ('rotate','switch_14','toggle_mass_mode','set_next_type'):keys+=['next_type','material_type']
             if name=='assign_material':keys+=['material_type']
             if name=='undo':keys+=['undo']
