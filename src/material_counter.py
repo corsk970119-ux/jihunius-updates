@@ -10,7 +10,7 @@ Windows에서 이 파일을 더블클릭. 지후니우스와 별도 실행/별�
 보관 재고: Ø10 Z급, Ø10 B급, Ø12, Ø14. 이미 기계에 넣은 소재는 보관 재고에서 제외.
 시작 시 보이는 번호는 기준값이며 최초 소재는 '중간 시작'이다.
 가공 수는 관측한 번호 변경 횟수이며, 불량 수는 수동으로 입력한 별도 기록이다.
-사이트 카운터(part_count)는 진단 참고값이며 집계에 합산하지 않는다.
+사이트 카운터(part_count)는 읽거나 기록하지 않으며, 프로그램 번호만으로 수량을 판단한다.
 데이터: %LOCALAPPDATA%\\MaterialCounter\\counter.sqlite3 (이 PC 전용).
 닫기 시 최소화를 선택하면 계속 수집. 완전 종료/PC 절전 중 수집 안 됨.
 연결 단절/재실행 후에는 누락 가능 표시와 함께 새 기준을 잡는다.
@@ -101,9 +101,9 @@ def parse_sample(result):
     state = str(result.get('state', '')).strip().upper()
     if state not in STATES:
         raise ValueError('설비 상태를 확인할 수 없습니다.')
-    part = result.get('part_count', '')
-    part = str(part).strip()[:80] if isinstance(part, (str, int, float)) and not isinstance(part, bool) else ''
-    return dict(machine=int(match.group(1)), program=str(int(number)), state=state, part_count=part)
+    # Keep the legacy field empty for database/client compatibility. Site counters
+    # are neither evidence of production nor a reason to refresh the history.
+    return dict(machine=int(match.group(1)), program=str(int(number)), state=state, part_count='')
 
 
 def request_json(endpoint, fields, host=HOST, port=None):
@@ -379,7 +379,7 @@ class Store:
         return self.db.execute('''INSERT INTO events(machine,material_id,at,kind,previous,program,state,
           part_count,auto_delta,defect_delta,note,next_material) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
           (row['machine'], row['active_material'], at, kind, previous, row['program'], row['state'],
-           row['part_count'], auto, defects, note, next_material)).lastrowid
+           '', auto, defects, note, next_material)).lastrowid
 
     def _movement(self, type_id, at, kind, delta, note='', material_id=None, event_id=None, reverses=None):
         return self.db.execute('''INSERT INTO stock_movements(at,type_id,kind,delta,note,material_id,event_id,reverses)
@@ -463,7 +463,7 @@ class Store:
         if old['last_seen'] is not None and at < old['last_seen']:
             self.live.discard(n)
         continuous = n in self.live and old['last_seen'] is not None and 0 <= at-old['last_seen'] <= GAP_SECONDS
-        row = dict(old, program=sample['program'], state=sample['state'], part_count=sample['part_count'])
+        row = dict(old, program=sample['program'], state=sample['state'], part_count='')
         eligible = countable_program(sample['program'])
         same_return = old['program']=='9020' and sample['program']==old['count_program']
         # Keep the visible program and counting reference separate. Only 9020 is
@@ -473,7 +473,7 @@ class Store:
         with self.transaction():
             if old['mass_mode']:
                 # Keep a live baseline for safe resume, without storing every mass job.
-                changed = any(old[key] != sample[key] for key in ('program','state','part_count'))
+                changed = any(old[key] != sample[key] for key in ('program','state'))
             elif old['active_material'] is None:
                 row['active_material'] = self.db.execute('''INSERT INTO materials(machine,started,start_program,partial,material_type)
                   VALUES(?,?,?,1,?)''', (n, at, sample['program'], old['initial_type'])).lastrowid
@@ -491,12 +491,10 @@ class Store:
                             auto=1 if counted else 0, note=note)
             elif old['state'] != sample['state']:
                 self._event(row, at, 'state')
-            elif old['part_count'] != sample['part_count']:
-                self._event(row, at, 'reference', note='사이트 카운터는 참고용이며 합산하지 않습니다.')
             else:
                 changed = False
             self.db.execute('''UPDATE machines SET program=?,state=?,part_count=?,last_seen=?,active_material=?,count_program=?
-              WHERE machine=?''', (sample['program'], sample['state'], sample['part_count'], at, row['active_material'], count_program, n))
+              WHERE machine=?''', (sample['program'], sample['state'], '', at, row['active_material'], count_program, n))
         self.live.add(n)
         return changed
 
@@ -1563,8 +1561,8 @@ class Application:
         widths = (42,44,90,124,124,55,55,50,130)
         self.history_tree = self._tree(self.history_tab,columns,headings,widths,height=6)
         self.label(self.history_tab,'수집 이력  ·  최근 200건  ·  같은 값의 반복 조회는 쌓지 않습니다.',color=PALETTE['muted'],anchor='w').pack(fill='x',padx=4,pady=(16,6))
-        self.event_tree = self._tree(self.history_tab,('at','machine','kind','program','part'),
-                                     ('관측시각','호기','내용','작업번호','사이트 카운터 · 참고'),(138,48,190,160,145),height=4)
+        self.event_tree = self._tree(self.history_tab,('at','machine','kind','program'),
+                                     ('관측시각','호기','내용','작업번호'),(138,48,190,160),height=4)
         self.event_tree.bind('<Double-1>',self.event_detail)
 
     def tab_changed(self,event=None):
@@ -2257,7 +2255,7 @@ class Application:
         for r in self.store.events(n):
             program=('O'+r['previous']+' → ' if r['previous'] else '')+('O'+r['program'] if r['program'] else '—')
             label=EVENT_NAMES.get(r['kind'],r['kind'])+(' (취소됨)' if r['undone'] else '')
-            item=self.event_tree.insert('','end',values=(date_text(r['at'],True),'{}호기'.format(r['machine']),label,program,r['part_count']))
+            item=self.event_tree.insert('','end',values=(date_text(r['at'],True),'{}호기'.format(r['machine']),label,program))
             self.event_details[item]=r
         self.dirty_history=False
 
@@ -2267,7 +2265,7 @@ class Application:
         if not selected:return
         r=self.event_details.get(selected[0])
         if not r:return
-        messagebox.showinfo('수집 이력','{}\n{}호기 · {}\n작업번호: {} → {}\n상태: {}\n사이트 카운터(참고): {}\n\n{}'.format(date_text(r['at']),r['machine'],EVENT_NAMES.get(r['kind'],r['kind']),r['previous'] or '—',r['program'],r['state'],r['part_count'] or '—',r['note']),parent=self.root)
+        messagebox.showinfo('수집 이력','{}\n{}호기 · {}\n작업번호: {} → {}\n상태: {}\n\n{}'.format(date_text(r['at']),r['machine'],EVENT_NAMES.get(r['kind'],r['kind']),r['previous'] or '—',r['program'],r['state'],r['note']),parent=self.root)
 
     def export(self):
         from tkinter import filedialog, messagebox
@@ -2282,7 +2280,7 @@ class Application:
         if not path:return
         try:
             payload=dict(version=VERSION,saved_at=date_text(time.time()),host=HOST,
-                         count_rule='observed transition into eligible number: machining/good +1; 1000..9999 except 3999/9012/9020/9999; return after 9020 to the same number +0, a different eligible number +1; return after other numbers counts as rework; repeated same polling +0; manual defect: good -1/defect +1, machining unchanged; early-discard rods count as one consumed rod and enter good/defect averages; completed-cohort averages exclude partial/gap/excess-defect rods; part_count reference only',
+                         count_rule='observed transition into eligible number: machining/good +1; 1000..9999 except 3999/9012/9020/9999; return after 9020 to the same number +0, a different eligible number +1; return after other numbers counts as rework; repeated same polling +0; manual defect: good -1/defect +1, machining unchanged; early-discard rods count as one consumed rod and enter good/defect averages; completed-cohort averages exclude partial/gap/excess-defect rods; site part_count ignored and not recorded in new events',
                          server=self.server_detail,errors=self.errors,source_errors=self.source_errors,
                          machines=[self.store.snapshot(n) for n in MACHINES],
                          materials=self.store.history(),events=self.store.events(limit=1000),
@@ -2321,7 +2319,7 @@ class Application:
           '9. CSV 내보내기와 전체 데이터 백업으로 기록을 따로 보관할 수 있습니다.\n\n'
           '첫 관측 번호는 기준값입니다. 첫 소재에는 중간 시작이 표시됩니다.\n'
           '같은 번호의 반복 조회는 세지 않습니다. 번호의 숫자 차이는 사용하지 않습니다.\n'
-          '사이트 카운터는 참고용이며 자동 집계에 합산하지 않습니다.\n'
+          '사이트 카운터는 읽거나 기록하지 않습니다. 수량은 프로그램 번호 변화만으로 판단합니다.\n'
           '실제 조회는 3초 간격입니다. 화면은 응답 지연 시 갱신 대기, 30초 초과 시 연결 끊김을 표시합니다.\n'
           '재실행하면 기존 집계를 유지합니다. 종료·연결 끊김 구간은 누락 가능으로 표시하고 새 기준을 잡습니다.\n'
           '실제 완료·양품을 판정하는 기능은 아닙니다. 현장 번호 변화를 확인해주세요.\n\n'
@@ -2329,7 +2327,7 @@ class Application:
           '기존 불량이 가공 수보다 많은 기록은 보존하고 불량초과를 표시합니다. 양품은 0 미만으로 표시하지 않습니다.\n'
           '이 시험판은 한 PC 전용입니다. 다른 PC와 집계를 공유하지 않습니다.\n'
           '최소화하면 계속 수집합니다. 완전 종료·PC 절전 중에는 수집하지 않습니다.\n'
-          '진단 저장 파일로 실제 사이트의 번호·상태·카운터 변화를 확인할 수 있습니다.\n\n'
+          '진단 저장 파일로 실제 사이트의 프로그램 번호·상태 변화를 확인할 수 있습니다.\n\n'
           '자동 저장 위치:\n'+str(self.folder),parent=self.root)
 
     def storage_error(self,e):
