@@ -120,6 +120,44 @@ class ProgramPathsTests(unittest.TestCase):
                 module.CONFIG_FILE.write_text(json.dumps({'folder': custom, **marker}), encoding='utf-8')
                 self.assertEqual(stl_app(module).folder.get(), custom)
 
+    def test_nc_old_default_switches_to_production_share_but_explicit_choice_is_retained(self):
+        old = r'\\192.168.0.254\내부공유폴더\★NC프로그램파일'
+        new = r'\\srvc5352374b\생산공유폴더\★NC프로그램파일'
+        path = self.app.program_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for saved in (old, old.replace('\\', '/'), old + '\\'):
+            with self.subTest(saved=saved):
+                path.write_text(json.dumps({'base_root': saved}), encoding='utf-8')
+                before = path.read_bytes()
+                self.assertEqual(load_app().load_program_base_root(), new)
+                self.assertEqual(path.read_bytes(), before)
+        # Choosing a different custom root, or explicitly reselecting the old
+        # server in the new version, must survive the next launch.
+        for selected in (r'Z:\★NC프로그램파일', r'\\NAS-B\별도 작업', old):
+            self.app.save_program_base_root(selected)
+            self.assertEqual(load_app().load_program_base_root(), selected)
+
+    def test_stl_old_default_switches_without_losing_filters_or_explicit_old_server_choice(self):
+        old = r'\\192.168.0.254\내부공유폴더\★커스텀 오더 2026년'
+        new = r'\\srvc5352374b\생산공유폴더\★커스텀 오더 2026년'
+        module = self.app.load_stl_finder()
+        module.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        for marker in ({}, {'default_folder': old}):
+            module.CONFIG_FILE.write_text(json.dumps(dict(folder=old, prefer_lab=False,
+                fuzzy_names=False, period_mode='지정 기간', start_date='2026-10-01',
+                end_date='2026-10-31', **marker)), encoding='utf-8')
+            before = module.CONFIG_FILE.read_bytes()
+            app = stl_app(module)
+            self.assertEqual(app.folder.get(), new)
+            self.assertFalse(app.prefer_lab.get())
+            self.assertFalse(app.fuzzy_names.get())
+            self.assertEqual((app.period_mode.get(), app.start_date.get(), app.end_date.get()),
+                             ('지정 기간', '2026-10-01', '2026-10-31'))
+            self.assertEqual(module.CONFIG_FILE.read_bytes(), before)
+            app.folder.set(old)
+            app.save_settings()
+            self.assertEqual(stl_app(load_app().load_stl_finder()).folder.get(), old)
+
     def test_stl_chooser_and_typed_path_survive_relaunch_with_pc_isolation(self):
         module = self.app.load_stl_finder(); app = stl_app(module)
         selected = r'\\NAS-A\커스텀 오더'

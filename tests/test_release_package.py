@@ -33,6 +33,18 @@ class PrivatePackageTests(unittest.TestCase):
     for tree in (old,new):
      tree.body=[n for n in tree.body if not (isinstance(n,ast.FunctionDef) and n.name in allowed)]
     self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
+   elif k=='STL_FINDER_SOURCE':
+    # Defaults and legacy-default loading changed intentionally. Path behavior
+    # is covered by test_program_paths; the entire search engine stays pinned.
+    old=ast.parse(before[k]);new=ast.parse(after[k])
+    for tree in (old,new):
+     tree.body=[n for n in tree.body if not (isinstance(n,ast.Assign)
+        and isinstance(n.targets[0],ast.Name)
+        and n.targets[0].id in {'DEFAULT_FOLDER','LEGACY_DEFAULT_FOLDER'})]
+     for node in tree.body:
+      if isinstance(node,ast.ClassDef) and node.name=='App':
+       node.body=[n for n in node.body if not (isinstance(n,ast.FunctionDef) and n.name=='load_settings')]
+    self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
    else:self.assertEqual(before[k],after[k],k)
   # Error hooks are observational. All original wash-log application definitions
   # still match the last release after removing only the new diagnostic calls.
