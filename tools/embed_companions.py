@@ -49,18 +49,44 @@ def companion_source(root, key):
     return result.encode('utf-8')
 
 
-def embed(root=ROOT):
+def _inflate(compressed):
+    try:
+        return zlib.decompress(base64.b64decode(compressed))
+    except Exception:
+        return None
+
+
+def _previous_payloads(root):
     path = root / 'apps/jihunius/app.pyw'
-    source = path.read_text(encoding='utf-8')
-    tree = ast.parse(source)
-    assignments = {node.targets[0].id: node for node in tree.body
-                   if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)}
-    payloads = ast.literal_eval(assignments['SUITE_COMPANIONS'].value)
-    payloads.setdefault('material',{})['title']='소재 사용량 조사(Beta)'
-    for key in payloads:
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, SyntaxError, ValueError):
+        return {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == 'SUITE_COMPANIONS'):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return {}
+            return value if isinstance(value, dict) else {}
+    return {}
+
+
+def companion_lines(root, titles):
+    """Generated assignment lines for the companion manager, apps and shared modules."""
+    payloads = {}
+    previous = _previous_payloads(root)
+    for key, title in titles.items():
         data = companion_source(root, key)
-        payloads[key].update(sha256=hashlib.sha256(data).hexdigest(),
-                             compressed=base64.b64encode(zlib.compress(data, 9)).decode('ascii'))
+        digest = hashlib.sha256(data).hexdigest()
+        old = previous.get(key, {})
+        compressed = old.get('compressed') if old.get('sha256') == digest else None
+        # zlib output differs between builds of zlib; reuse the committed blob when the
+        # source is unchanged so rebuilding on another PC does not create a noisy diff.
+        if compressed is None or _inflate(compressed) != data:
+            compressed = base64.b64encode(zlib.compress(data, 9)).decode('ascii')
+        payloads[key] = {'title': title, 'sha256': digest, 'compressed': compressed}
     manager = (root / 'src/companion_update.py').read_text(encoding='utf-8') + '\n' + (root / 'src/companions.py').read_text(encoding='utf-8')
     compile(manager, 'companions', 'exec')
     replacements = {
@@ -74,13 +100,13 @@ def embed(root=ROOT):
     error_ui=(root/'src/error_history_ui.py').read_text(encoding='utf-8')
     combined=errors+'\nSYNC_SOURCE = '+repr(errors)+'\n'+error_ui
     replacements['SuiteErrors']='SuiteErrors = _suite_load_support("jihunius_error_history", '+repr(combined)+')\n'
-    lines = source.splitlines(keepends=True)
-    for name in sorted(replacements, key=lambda name: assignments[name].lineno, reverse=True):
-        node = assignments[name]
-        lines[node.lineno - 1:node.end_lineno] = [replacements[name]]
-    result = ''.join(lines)
-    compile(result, str(path), 'exec')
-    path.write_text(result, encoding='utf-8')
+    return replacements
+
+
+def embed(root=ROOT):
+    """Kept for existing tools/tests: rebuild apps/jihunius/app.pyw from all sources."""
+    from build_app import build
+    build(root)
 
 
 if __name__ == '__main__': embed()

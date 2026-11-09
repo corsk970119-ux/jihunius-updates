@@ -49,13 +49,12 @@ for action,color in (('defect','#f3a3ac'),('rotate','#c1d5ee')):
   tiles[action+'_icon'+('_disabled' if disabled else '')]=encode(im.resize((16,16),Image.Resampling.LANCZOS))
 node=nodes['_TILE_DATA'];lines=s.splitlines(True);lines[node.lineno-1:node.end_lineno]=['_TILE_DATA = '+repr(tiles)+'\n'];P.write_text(''.join(lines),encoding='utf-8')
 # Switch dimensions and text hit area unchanged.
-p=R/'apps/jihunius/app.pyw';s=p.read_text(encoding='utf-8');t=ast.parse(s)
-node=next(n for n in t.body if isinstance(n,ast.Assign) and getattr(n.targets[0],'id','')=='MACHINE_ALERT_SWITCH_PNGS')
 switches={}
 for on in (False,True):
  im=Image.new('RGBA',(352,128));d=ImageDraw.Draw(im)
  d.rounded_rectangle((2,2,350,126),radius=62,fill='#203657' if on else '#263144',outline='#526782' if on else '#465c78',width=4)
  x=70 if on else 18;d.ellipse(((x-13)*4,3*4,(x+13)*4,29*4),fill='#a7c9ff' if on else '#a0aec3')
  switches[on]=encode(im.resize((88,32),Image.Resampling.LANCZOS))
-lines=s.splitlines(True);lines[node.lineno-1:node.end_lineno]=['MACHINE_ALERT_SWITCH_PNGS = '+repr(switches)+'\n'];p.write_text(''.join(lines),encoding='utf-8')
+# Switch PNGs live in assets/; tools/build_app.py embeds them into app.pyw.
+for on in (False,True):(R/'assets'/('alert_switch_on.png' if on else 'alert_switch_off.png')).write_bytes(base64.b64decode(switches[on]))
 print('Generated',len(tiles),'assets; no runtime rendering or dependency added')
