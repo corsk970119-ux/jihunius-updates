@@ -830,6 +830,12 @@ class DefectApp:
                               ("highlightThickness", 0), ("font", "{맑은 고딕} 10")):
             self.root.option_add("*TCombobox*Listbox." + option, value)
 
+        from visual_theme import install_companion_buttons
+        install_companion_buttons(self.root, self.style, (
+            ('App.TButton', 'secondary', Theme.TEXT),
+            ('Reset.App.TButton', 'danger', Theme.RESET_TEXT),
+        ))
+
     def _dark_titlebar(self):
         if os.name != "nt":
             return

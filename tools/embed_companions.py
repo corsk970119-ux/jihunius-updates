@@ -36,7 +36,14 @@ def companion_source(root, key):
             module_source=(root/'src'/(name+'.py')).read_text(encoding='utf-8')
             adapter += "_m = _material_types.ModuleType("+repr(name)+")\n_material_sys.modules["+repr(name)+"] = _m\nexec(compile("+repr(module_source)+", "+repr('<'+name+'>')+", 'exec'), _m.__dict__)\n"
         adapter += "def main():\n    return _material_sys.modules['material_ui'].boot()\n"
-    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + '\n\n']
+    visual_support = ''
+    if key in ('protrusion', 'special-table'):
+        visual=(root/'src/visual_theme.py').read_text(encoding='utf-8')
+        visual_support=("\nimport types as _visual_types, sys as _visual_sys\n"
+                    "_visual_module = _visual_types.ModuleType('visual_theme')\n"
+                    "_visual_sys.modules['visual_theme'] = _visual_module\n"
+                    "exec(compile("+repr(visual)+", '<visual_theme>', 'exec'), _visual_module.__dict__)\n")
+    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + visual_support + '\n\n']
     result = ''.join(lines)
     compile(result, key, 'exec')
     return result.encode('utf-8')
@@ -62,6 +69,7 @@ def embed(root=ROOT):
         'SuiteCompanionManager': 'SuiteCompanionManager = _suite_load_support("jihunius_suite_companions", ' + repr(manager) + ').CompanionManager\n',
         'SuiteMaterialQuick': 'SuiteMaterialQuick = _suite_load_support("jihunius_material_quick", ' + repr((root/'src/material_quick.py').read_text(encoding='utf8')) + ')\n',
     }
+    replacements['SuiteVisualTheme']='SuiteVisualTheme = _suite_load_support("jihunius_visual_theme", '+repr((root/'src/visual_theme.py').read_text(encoding='utf-8'))+')\n'
     errors=(root/'src/error_history.py').read_text(encoding='utf-8')
     error_ui=(root/'src/error_history_ui.py').read_text(encoding='utf-8')
     combined=errors+'\nSYNC_SOURCE = '+repr(errors)+'\n'+error_ui

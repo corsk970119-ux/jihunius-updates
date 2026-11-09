@@ -1,5 +1,5 @@
 """Production package uses the managed updater and preserves the prior engines."""
-import ast,base64,hashlib,sys,tempfile,unittest,zlib
+import ast,base64,hashlib,re,sys,tempfile,unittest,zlib
 from pathlib import Path
 from unittest.mock import Mock,patch
 from types import SimpleNamespace
@@ -8,6 +8,25 @@ ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'releases/jihunius/2026.11.03.10'
 sys.path.insert(0,str(ROOT/'tools'))
 from embed_companions import companion_source
+
+
+class NormalizeColors(ast.NodeTransformer):
+ def visit_Constant(self,node):
+  if isinstance(node.value,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',node.value):
+   node.value='#COLOR'
+  return node
+
+
+class NormalizeCalendarColors(NormalizeColors):
+ def visit_ClassDef(self,node):
+  if node.name=='DatePicker':
+   for method in node.body:
+    if isinstance(method,ast.FunctionDef) and method.name=='draw':
+     for call in ast.walk(method):
+      if isinstance(call,ast.Call) and isinstance(call.func,ast.Attribute) and call.func.attr=='Button':
+       for kw in call.keywords:
+        if kw.arg=='fg':kw.value=ast.Constant(value='APPROVED_CALENDAR_FOREGROUND')
+  return self.generic_visit(node)
 
 
 def assignments(path):
@@ -41,6 +60,11 @@ class PrivatePackageTests(unittest.TestCase):
      tree.body=[n for n in tree.body if not (isinstance(n,ast.Assign)
         and isinstance(n.targets[0],ast.Name)
         and n.targets[0].id in {'DEFAULT_FOLDER','LEGACY_DEFAULT_FOLDER'})]
+     # Approved visual refresh changes only ttk styling and literal colors.
+     # Keep every search/ranking/matching function pinned to the prior release.
+     tree.body=[n for n in tree.body if not (isinstance(n,ast.FunctionDef)
+        and n.name=='configure_app_style')]
+     NormalizeCalendarColors().visit(tree)
      for node in tree.body:
       if isinstance(node,ast.ClassDef) and node.name=='App':
        node.body=[n for n in node.body if not (isinstance(n,ast.FunctionDef) and n.name=='load_settings')]
@@ -50,11 +74,20 @@ class PrivatePackageTests(unittest.TestCase):
   # still match the last release after removing only the new diagnostic calls.
   previous=assignments(ROOT/'releases/jihunius/2026.11.04.2/app.pyw')['SUITE_COMPANIONS']['wash-log']
   old=zlib.decompress(base64.b64decode(previous['compressed'])).decode()
-  class StripDiagnostics(ast.NodeTransformer):
+  class StripDiagnostics(NormalizeColors):
    def visit_Expr(self,node):
     if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=='_diagnostic_error':return None
     return self.generic_visit(node)
-  old_defs={n.name:ast.dump(n,include_attributes=False) for n in ast.parse(old).body if isinstance(n,(ast.ClassDef,ast.FunctionDef))}
+   def visit_ClassDef(self,node):
+    if node.name=='RoundedButton':
+     for method in node.body:
+      if isinstance(method,ast.FunctionDef) and method.name=='draw':
+       for call in ast.walk(method):
+        if isinstance(call,ast.Call) and isinstance(call.func,ast.Attribute) and call.func.attr=='create_polygon':
+         for kw in call.keywords:
+          if kw.arg=='outline':kw.value=ast.Constant(value='APPROVED_BUTTON_OUTLINE')
+    return self.generic_visit(node)
+  old_defs={n.name:ast.dump(StripDiagnostics().visit(n),include_attributes=False) for n in ast.parse(old).body if isinstance(n,(ast.ClassDef,ast.FunctionDef))}
   for n in ast.parse((ROOT/'src/wash_log.py').read_text()).body:
    if isinstance(n,(ast.ClassDef,ast.FunctionDef)) and n.name!='_diagnostic_error':
     self.assertEqual(ast.dump(StripDiagnostics().visit(n),include_attributes=False),old_defs[n.name],n.name)

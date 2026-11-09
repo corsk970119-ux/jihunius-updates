@@ -1192,7 +1192,7 @@ def make_rounded_button(tk, parent, **options):
                 if disabled:
                     front=self.winfo_rgb(fill);back=self.winfo_rgb(self._round_surface)
                     fill='#'+''.join('{:02x}'.format(round((a*.64+b*.36)/257)) for a,b in zip(front,back))
-                border='#85b4ff' if self._round_focus and not disabled else None
+                border='#85b4ff' if self._round_focus and not disabled else PALETTE['line']
                 signature=(w,h,fill,border)
                 if signature==self._round_signature:return
                 self._round_signature=signature
