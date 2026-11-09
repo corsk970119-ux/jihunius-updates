@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Files created when the app is run from the repository on Linux/macOS
+.app.pyw.update.lock
+*\\*

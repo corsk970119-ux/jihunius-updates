@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>A-1 머신9 아래로</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.a-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border-radius:8px;border:1px solid #2c3240;background:#1d212b;color:#d7dce4;font:500 13px 'Noto Sans KR',sans-serif;box-sizing:border-box;cursor:pointer}
+.a-btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.a-btn.danger{background:transparent;border-color:#5b2a31;color:#f2a3ab}
+.a-card{background:#171a21;border:1px solid #262b36;border-radius:12px;box-sizing:border-box}
+.a-label{font:600 12px 'Noto Sans KR',sans-serif;color:#9aa3b2;letter-spacing:.02em}
+.a-h{font:600 14px 'Noto Sans KR',sans-serif;color:#eef1f6;margin:0}
+.a-input{height:34px;border-radius:8px;border:1px solid #2c3240;background:#0f1115;color:#eef1f6;padding:0 12px;font:500 14px 'Noto Sans KR',sans-serif;box-sizing:border-box}
+.a-mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+</style>
+</helmet>
+<div style="width:1120px;height:920px;box-sizing:border-box;padding:18px 20px;background:#0f1115;font-family:'Noto Sans KR',sans-serif;color:#d7dce4;display:flex;flex-direction:column;gap:12px">
+
+  <div style="display:flex;align-items:center;gap:14px;height:44px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:32px;height:32px;border-radius:9px;background:#3b82f6;display:flex;align-items:center;justify-content:center;color:#ffffff;font:700 15px 'Noto Sans KR',sans-serif">J</div>
+      <div style="font:700 20px 'Noto Sans KR',sans-serif;color:#f5f7fa;letter-spacing:-.01em">지후니우스</div>
+    </div>
+    <div style="width:1px;height:22px;background:#2c3240"></div>
+    <div style="display:flex;gap:8px">
+      <sc-for list="{{popups}}" as="p" hint-placeholder-count="4">
+        <button class="a-btn" type="button">{{p}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7d8696" stroke-width="2" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;height:38px">
+    <div style="display:flex;gap:4px;padding:3px;background:#171a21;border:1px solid #262b36;border-radius:10px">
+      <button type="button" style="height:30px;padding:0 16px;border:0;border-radius:7px;background:#2a3140;color:#ffffff;font:600 13px 'Noto Sans KR',sans-serif">지후니우스</button>
+      <button type="button" style="height:30px;padding:0 16px;border:0;border-radius:7px;background:transparent;color:#9aa3b2;font:500 13px 'Noto Sans KR',sans-serif">STL 찾기</button>
+      <button type="button" style="height:30px;padding:0 16px;border:0;border-radius:7px;background:transparent;color:#9aa3b2;font:500 13px 'Noto Sans KR',sans-serif">세척완료</button>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center">
+      <button class="a-btn" type="button">인수인계 <span style="background:#f5b942;color:#1a1300;border-radius:999px;padding:0 7px;font:700 11px 'Noto Sans KR',sans-serif;line-height:18px">2</span></button>
+    </div>
+    <button class="a-btn" type="button" style="border-color:#6b5320;color:#f5c766;background:#231d10"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f5c766" stroke-width="2" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"></path><path d="M12 10v4M12 17v.5"></path></svg>오류 기록 2</button>
+    <button class="a-btn" type="button">업데이트</button>
+    <div style="height:34px;min-width:150px;padding:0 14px;border-radius:8px;background:#171a21;border:1px solid #262b36;display:flex;align-items:center;gap:8px;box-sizing:border-box"><span style="width:8px;height:8px;border-radius:50%;background:#4ade80"></span><span style="font:500 13px 'Noto Sans KR',sans-serif;color:#d7dce4">대기 중</span></div>
+  </div>
+
+  <div class="a-card" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <span class="a-label" style="width:72px">작업 모드</span>
+      <div style="flex:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:3px;background:#0f1115;border:1px solid #262b36;border-radius:10px">
+        <button type="button" style="height:32px;border:0;border-radius:7px;background:transparent;color:#9aa3b2;font:500 13px 'Noto Sans KR',sans-serif">파일만 가져오기</button>
+        <button type="button" style="height:32px;border:0;border-radius:7px;background:transparent;color:#9aa3b2;font:500 13px 'Noto Sans KR',sans-serif">리스트만 만들기</button>
+        <button type="button" style="height:32px;border:1px solid #3b82f6;border-radius:7px;background:#1b2c4a;color:#ffffff;font:600 13px 'Noto Sans KR',sans-serif">파일 + 리스트 만들기</button>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px">
+      <span class="a-label" style="width:72px">리스트 파일</span>
+      <div style="display:flex;gap:4px;padding:3px;background:#0f1115;border:1px solid #262b36;border-radius:10px">
+        <button type="button" class="a-mono" style="height:28px;padding:0 12px;border:0;border-radius:7px;background:#2a3140;color:#ffffff;font-size:13px">O3999</button>
+        <button type="button" class="a-mono" style="height:28px;padding:0 12px;border:0;border-radius:7px;background:transparent;color:#9aa3b2;font-size:13px">O3998</button>
+      </div>
+      <label class="a-label" for="a-year" style="margin-left:12px">연도</label>
+      <input id="a-year" class="a-input a-mono" value="2026" style="width:84px">
+      <label class="a-label" for="a-date">날짜 폴더</label>
+      <input id="a-date" class="a-input a-mono" value="11.09" style="width:110px;border-color:#3b82f6">
+      <button class="a-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa3b2" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>경로설정</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:262px 262px minmax(0,1fr);gap:12px;height:336px">
+    <div class="a-card" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between"><h2 class="a-h">드라이브 정리</h2><span class="a-mono" style="font-size:12px;color:#4ade80">F:\ 연결됨</span></div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"><button class="a-btn" type="button">추가</button><button class="a-btn" type="button">새로고침</button></div>
+      <div style="flex:1;background:#0f1115;border:1px solid #262b36;border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;overflow:hidden">
+        <sc-for list="{{files}}" as="f" hint-placeholder-count="5">
+          <div class="a-mono" style="padding:6px 8px;border-radius:6px;font-size:12.5px;color:#cfd5de">{{f}}</div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:8px"><button class="a-btn danger" type="button" style="flex:1">F: 드라이브 비우기</button><button class="a-btn danger" type="button">삭제</button></div>
+    </div>
+
+    <div class="a-card" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between"><h2 class="a-h">프로그램 번호</h2><span style="font-size:12px;color:#9aa3b2">4개</span></div>
+      <div class="a-mono" style="flex:1;background:#0f1115;border:1px solid #262b36;border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.75;color:#eef1f6;white-space:pre-line">1452
+1462
+6001
+6002</div>
+      <button class="a-btn primary" type="button" style="height:40px;font-weight:600">파일 + 리스트 만들기</button>
+    </div>
+
+    <div class="a-card" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between"><h2 class="a-h">작업 기록</h2><span style="font-size:12px;color:#9aa3b2">최근 100줄</span></div>
+      <div style="flex:1;background:#0f1115;border:1px solid #262b36;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;overflow:hidden">
+        <sc-for list="{{log}}" as="l" hint-placeholder-count="6">
+          <div style="display:flex;gap:10px;font-size:12.5px;line-height:1.5"><span class="a-mono" style="color:#6b7484;flex:none">{{l.t}}</span><span style="color:{{l.c}}">{{l.m}}</span></div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <div class="a-card" style="padding:14px 16px;display:flex;align-items:center;gap:20px">
+    <div style="display:flex;flex-direction:column;gap:8px;width:640px">
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px">
+        <sc-for list="{{top}}" as="m" hint-placeholder-count="4">
+          <div style="height:44px;border-radius:9px;background:{{m.bg}};color:{{m.fg}};display:flex;align-items:center;justify-content:space-between;padding:0 12px;box-sizing:border-box"><span style="font:600 12px 'Noto Sans KR',sans-serif">{{m.name}}</span><span class="a-mono" style="font-size:14px">{{m.prog}}</span></div>
+        </sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px">
+        <sc-for list="{{bottom}}" as="m" hint-placeholder-count="5">
+          <div style="height:44px;border-radius:9px;background:{{m.bg}};color:{{m.fg}};display:flex;align-items:center;justify-content:space-between;padding:0 12px;box-sizing:border-box"><span style="font:600 12px 'Noto Sans KR',sans-serif">{{m.name}}</span><span class="a-mono" style="font-size:14px">{{m.prog}}</span></div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font:600 13px 'Noto Sans KR',sans-serif;color:#eef1f6">머신 알림</span><span style="font-size:12px;color:#9aa3b2">9대 선택</span></div>
+      <div role="img" aria-label="알림 켜짐" style="width:48px;height:26px;border-radius:999px;background:#3b82f6;position:relative"><span style="position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#ffffff"></span></div>
+      <button class="a-btn" type="button">알림 설정</button>
+    </div>
+  </div>
+
+  <div class="a-card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <h2 class="a-h">소재 사용량 조사</h2>
+    <div style="display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:8px">
+      <sc-for list="{{units}}" as="u" hint-placeholder-count="9">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="text-align:center;font:600 12px 'Noto Sans KR',sans-serif;color:#9aa3b2">{{u}}</div>
+          <button class="a-btn" type="button" style="height:32px;padding:0 6px;font-size:12px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f5c766" stroke-width="2" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"></path><path d="M12 10v4M12 17v.5"></path></svg>불량</button>
+          <button class="a-btn" type="button" style="height:32px;padding:0 6px;font-size:12px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"></path></svg>소재교체</button>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1120,"height":920}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const colors = { RUN: ['#22c55e', '#06210f'], ALARM: ['#ef4444', '#ffffff'], WAIT: ['#facc15', '#2a2200'], OFF: ['#2a303c', '#c5ccd6'] };
+    const words = { RUN: '가동', ALARM: '알람', WAIT: '대기', OFF: '꺼짐' };
+    const mk = ([n, s, p]) => ({ name: '머신' + n, prog: p, state: words[s], bg: colors[s][0], fg: colors[s][1] });
+    const top = [[1,'RUN','6001'],[3,'RUN','1452'],[5,'ALARM','1462'],[7,'WAIT','6002']].map(mk);
+    const bottom = [[2,'RUN','6001'],[4,'RUN','6003'],[6,'OFF','—'],[8,'RUN','1452'],[9,'OFF','—']].map(mk);
+    return {
+      popups: ['세척일보', '돌출량', '특수 돌출량', '소재 사용량 조사 Beta'],
+      files: ['O1452', 'O1462', 'O3999', 'O6001', '수정10.30.py'],
+      log: [
+        { t: '09:12', m: '파일 + 리스트 만들기 시작 · 11.09', c: '#cfd5de' },
+        { t: '09:12', m: '4개 가져옴 · 수정10.30 적용 4개', c: '#cfd5de' },
+        { t: '09:12', m: 'O3999 리스트 저장 완료', c: '#4ade80' },
+        { t: '09:30', m: 'O1462 → 제목과 파이가 다름 확인 필요', c: '#f5c766' },
+        { t: '10:05', m: '드라이브 새로고침 · 파일 5개', c: '#cfd5de' }
+      ],
+      top, bottom,
+      units: ['1호기','2호기','3호기','4호기','5호기','6호기','7호기','8호기','9호기']
+    };
+  }
+}
+</script>
+</body>
+</html>

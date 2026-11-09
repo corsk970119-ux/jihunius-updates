@@ -67,21 +67,21 @@ def _diagnostic_error(message,stage):
 
 
 class Theme:
-    BACKGROUND = "#0f0f0f"
-    SURFACE = "#181a1e"
-    CELL = "#191c20"
-    CELL_ALT = "#1d2025"
-    PRODUCT = "#22262c"
-    HEADER = "#242d38"
-    LINE = "#343b45"
-    TEXT = "#e1e5eb"
-    MUTED = "#9ba5b4"
+    BACKGROUND = "#101216"
+    SURFACE = "#16191e"
+    CELL = "#0c0e11"
+    CELL_ALT = "#181c21"
+    PRODUCT = "#1e232a"
+    HEADER = "#232830"
+    LINE = "#323944"
+    TEXT = "#dedfe0"
+    MUTED = "#a0a2a5"
     ACCENT = "#a4c9f5"
-    FOCUS = "#2a3a4e"
-    MARK = "#263c53"
-    MARK_HOVER = "#304c69"
-    EMPTY = "#141619"
-    DISABLED = "#5e6876"
+    FOCUS = "#282e37"
+    MARK = "#282e38"
+    MARK_HOVER = "#333b47"
+    EMPTY = "#121418"
+    DISABLED = "#475262"
     RESET_BG = "#30252b"
     RESET_HOVER = "#493039"
     RESET_TEXT = "#dfadb5"
@@ -776,12 +776,12 @@ class DefectApp:
 
             rectangle("#1e4f7a", 2, 4, 30, 28)
             rectangle("#ffffff", 4, 6, 28, 26)
-            rectangle("#377fbd", 4, 6, 28, 12)
+            rectangle("#6c7381", 4, 6, 28, 12)
             rectangle("#e4eff8", 4, 12, 12, 26)
             for x in (12, 20):
-                rectangle("#8aa7be", x, 12, x + 2, 26)
+                rectangle("#9b9ea3", x, 12, x + 2, 26)
             for y in (12, 16, 22):
-                rectangle("#8aa7be", 4, y, 28, y + 2)
+                rectangle("#9b9ea3", 4, y, 28, y + 2)
             self._window_icons.append(icon)
         self.root.iconphoto(True, *self._window_icons)
 

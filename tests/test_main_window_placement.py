@@ -21,6 +21,9 @@ class MainWindowPlacementTests(unittest.TestCase):
   self.stack.enter_context(patch.object(self.m,'SuiteCompanionManager',side_effect=children))
  def launch(self):
   root=tk.Tk();app=self.m.IntegrationApp(root);self.apps.append(app);root.update();return app
+ def require_height(self,app,height):
+  # Font metrics differ between machines; the restore check needs a size above the content minimum.
+  if app.minimum_height>height:self.skipTest('this font set needs {}px > {}px under test'.format(app.minimum_height,height))
  def geometry(self,app):
   r=app.window;return (r.winfo_width(),r.winfo_height(),r.winfo_x(),r.winfo_y())
  def close_app(self,app):
@@ -33,7 +36,7 @@ class MainWindowPlacementTests(unittest.TestCase):
    if not app._suite_stopped:self.close_app(app)
   self.apps.clear();self.m=None;gc.collect()
  def test_main_window_restores_last_size_and_right_monitor_position_after_full_exit(self):
-  app=self.launch();app.window.geometry('1230x920+2180+120');app.window.update()
+  app=self.launch();self.require_height(app,920);app.window.geometry('1230x920+2180+120');app.window.update()
   self.assertEqual(self.geometry(app),(1230,920,2180,120))
   self.close_app(app)
   next_app=self.launch()
@@ -41,7 +44,7 @@ class MainWindowPlacementTests(unittest.TestCase):
   self.assertEqual(next_app._window_state.path.name,'jihunius.json')
   self.assertEqual(next_app.material_button.cget('text'),'소재 사용량 조사(Beta)')
  def test_tray_flush_and_later_resize_are_preserved_without_sharing_pc_preferences(self):
-  app=self.launch();app.window.geometry('1180x900+2100+95');app.window.update()
+  app=self.launch();self.require_height(app,900);app.window.geometry('1180x900+2100+95');app.window.update()
   app._hide_to_tray()
   path=Path(self.tmp.name)/'JihuniusSuite/window-state/jihunius.json'
   self.assertTrue(path.exists(),'Hiding must flush normal bounds before losing visible state')

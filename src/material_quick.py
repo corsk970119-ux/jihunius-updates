@@ -138,9 +138,25 @@ class QuickBridge:
                     at=state['at'] if state else 0)
 
 class QuickPanel:
-    def __init__(self,app,parent):
+    def __init__(self,app,parent,cells=None,header=None):
         self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={};self.confirming=False
         tk,ttk=app.tk,app.ttk
+        if cells is not None:
+            # 설비 보드형: 호기별 머신 칸 아래 자리에 같은 명령의 버튼만 배치합니다.
+            self.frame=parent;self.message=tk.StringVar(value='')
+            self.caption=ttk.Label(header,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9))
+            self.caption.pack(side='left',padx=(14,0))
+            for name in ('Danger','Secondary'):
+                app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,6),font=('맑은 고딕',10,'bold'))
+            for n in range(1,10):
+                cell=cells[n];cell.columnconfigure((0,1),weight=1,uniform='material-quick-'+str(n))
+                defect=ttk.Button(cell,text='불량',style='QuickMaterial.Danger.TButton',width=4,
+                    command=lambda machine=n:self.submit('defect',machine));defect.grid(row=0,column=0,sticky='ew',padx=(0,3))
+                rotate=ttk.Button(cell,text='소재교체',style='QuickMaterial.Secondary.TButton',width=4,
+                    command=lambda machine=n:self.submit('rotate',machine));rotate.grid(row=0,column=1,sticky='ew',padx=(3,0))
+                defect.configure(state='disabled');rotate.configure(state='disabled')
+                self.rows[n]=dict(cell=cell,name=None,defect=defect,rotate=rotate)
+            return
         self.frame=ttk.Frame(parent,style='RoundedCard.TFrame',padding=(14,10))
         title=ttk.Frame(self.frame,style='Card.TFrame',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky='ew',pady=(0,6))
         ttk.Label(title,text='소재 사용량 조사',style='Section.TLabel').pack(side='left')
@@ -165,7 +181,7 @@ class QuickPanel:
         for widgets in self.rows.values():
             for action in ('defect','rotate'):
                 widgets[action].configure(image=(images[action+'_icon'],
-                    'disabled',images[action+'_icon_disabled']),compound='left',width=6)
+                    'disabled',images[action+'_icon_disabled']),compound='left',width=4 if widgets['name'] is None else 6)
 
     def connect(self,manager):
         folder=Path(os.environ.get('LOCALAPPDATA') or str(Path.home()/'.local'/'share'))/'MaterialCounter'
@@ -210,5 +226,5 @@ class QuickPanel:
                     widgets[action].configure(state='normal' if available and not busy and row.get('can_'+action,False) else 'disabled')
         if time.monotonic()>self.message_until:
             text='저장 확인 대기 {}건'.format(len(pending)) if pending else ''
-            self.message.set(text);self.caption.configure(foreground='#91a5bf')
+            self.message.set(text);self.caption.configure(foreground='#9fa2a7')
     def has_pending(self):return bool(self.channel and self.channel.pending)
