@@ -82,7 +82,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 
 ### 자동 테스트
 
-`main`과 작업 브랜치에 올리면 GitHub Actions(`.github/workflows/tests.yml`)가 Linux(Xvfb)에서 전체 테스트를 실행하고, Windows에서도 참고용으로 실행합니다. 화면 배치 검사 일부는 글꼴에 따라 결과가 달라질 수 있어 Windows 결과는 참고용입니다.
+`main`과 작업 브랜치에 올리면 GitHub Actions(`.github/workflows/tests.yml`)가 Linux(Xvfb)에서 빌드 일치·Python 3.8 문법·전체 테스트를 실행합니다. 기존 테스트는 Linux 기준으로 작성되어 Windows에서는 일부가 실패·정지하므로, Windows 실행은 Actions 화면의 **Run workflow**로만 참고용으로 돌립니다.
 
 ## 검증 범위
 

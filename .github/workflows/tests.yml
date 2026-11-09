@@ -34,10 +34,13 @@ jobs:
         run: xvfb-run -a -s "-screen 0 3840x1200x24" python -m unittest discover -s tests -p 'test_*.py'
 
   windows:
-    # Reference run on real Windows Tk/fonts. Never blocks; read the log for layout differences.
+    # Manual reference run only (Actions → tests → Run workflow). The existing suite was
+    # written for Linux/Xvfb: on Windows several tests error and one hangs, so this job is
+    # not run on every push until those tests are made Windows-compatible.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     continue-on-error: true
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
