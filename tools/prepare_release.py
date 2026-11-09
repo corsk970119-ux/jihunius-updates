@@ -14,7 +14,7 @@ def prepare(root,version,notes):
     parts=tuple(map(int,version.split('.')));date(*parts[:3])
     source_path=root/'apps/jihunius/app.pyw';source=source_path.read_text(encoding='utf-8')
     lines=source.splitlines(keepends=True);edits=[]
-    helper=(root/'src/update_engine.py').read_text(encoding='utf-8')+'\n'+(root/'src/update_ui.py').read_text(encoding='utf-8')
+    helper='\n'.join((root/'src'/name).read_text(encoding='utf-8') for name in ('update_engine.py','update_origin.py','update_ui.py'))
     for node in ast.parse(source).body:
         if isinstance(node,ast.Assign) and isinstance(node.targets[0],ast.Name):
             name=node.targets[0].id

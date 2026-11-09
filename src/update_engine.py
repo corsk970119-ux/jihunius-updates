@@ -1,4 +1,5 @@
 """Public GitHub update transport and local Python version selection. Python 3.8+."""
+import ast
 import ctypes
 from datetime import date
 import hashlib
@@ -151,6 +152,21 @@ def check_offer(current,fetch=public_fetch,rejected_sha=None):
     if offered['sha256']==rejected_sha:return {'kind':'rejected','offered':offered}
     return {'kind':'available','offered':offered}
 
+def embedded_version(data, fallback):
+    """A shared origin may change after the launcher was loaded by Python."""
+    values=[]
+    try:
+        for node in ast.parse(data).body:
+            if (isinstance(node,ast.Assign) and len(node.targets)==1
+                    and isinstance(node.targets[0],ast.Name) and node.targets[0].id=='SUITE_APP_VERSION'):
+                values.append(ast.literal_eval(node.value))
+        if len(values)>1:raise ValueError('duplicate version')
+        result=values[0] if values else fallback
+        version(result)
+        return result
+    except (SyntaxError,ValueError,TypeError,UpdateError):
+        raise UpdateError('실행 파일에 기록된 버전을 확인하지 못했습니다.') from None
+
 class Store:
     def __init__(self,root,origin,base_version):
         self.root=Path(root);self.origin=Path(origin).resolve();self.base_version=base_version
@@ -167,6 +183,7 @@ class Store:
         except (OSError,ValueError,TypeError,KeyError,UpdateError):return None
     def prepare(self):
         data=self.origin.read_bytes()
+        self.base_version=embedded_version(data,self.base_version)
         base=descriptor({'version':self.base_version,'path':'releases/jihunius/{}/app.pyw'.format(self.base_version),
                          'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'min_python':[3,8],'update_protocol':1})
         verify(data,base)
@@ -240,7 +257,7 @@ def focus_process(pid):
     if not found:return False
     u.ShowWindow(found[0],9);u.SetForegroundWindow(found[0]);return True
 
-def managed_context():
+def managed_context(app_version=None):
     if os.environ.get('JIHUNIUS_UPDATE_CHILD')!='1':return None
     origin=os.environ.get('JIHUNIUS_UPDATE_ORIGIN','');nonce=os.environ.get('JIHUNIUS_UPDATE_NONCE','')
     if not origin or not re.fullmatch(r'[0-9a-f]{32}',nonce):return None
@@ -248,6 +265,24 @@ def managed_context():
     if session.get('nonce')!=nonce or session.get('pid') not in (None,os.getpid()):return None
     value=descriptor(session.get('current'))
     if Path(sys.argv[0]).resolve()!=root/'versions'/value['sha256']/'app.pyw':return None
+    if app_version is not None and app_version!=value['version']:
+        # Old installed launchers could pair freshly replaced shared bytes with
+        # their already-loaded version constant. Correct metadata only for these
+        # exact verified bytes, before the UI announces a version or copies origin.
+        data=Path(sys.argv[0]).read_bytes();verify(data,value)
+        if embedded_version(data,None)!=app_version:raise UpdateError('실행 중인 버전 정보를 확인하지 못했습니다.')
+        state=read_json(root/'state.json')
+        if state.get('current',{}).get('sha256')!=value['sha256']:
+            raise UpdateError('적용 버전이 변경됐습니다. 프로그램을 다시 실행해 주세요.')
+        corrected=dict(value,version=app_version,path='releases/jihunius/'+app_version+'/app.pyw')
+        descriptor(corrected)
+        for key in ('current','base','previous'):
+            if isinstance(state.get(key),dict) and state[key].get('sha256')==value['sha256']:
+                state[key]=dict(state[key],version=app_version,path=corrected['path'])
+        write_json(root/'state.json',state)
+        session['current']=corrected
+        if isinstance(state.get('base'),dict):session['base_version']=state['base']['version']
+        write_json(root/'session.json',session);value=corrected
     return {'origin':origin,'nonce':nonce,'root':root,'current':value,'base_version':session['base_version'],
             'supervisor_pid':session.get('supervisor_pid')}
 
@@ -310,7 +345,7 @@ def launch(origin,base_version,argv=None,icon_bytes=None):
         current=store.prepare()
         while True:
             nonce=uuid.uuid4().hex
-            session={'nonce':nonce,'current':current,'base_version':base_version,'supervisor_pid':os.getpid()}
+            session={'nonce':nonce,'current':current,'base_version':store.base_version,'supervisor_pid':os.getpid()}
             write_json(store.root/'session.json',session)
             try:(store.root/'ready.json').unlink()
             except FileNotFoundError:pass

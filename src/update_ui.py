@@ -40,6 +40,7 @@ class Controller:
         self.last_check_completed=None;self.last_check_succeeded=None
         self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None;self.check_timer=None
         self.save_timer=None
+        self.origin_checked=False;self.origin_result=None
         self._download_apply=False
         self.message='시작할 때와 실행 중 1분마다 새 버전을 자동 확인합니다.'
         if self.current is None:
@@ -116,11 +117,19 @@ class Controller:
     def check(self,force=False):
         if self.closed or self.busy or self.applying or self.current is None:return False
         if not force and self.last_check is not None and time.monotonic()-self.last_check<AUTO_CHECK_SECONDS:return False
+        if force:self.origin_checked=False
         self.last_check=time.monotonic();self.message='새 버전을 확인하고 있습니다…'
         if not self.offered:self.label.set('업데이트 확인 중')
         started=self.task('check',lambda:check_offer(self.current,rejected_sha=self.store.state().get('rejected_sha')))
         if started:self.schedule_check()
         return started
+
+    def sync_origin(self):
+        action=globals().get('sync_origin_bounded')
+        if self.origin_checked or self.current is None or self.context is None or not callable(action):return
+        if self.closed or self.busy or self.applying:return
+        self.origin_checked=True
+        self.task('origin',lambda:action(self.context))
 
     def poll(self):
         self.timer=None
@@ -145,6 +154,9 @@ class Controller:
                 self.message='시작에 실패해 복구한 버전입니다. 수정된 새 배포를 기다립니다.'
             else:
                 self.offered=None;self.label.set('업데이트');self.message='현재 사용할 수 있는 최신 버전입니다.'
+        elif kind=='origin':
+            self.origin_result=value
+            if not self.offered:self.label.set('업데이트')
         elif kind=='download':
             self.staged=value;self.message='새 버전 검증을 마쳤습니다.'
             resume=self._download_apply;self._download_apply=False
@@ -152,6 +164,7 @@ class Controller:
             if resume:self.apply()
             return
         self.refresh()
+        if kind=='check':self.sync_origin()
 
     def open(self):
         if self.closed:return
@@ -189,8 +202,10 @@ class Controller:
 
     def refresh(self):
         if self.closed:return
-        self.button.configure(style='HandoverNotice.TButton' if self.offered else 'Popup.TButton')
+        origin_pending=self.origin_result is not None and self.origin_result.get('kind') in ('failed','busy','newer')
+        self.button.configure(style='HandoverNotice.TButton' if self.offered or origin_pending else 'Popup.TButton')
         if self.offered:self.label.set('새 버전 있음')
+        elif origin_pending:self.label.set('원본 교체 확인')
         if self.dialog is None or not self.dialog.winfo_exists():return
         current=self.current['version'] if self.current else self.app_version
         if self.current is None:
@@ -204,7 +219,8 @@ class Controller:
         text=notes or ('변경 내용이 등록되지 않았습니다.' if self.offered else '새 버전이 있으면 변경 내용과 사용 안내가 여기에 표시됩니다.')
         if self.notes.get('1.0','end-1c')!=text:
             self.notes.configure(state='normal');self.notes.delete('1.0','end');self.notes.insert('1.0',text);self.notes.configure(state='disabled')
-        self.status.set(self.message)
+        origin_note=self.origin_result.get('message','') if self.origin_result else ''
+        self.status.set(self.message+('\n'+origin_note if origin_note else ''))
         self.check_button.configure(state='disabled' if self.busy or self.applying or self.current is None else 'normal')
         self.apply_button.configure(state='normal' if self.offered and not self.busy and not self.applying else 'disabled')
 
