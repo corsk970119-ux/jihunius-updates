@@ -595,6 +595,9 @@ class RoundedButton(tk.Canvas):
         fill=self.options['activebackground'] if self.hover else self.options['bg']
         points=[r,1,w-r,1,w-1,1,w-1,r,w-1,h-r,w-1,h-1,w-r,h-1,r,h-1,1,h-1,1,h-r,1,r,1,1]
         self.create_polygon(points,smooth=True,splinesteps=12,fill=fill,outline=BLUE if self.focus_get()==self else LINE)
+        if w>14 and h>8:
+            self.create_line(7,2,w-7,2,fill='#606974')
+            self.create_line(7,h-2,w-7,h-2,fill='#0c1015')
         self.create_text(w/2,h/2,text=self.options['text'],fill=self.options['activeforeground'] if self.hover else self.options['fg'],font=self.options['font'])
 
 class RoundedCard(tk.Frame):

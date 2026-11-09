@@ -160,6 +160,13 @@ class QuickPanel:
                 command=lambda machine=n:self.submit('rotate',machine));rotate.grid(row=2,column=0,sticky='ew')
             defect.configure(state='disabled');rotate.configure(state='disabled')
             self.rows[n]=dict(cell=cell,name=name,defect=defect,rotate=rotate)
+    def set_icons(self,images):
+        # Root-owned PNGs stay alive; native ttk retains disabled/invoke behavior.
+        for widgets in self.rows.values():
+            for action in ('defect','rotate'):
+                widgets[action].configure(image=(images[action+'_icon'],
+                    'disabled',images[action+'_icon_disabled']),compound='left',width=6)
+
     def connect(self,manager):
         folder=Path(os.environ.get('LOCALAPPDATA') or str(Path.home()/'.local'/'share'))/'MaterialCounter'
         try:self.channel=QuickChannel(manager,folder/'quick-inputs.json')

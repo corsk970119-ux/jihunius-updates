@@ -82,6 +82,13 @@ class PrivatePackageTests(unittest.TestCase):
     if node.name=='RoundedButton':
      for method in node.body:
       if isinstance(method,ast.FunctionDef) and method.name=='draw':
+       # Approved shallow bevel: strip only decorative lines, keep the full
+       # underlying polygon/text/focus code and all interactions pinned.
+       method.body=[statement for statement in method.body if not (
+        isinstance(statement,ast.If) and statement.body and all(
+         isinstance(item,ast.Expr) and isinstance(item.value,ast.Call)
+         and isinstance(item.value.func,ast.Attribute)
+         and item.value.func.attr=='create_line' for item in statement.body))]
        for call in ast.walk(method):
         if isinstance(call,ast.Call) and isinstance(call.func,ast.Attribute) and call.func.attr=='create_polygon':
          for kw in call.keywords:

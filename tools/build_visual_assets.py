@@ -1,4 +1,4 @@
-"""Build small flat ttk assets offline. Pillow is not used by the application."""
+"""Build shallow beveled ttk assets offline. No runtime Pillow dependency."""
 import ast,base64,io
 from pathlib import Path
 from PIL import Image,ImageDraw
@@ -9,28 +9,44 @@ nodes={n.targets[0].id:n for n in tree.body if isinstance(n,ast.Assign) and isin
 palettes=ast.literal_eval(nodes['_PALETTES'].value)
 def encode(image):
  o=io.BytesIO();image.save(o,format='PNG');return base64.b64encode(o.getvalue()).decode('ascii')
-def tile(fill,edge,focused=False,kind='button'):
+def tile(fill,edge,focused=False,kind='button',pressed=False,disabled=False):
  k=4;w,h=128,64;im=Image.new('RGBA',(w*k,h*k),'#111722' if kind in ('popup','popup_open','handover','handover_notice','tab','tab_selected','nav') else '#1b2433');d=ImageDraw.Draw(im)
- if kind in ('tab','tab_selected'):
-  d.rectangle((0,0,w*k,h*k),fill=fill)
-  if kind=='tab_selected':d.rectangle((6*k,(h-2)*k,(w-6)*k,h*k),fill='#85b4ff')
-  if focused:d.rectangle((1*k,1*k,(w-1)*k,(h-1)*k),outline='#85b4ff',width=k)
- elif kind=='nav':
+ if kind=='nav':
   d.rectangle((0,0,w*k,h*k),fill=fill)
  elif kind=='card':
   d.rectangle((0,0,w*k,h*k),fill=fill)
-  d.line((0,0,w*k,0),fill=edge,width=k)
+  d.rounded_rectangle((.5*k,.5*k,(w-.5)*k,(h-.5)*k),radius=6*k,outline=edge,width=k)
  else:
-  d.rounded_rectangle((.5*k,.5*k,(w-.5)*k,(h-.5)*k),radius=6*k,fill=fill,outline=edge,width=(2 if focused else 1)*k)
+  d.rounded_rectangle((.5*k,.5*k,(w-.5)*k,(h-.5)*k),radius=6*k,fill=fill,outline=edge,width=k)
+  if kind not in ('field','status'):
+   # Decoration lives within the 8px slicing border; center stays flat.
+   light,dark=('#3a485c','#182131') if disabled else ('#66768b','#101824')
+   if pressed:light,dark=dark,light
+   d.line((7*k,2*k,(w-7)*k,2*k),fill=light,width=k)
+   d.line((7*k,(h-2)*k,(w-7)*k,(h-2)*k),fill=dark,width=k)
+  if focused:d.rounded_rectangle((1*k,1*k,(w-1)*k,(h-1)*k),radius=6*k,outline='#85b4ff',width=2*k)
  return encode(im.resize((w,h),Image.Resampling.LANCZOS))
 tiles={}
 for name,(fill,edge,active,pressed) in palettes.items():
  for state,c,b,focus in [('normal',fill,edge,False),('active',active,edge,False),('pressed',pressed,edge,False),('disabled','#202b3b','#334157',False),('focus',fill,'#85b4ff',True),('focus_active',active,'#85b4ff',True)]:
-  tiles[name+'_'+state]=tile(c,b,focus,kind=name)
-tiles.update(field_normal=tile('#131c2b','#36455e'),field_disabled=tile('#202b3b','#334157'),field_focus=tile('#131c2b','#85b4ff',True),card=tile('#1b2433','#36455e',kind='card'),nav=tile('#111722','#111722',kind='nav'),status=tile('#2b3b52','#2b3b52'))
+  tiles[name+'_'+state]=tile(c,b,focus,kind=name,pressed=state=='pressed',disabled=state=='disabled')
+tiles.update(field_normal=tile('#131c2b','#36455e',kind='field'),field_disabled=tile('#202b3b','#334157',kind='field'),field_focus=tile('#131c2b','#85b4ff',True,kind='field'),card=tile('#1b2433','#36455e',kind='card'),nav=tile('#111722','#111722',kind='nav'),status=tile('#2b3b52','#2b3b52',kind='status'))
 im=Image.new('RGBA',(56,56));d=ImageDraw.Draw(im)
 d.rounded_rectangle((19,3,51,35),radius=5,outline='#a4b6cc',width=4);d.rounded_rectangle((4,18,36,50),radius=5,outline='#a4b6cc',width=4)
 tiles['popup_icon']=encode(im.resize((14,14),Image.Resampling.LANCZOS))
+for action,color in (('defect','#f3a3ac'),('rotate','#c1d5ee')):
+ for disabled in (False,True):
+  color_now='#8190a5' if disabled else color
+  im=Image.new('RGBA',(64,64));d=ImageDraw.Draw(im)
+  if action=='defect':
+   d.line([(32,7),(58,54),(6,54),(32,7)],fill=color_now,width=6,joint='curve')
+   d.line((32,24,32,36),fill=color_now,width=6);d.ellipse((29,42,35,48),fill=color_now)
+  else:
+   d.arc((10,10,54,54),205,360,fill=color_now,width=6)
+   d.arc((10,10,54,54),25,180,fill=color_now,width=6)
+   d.polygon([(54,16),(54,35),(38,28)],fill=color_now)
+   d.polygon([(10,48),(10,29),(26,36)],fill=color_now)
+  tiles[action+'_icon'+('_disabled' if disabled else '')]=encode(im.resize((16,16),Image.Resampling.LANCZOS))
 node=nodes['_TILE_DATA'];lines=s.splitlines(True);lines[node.lineno-1:node.end_lineno]=['_TILE_DATA = '+repr(tiles)+'\n'];P.write_text(''.join(lines),encoding='utf-8')
 # Switch dimensions and text hit area unchanged.
 p=R/'apps/jihunius/app.pyw';s=p.read_text(encoding='utf-8');t=ast.parse(s)

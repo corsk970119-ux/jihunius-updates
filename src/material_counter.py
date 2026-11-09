@@ -1064,7 +1064,7 @@ class DatabaseJobs:
                 if db is not None:db.close()
 
 
-def rounded_image(tk, owner, width, height, radius, fill, border=None, border_width=1):
+def rounded_image(tk, owner, width, height, radius, fill, border=None, border_width=1, raised=False):
     """Antialiased transparent round rectangle, cached per Tk interpreter (no Pillow)."""
     import base64
     from collections import OrderedDict
@@ -1077,7 +1077,7 @@ def rounded_image(tk, owner, width, height, radius, fill, border=None, border_wi
     border_width=max(0.0,min(float(border_width),width/2,height/2)) if border else 0.0
     def rgb(value):return tuple(c//257 for c in owner.winfo_rgb(value))
     color=rgb(fill);edge=rgb(border) if border else color
-    key=(width,height,radius,color,edge,border_width)
+    key=(width,height,radius,color,edge,border_width,raised)
     cache=getattr(root,'_rounded_image_cache',None)
     if cache is None:
         cache=OrderedDict();root._rounded_image_cache=cache
@@ -1100,7 +1100,8 @@ def rounded_image(tk, owner, width, height, radius, fill, border=None, border_wi
         if not outer:return b'\0\0\0\0'
         if border_width:
             inner=min(outer,coverage(x,y,border_width))
-            pixels=tuple(round((color[i]*inner+edge[i]*(outer-inner))/outer) for i in range(3))
+            bevel=tuple(min(255,c+28) for c in edge) if raised and y<height/2 else (tuple(max(0,c-35) for c in edge) if raised else edge)
+            pixels=tuple(round((color[i]*inner+bevel[i]*(outer-inner))/outer) for i in range(3))
         else:pixels=color
         return bytes(pixels+(round(255*outer),))
     raw=bytearray()
@@ -1108,8 +1109,8 @@ def rounded_image(tk, owner, width, height, radius, fill, border=None, border_wi
     strip=min(width//2,edge_size)
     row_cache={}
     for y in range(height):
-        # Both vertical halves are symmetric as well.
-        reflected=min(y,height-1-y,edge_size)
+        # Beveled buttons distinguish top/bottom; panels retain symmetric rows.
+        reflected=(min(y,height-1-y,edge_size),raised and y>=height/2)
         if reflected not in row_cache:
             left=[pixel(x+.5,y+.5) for x in range(strip)]
             middle=pixel(width/2,y+.5)*(width-2*strip)
@@ -1196,7 +1197,7 @@ def make_rounded_button(tk, parent, **options):
                 signature=(w,h,fill,border)
                 if signature==self._round_signature:return
                 self._round_signature=signature
-                self._round_image=rounded_image(tk,self,w,h,10,fill,border=border,border_width=1.5)
+                self._round_image=rounded_image(tk,self,w,h,6,fill,border=border,border_width=1.5,raised=True)
                 tk.Button.configure(self,image=self._round_image)
 
             def configure(self,cnf=None,**kwargs):
