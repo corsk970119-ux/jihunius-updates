@@ -53,6 +53,7 @@ class Widget:
     def get(self, *args): self.check(); return self.text
     def curselection(self): self.check(); return tuple(sorted(self.selected))
     def yview(self): self.check(); return (.25, .75)
+    def xview(self): self.check(); return (0., 1.)
     def delete(self, *args): self.check(); self.items.clear(); self.selected.clear()
     def insert(self, where, *values): self.check(); self.items.extend(values)
     def selection_set(self, index): self.check(); self.selected.add(index)
@@ -60,6 +61,7 @@ class Widget:
     def activate(self, index): self.check()
     def see(self, index): self.check()
     def yview_moveto(self, value): self.check()
+    def xview_moveto(self, value): self.check()
 
 
 class Window:
