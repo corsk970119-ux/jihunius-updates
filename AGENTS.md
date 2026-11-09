@@ -1,5 +1,7 @@
 # 지후니우스 작업 규칙 (AI·사람 공통)
 
+**시작 전에 `docs/HANDOFF.md`(현재 상태·진행 중 작업·디자인 시안)를 먼저 읽는다.**
+
 - `apps/jihunius/app.pyw`, `dist/`, `releases/`는 **빌드 결과물**이다. 직접 고치지 말고 `src/`·`assets/`를 고친 뒤 `python tools/build_app.py`로 만든다. 구조는 README의 "소스 구조와 빌드" 참고.
 - 기존 기능은 **온전히** 유지한다. 속도 개선·디자인 변경도 기능 동작을 바꾸면 안 된다.
 - 배포 = `main`의 `channels/stable.json` 변경이다. 사용자가 "배포해줘"라고 할 때만 `tools/prepare_release.py`로 새 버전을 만들어 main에 올린다. 그 외 작업은 작업 브랜치에서 한다.

@@ -1,0 +1,72 @@
+# 인수인계 — Claude Code에서 이어서 작업하기
+
+최종 갱신: 2026-11-09 (Asia/Seoul). 이 문서와 `CLAUDE.md`를 먼저 읽고 시작한다.
+표기: **[사용자 승인]** 사용자가 직접 말한 것 / **[확인됨]** 실행해서 확인한 사실 / **[AI 판단]** 근거 있는 판단.
+
+## 1. 지금 상태
+
+- 정식 배포(main, `channels/stable.json`): **2026.11.09.8** — 회사 PC들이 받는 버전.
+- 작업 브랜치: **`claude/improvements-20261109`** — 검토용 **2026.11.09.9**. 배포 안 함 **[사용자 승인: 배포는 "배포해줘" 할 때만]**.
+- 사용자에게 전달한 검토 파일: `지후니우스_2026.11.09.9_검토용.pyw` (= 이 브랜치의 `apps/jihunius/app.pyw`).
+- 남은 GitHub 정리: 원격 브랜치 `claude/access-check-194911`(쓰기 권한 확인용, 내용 없음) 삭제 필요 — 프록시 제한으로 못 지움. `feature/…`, `fix/…` 브랜치는 이전 GPT 작업 흔적.
+
+## 2. 이번(.9)에 바꾼 것 [확인됨]
+
+1. **소스 분리**: 1.2MB `app.pyw` 안에만 있던 코드를 `src/host/`(메인, STL 찾기, MES/POP, 수정10.30, 트레이)와 `assets/`로 분리. `tools/build_app.py`가 다시 한 파일로 합침. 분리 직후 빌드가 .8과 **바이트 동일**함을 확인.
+2. **설비 조회 연결 유지**: `MonitorClient` — 호기별 HTTP 연결 재사용, 끊기면 새 연결로 1회 재시도, 시간 초과는 재시도 안 함. 소재 집계(`src/material_counter.py`)의 조회는 정확도 때문에 그대로 둠.
+3. **화면 밀림 수정**: 165% 배율에서 "F: 드라이브 비우기" 글자 길이 때문에 드라이브 칸이 3px 넓어지던 문제 → `reserve_empty_button_width()`.
+4. **테스트/CI**: `tests/test_build_app.py`, `tests/test_monitor_client.py` 추가. 창 위치 테스트 2개는 글꼴 때문에 최소 높이가 더 크면 skip. GitHub Actions Linux 통과. Windows 잡은 수동 실행만(기존 테스트가 Linux 기준이라 Windows에서 일부 실패·멈춤).
+5. 결과: 전체 372개 통과(2 skip), Xvfb에서 실제 실행해 시작 완료 확인. **회사 Windows PC 실사용 확인은 아직.**
+
+적용 안 한 것 [AI 판단]: 설비 조회와 소재 집계 조회 합치기(집계 정확도 위험), 시작 코드 캐시(효과 ≈0.08초), Drive 작업기록(사용자가 요청할 때만).
+
+## 3. 진행 중: 디자인 개편 (사용자 결정 대기)
+
+사용자 요구 [사용자 승인]:
+- 현재 미감이 마음에 안 듦. **현대적인 사내 프로그램** 느낌. "색감 문제가 아니라 느낌(구성) 자체"가 와닿지 않음.
+- 이전 피드백: 민트/차콜은 눈 아픔 → 원래 남색 계열 선호, **버튼은 경계가 보여야 함**, **머신 칸은 상태색으로 꽉 채움**, 불량·소재교체 **아이콘 필수**, 불량 버튼에 "+1" 글자 없음, **성능 저하 절대 금지**, 기능은 온전히 유지.
+
+시안 (HTML 목업, 실제 앱 아님): `docs/design/2026-11-09/`. 현재 화면 캡처: `current-2026.11.09.9.png`.
+
+| 파일 | 시안 | 핵심 |
+|---|---|---|
+| `Main.dc.html` | A 그래파이트 프로 | 1차 · 배치 유지, 무채색 다크 |
+| `Fluent.dc.html` | B 라이트 플루언트 | 1차 · 윈도우11 밝은 톤 |
+| `Navy.dc.html` | C 미드나잇 네이비 | 1차 · 알약형 버튼, 머신 1줄 |
+| `Industrial.dc.html` | D 인더스트리얼 라이트 | 1차 · 각진 산업용 |
+| `TwoTone.dc.html` | E 투톤 콘솔 | 1차 · 어두운 상단 + 밝은 본문 |
+| `Sidebar.dc.html` | F 사이드 메뉴형 | 2차 · 왼쪽 세로 메뉴 |
+| `Board.dc.html` | G 설비 보드 중심 | 2차 · 머신 카드 안에 불량/소재교체 |
+| `Steps.dc.html` | H 단계형 작업 | 2차 · ①방식 ②위치 ③번호 ④실행 |
+| `Pro.dc.html` | I 데스크톱 프로 툴 | 2차 · 도구줄 + 분할 창 + 상태표시줄 |
+
+사용자 반응: 1차 5개 "다 아쉬움" → 2차 4개(F~I, 같은 남색, 구성만 다름) 제시 후 **아직 선택 안 함**. (claude.ai 디자인 캔버스 "지후니우스 디자인 시안"에도 같은 내용이 있음.)
+
+### 디자인 적용 시 지켜야 할 것
+- Tkinter/ttk만 사용(추가 패키지 금지, Python 3.8+). 둥근 모서리·입체 버튼은 기존처럼 **내장 PNG 이미지 요소**(`src/visual_theme.py`의 `_TILE_DATA`, `tools/build_visual_assets.py`)로 구현.
+- 시안의 글꼴은 웹 대체 글꼴. 실제는 **맑은 고딕**(숫자는 Consolas 검토 가능).
+- 위젯의 `command`, 이벤트 바인딩, 타이머, 저장·동기화 로직은 건드리지 않고 **배치·스타일만** 변경. 메인 외 팝업(세척일보·돌출량·특수 돌출량·소재 창)도 같은 톤으로.
+- 변경 전후 시작 시간·탭 전환·머신 갱신 속도 비교 기록.
+- 배치를 크게 바꾸는 시안(F~I)은 기존 화면 테스트(`tests/test_drive_layout.py`, `test_main_window_placement.py`, `test_tactile_controls.py` 등)의 기대값도 함께 수정해야 함.
+
+## 4. 작업 방법
+
+```sh
+git clone https://github.com/corsk970119-ux/jihunius-updates.git
+cd jihunius-updates
+git checkout claude/improvements-20261109
+
+# 수정은 src/ 와 assets/ 에서. app.pyw 직접 수정 금지.
+python tools/build_app.py            # → apps/jihunius/app.pyw
+python tools/build_app.py --check
+python -m unittest discover -s tests -p "test_*.py"   # Linux: xvfb-run -a -s "-screen 0 3840x1200x24" 앞에 붙임
+```
+- Windows에서는 `python` 대신 `py`일 수 있음. 기존 테스트는 Linux/Xvfb 기준이라 Windows에서 일부 실패할 수 있음(제품 오류와 구분).
+- 저장소 안에서 `app.pyw`를 직접 실행하지 말 것 — 실행 시 잠금 파일·오류기록 파일이 `apps/jihunius/`에 생김(.gitignore 처리했지만 주의). 실행 확인은 다른 폴더에 복사해서.
+- 검토 파일 만들기: 템플릿의 `SUITE_APP_VERSION`을 새 번호로 → 빌드 → `apps/jihunius/app.pyw`를 사용자에게 전달. 이미 PC에 있는 버전보다 **번호가 커야** 그 파일이 실행됨(업데이트 캐시가 같거나 높은 버전을 우선).
+- 배포(요청 시에만): `python tools/prepare_release.py <버전> --notes docs/changes.txt` → 테스트 → main에 한 커밋. 이미 올린 `releases/` 버전은 덮어쓰지 않음. 검토용 .9를 그대로 배포하면 같은 바이트가 나옴(노트는 `docs/releases/2026.11.09.9.txt`).
+
+## 5. 기존 미해결 (이전 기록에서 이어짐)
+- 세척완료 약 70건 이상에서 오류(원인 미확인), 여러 PC MES/POP 동시 실행 잠금 없음, O1004.nc 빈 파일 문제.
+- 회사 현장 확인 필요: SMB·방화벽·담당 PC 연결, DPI/듀얼 모니터, 실제 설비 수량 대조.
+- 상세 이력: Google Drive `지훈/작업기록/프로그램/00_최신요약.txt` (11.09.2까지만 기록됨, .3~.9 미기록).
