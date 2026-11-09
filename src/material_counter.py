@@ -52,8 +52,8 @@ DEFAULT_MATERIAL_TYPE = '10B'
 MOVEMENT_NAMES = {'initial':'최초 재고', 'register':'최초 재고', 'receive':'입고', 'adjust':'실사 조정',
                   'consume':'소재 사용', 'return':'교체 취소', 'cancel':'교체 취소',
                   'reversal':'교체 취소', 'reverse':'교체 취소'}
-PALETTE = dict(bg='#111722', card='#1b2433', field='#131c2b', text='#e7edf7',
-               muted='#93a3bc', line='#36455e', blue='#2563eb', selected='#284a79',
+PALETTE = dict(bg='#17181a', card='#242528', field='#1c1d20', text='#e7edf7',
+               muted='#9fa1a6', line='#45474b', blue='#3d7ef5', selected='#284a79',
                green='#72d9ad', yellow='#f1c676', red='#ed929c', danger='#b91c1c', danger_active='#991b1b')
 STATES = {'RUN': '가공 중', 'WAIT': '대기', 'HOLD': '일시정지',
           'ALARM': '알람', 'STOP': '정지', 'OFF': '전원 꺼짐'}
@@ -1336,7 +1336,7 @@ class Application:
         return make_rounded_button(self.tk,parent, text=text, command=command, font=(self.font,10,'bold'),
                               bg=PALETTE['blue'] if primary else PALETTE['card'], fg='white',
                               activebackground=PALETTE['selected'], activeforeground='white',
-                              disabledforeground='#6b7890', relief='flat', bd=0, padx=13, pady=7,
+                              disabledforeground='#77797d', relief='flat', bd=0, padx=13, pady=7,
                               cursor='hand2', **kwargs)
 
     def rounded_panel(self, parent, fill=None, radius=14, border=None):
@@ -1403,7 +1403,7 @@ class Application:
             self.label(board,heading,color=PALETTE['muted'],bg=PALETTE['bg']).grid(row=0,column=j,sticky='nsew',pady=(0,1),ipady=8)
         self.rows = {}
         for n in MACHINES:
-            bg = PALETTE['card'] if n%2 else '#172130'
+            bg = PALETTE['card'] if n%2 else '#202224'
             row_card=self.rounded_panel(board,fill=bg,radius=11)
             row_card.grid(row=n,column=0,columnspan=len(widths),sticky='nsew',pady=(0,4))
             # All headings and machine cells belong to ONE grid. Independent

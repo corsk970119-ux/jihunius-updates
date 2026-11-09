@@ -65,9 +65,9 @@ TIMESTAMPED_NAME = re.compile(r"^20\d{6}_\d{4}_")
 TOOTH_SUFFIX = re.compile(rf"_#?({TOOTH_NUMBER})_(\d+)$")
 SEARCH_PERIODS = ("최근 3일", "오늘", "지정 기간", "전체")
 UI_COLORS = {
-    "background": "#111722", "card": "#1b2433", "field": "#131c2b",
-    "text": "#e7edf7", "muted": "#93a3bc", "border": "#36455e",
-    "accent": "#85b4ff", "selection": "#284a79", "disabled": "#263144",
+    "background": "#17181a", "card": "#242528", "field": "#1c1d20",
+    "text": "#e7edf7", "muted": "#9fa1a6", "border": "#45474b",
+    "accent": "#85b4ff", "selection": "#284a79", "disabled": "#313336",
 }
 
 
@@ -155,13 +155,13 @@ def configure_app_style(window):
                     insertcolor=colors["text"], bordercolor=colors["border"],
                     lightcolor=colors["border"], darkcolor=colors["border"], padding=(8, 6))
     style.map("STL.TEntry", fieldbackground=[("disabled", colors["disabled"])],
-              foreground=[("disabled", "#75849c")], bordercolor=[("focus", colors["accent"])])
-    style.configure("STL.TCombobox", fieldbackground=colors["field"], background="#2b3b52",
+              foreground=[("disabled", "#818388")], bordercolor=[("focus", colors["accent"])])
+    style.configure("STL.TCombobox", fieldbackground=colors["field"], background="#3a3c40",
                     foreground=colors["text"], arrowcolor=colors["text"],
                     bordercolor=colors["border"], lightcolor=colors["border"],
                     darkcolor=colors["border"], padding=(8, 6))
     style.map("STL.TCombobox", fieldbackground=[("disabled", colors["disabled"]), ("readonly", colors["field"])],
-              foreground=[("disabled", "#75849c"), ("readonly", colors["text"])],
+              foreground=[("disabled", "#818388"), ("readonly", colors["text"])],
               selectbackground=[("readonly", colors["field"])],
               selectforeground=[("readonly", colors["text"])],
               bordercolor=[("focus", colors["accent"])])
@@ -169,36 +169,36 @@ def configure_app_style(window):
                     indicatorbackground=colors["field"], indicatorforeground=colors["text"],
                     bordercolor=colors["border"], padding=(0, 2))
     style.map("STL.TCheckbutton", background=[("active", colors["card"])],
-              foreground=[("disabled", "#75849c")],
+              foreground=[("disabled", "#818388")],
               indicatorforeground=[("selected", colors["background"])],
               indicatorbackground=[("disabled", colors["disabled"]), ("selected", colors["accent"])])
-    style.configure("STL.Accent.TButton", background="#203047", foreground="#ffffff", borderwidth=0,
+    style.configure("STL.Accent.TButton", background="#2f3135", foreground="#ffffff", borderwidth=0,
                     padding=(14, 6), font=("맑은 고딕", 10, "bold"))
-    style.map("STL.Accent.TButton", background=[("disabled", "#2d4266"), ("active", "#1d4ed8")],
-              foreground=[("disabled", "#8092ad")])
-    style.configure("STL.Secondary.TButton", background="#2b3b52", foreground="#ffffff",
-                    bordercolor="#6b7e9a", lightcolor="#6b7e9a", darkcolor="#6b7e9a",
+    style.map("STL.Accent.TButton", background=[("disabled", "#2d4266"), ("active", "#2f6be0")],
+              foreground=[("disabled", "#8e9196")])
+    style.configure("STL.Secondary.TButton", background="#3a3c40", foreground="#ffffff",
+                    bordercolor="#7b7d82", lightcolor="#7b7d82", darkcolor="#7b7d82",
                     padding=(10, 6), font=("맑은 고딕", 10, "bold"))
-    style.map("STL.Secondary.TButton", background=[("disabled", colors["disabled"]), ("active", "#354966")],
-              foreground=[("disabled", "#879ab7"), ("!disabled", "#ffffff")])
+    style.map("STL.Secondary.TButton", background=[("disabled", colors["disabled"]), ("active", "#474a4f")],
+              foreground=[("disabled", "#96999e"), ("!disabled", "#ffffff")])
     style.configure("STL.Danger.TButton", background=colors["card"], foreground="#f593a5",
                     bordercolor="#633b4b", lightcolor="#633b4b", darkcolor="#633b4b",
                     padding=(10, 6), font=("맑은 고딕", 10, "bold"))
     style.map("STL.Danger.TButton", background=[("disabled", colors["disabled"]), ("active", "#392736")],
-              foreground=[("disabled", "#718098")])
+              foreground=[("disabled", "#7d7f84")])
     style.configure("STL.Treeview", font=("맑은 고딕", 9), rowheight=28,
                     background=colors["field"], fieldbackground=colors["field"], foreground=colors["text"],
                     bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"])
-    style.configure("STL.Treeview.Heading", font=("맑은 고딕", 10, "bold"), background="#2b3b52",
+    style.configure("STL.Treeview.Heading", font=("맑은 고딕", 10, "bold"), background="#3a3c40",
                     foreground=colors["text"], bordercolor=colors["border"],
                     lightcolor=colors["border"], darkcolor=colors["border"], padding=(6, 6))
     style.map("STL.Treeview", background=[("selected", colors["selection"])], foreground=[("selected", "#ffffff")])
-    style.map("STL.Treeview.Heading", background=[("active", "#354966")])
+    style.map("STL.Treeview.Heading", background=[("active", "#474a4f")])
     for name in ("STL.Vertical.TScrollbar", "STL.Horizontal.TScrollbar"):
-        style.configure(name, background="#40506b", troughcolor=colors["field"], borderwidth=0,
-                        bordercolor=colors["field"], lightcolor="#40506b", darkcolor="#40506b",
-                        arrowcolor="#a0aec3", arrowsize=12)
-        style.map(name, background=[("active", "#536781")])
+        style.configure(name, background="#505256", troughcolor=colors["field"], borderwidth=0,
+                        bordercolor=colors["field"], lightcolor="#505256", darkcolor="#505256",
+                        arrowcolor="#a9abaf", arrowsize=12)
+        style.map(name, background=[("active", "#63666a")])
     return style
 
 
@@ -776,7 +776,7 @@ class DatePicker:
                     today = value == date.today()
                     tk.Button(self.grid, text=str(day), width=4, pady=6, relief="flat", font=("맑은 고딕", 10),
                               bg=UI_COLORS["accent"] if today else UI_COLORS["card"], fg=UI_COLORS["background"] if today else UI_COLORS["text"],
-                              activebackground="#354966", activeforeground="#ffffff", cursor="hand2",
+                              activebackground="#474a4f", activeforeground="#ffffff", cursor="hand2",
                               highlightthickness=0,
                               command=lambda d=value: self.choose(d)).grid(row=row, column=column, padx=2, pady=2)
 
@@ -957,7 +957,7 @@ class App:
         xscroll = ttk.Scrollbar(result_frame, orient="horizontal", command=self.tree.xview, style="STL.Horizontal.TScrollbar")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-        self.tree.tag_configure("best_match", background="#382f1e", foreground="#f5c26b")
+        self.tree.tag_configure("best_match", background="#382f1e", foreground="#ffd166")
         self.tree.tag_configure("missing", foreground=UI_COLORS["muted"])
         self.tree.bind("<Double-1>", self.double_click)
         self.tree.bind("<Return>", lambda _event: self.open_file())
