@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 SHARED_FOLDER = Path(r'\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈\지후니우스_인수인계')
-BG, CELL, ALT, HEADER, LINE, TEXT, MUTED, BLUE = '#17181a','#202224','#252729','#34363a','#434549','#e6edf5','#afb1b6','#3d7ef5'
+BG, CELL, ALT, HEADER, LINE, TEXT, MUTED, BLUE = '#101216','#171b20','#1b1f25','#262c34','#303843','#e6edf5','#afb1b6','#3d7ef5'
 SEED_ROWS = [{'id': 'seed-4', 'cells': ['블루다이아RC', '드릴값(위) 9.1(7.88)', '스크류 길이 (1.75~1.8) /']}, {'id': 'seed-5', 'cells': ['블루다이아NC', '드릴값(위) 9.0(7.78)', '스크류 길이 (3.05~3.1)  /']}, {'id': 'seed-6', 'cells': ['스트라우만 RC', '드릴값 8.8', '(구)드릴-드릴값 2.43']}, {'id': 'seed-7', 'cells': ['스트라우만 NC', '드릴값 +0.06', '(구)드릴-드릴값 2.43']}, {'id': 'seed-8', 'cells': ['심플라인', '드릴값 5.4', '심플라인 환봉 스크류로 체크 (2.5)']}, {'id': 'seed-9', 'cells': ['네오 IU', '드릴값 위 5.42 아래 +0.2', '네오 스크류 네오 돌출량']}, {'id': 'seed-10', 'cells': ['성남 리더스', '3X -0.03 헥사 2.475', '성남리더스 전용 랩아나로그 사용(빡빡하게 들어가면 안됨)']}, {'id': 'seed-11', 'cells': ['TSV(짐머)', '드릴값 6.41', '스크류 길이 (2.3)']}, {'id': 'seed-12', 'cells': ['오스템M KS', '드릴값 4.4', '스크류 길이 (2.8~2.85)']}, {'id': 'seed-13', 'cells': ['바이오뎀M', '드릴값 4.2', '오스템M 스크류에 길이 (2.5)']}, {'id': 'seed-14', 'cells': ['오스템KS', '가이드O', '스크류 길이 (1.45~1.5)']}, {'id': 'seed-15', 'cells': ['', '가이드X', '스크류길이 (2.35~2.4)']}, {'id': 'seed-16', 'cells': ['네오ITI', '드릴값 위 5.25 아래 +0.6', '스크류 길이 (2.4~2.45)']}, {'id': 'seed-17', 'cells': ['브라이트', '드릴값 위 -0.3', '스크류 길이 (2.15~2.2)']}, {'id': 'seed-18', 'cells': ['노멀엑티브M', '헥사2.24', '돌출량 2.6']}, {'id': 'seed-19', 'cells': ['노멀엑티브R', '드릴값 위 -0.3', '돌출량 2.6']}, {'id': 'seed-20', 'cells': ['탑플란', '헥사 2.465~2.475', '드릴값  W-0.3  / R +0.5해야함.']}, {'id': 'seed-21', 'cells': ['BLX', '', '돌출량 1.5~1.55']}, {'id': 'seed-22', 'cells': ['탑플란SS', '치수 : R4.8 / W6.0 공구 : T400 탑플란R에서 W -0.053 Z0.51', '돌출량 : R 2.7 / W 3.4 (스크류 오스템SS)']}, {'id': 'seed-23', 'cells': ['', '탑플란W에서 일반W (Z-0.02 T15 -0.12)', '일반R에서 탑플란R (Z+0.045,T15Z-0.36)']}, {'id': 'seed-24', 'cells': ['워렌텍IT', '', '돌출량 3.45~3.5 (네오R 스크류)']}, {'id': 'seed-25', 'cells': ['탑플란M', '드릴값 위 -0.03', '돌출량 3.2~3.25(오스템M 드릴)']}, {'id': 'seed-26', 'cells': ['아름R', '', '오스템스크류 2.8~2.85']}, {'id': 'seed-27', 'cells': ['스트라우만 RC정품', '모스테이퍼 두께로 판별 정품이 더 큼 1.7@ 이상', '스크류 돌출량 짧게 나옴 1.75 이하로 나옴']}, {'id': 'seed-28', 'cells': ['IU', '드릴값 위 -0.19', '']}, {'id': 'seed-29', 'cells': ['아름R', '', '']}]
 SEED_NOTES = '덴티움 탑플란 메가젠스크류로 덴티움 길이값 맞추는것은 위에 수치만 -0.25 했음 잘나오면 이대로하고 아니면 치수조정해야함 \n수정된 사항은 추가 할것'
 
@@ -303,7 +303,7 @@ class SpecialTableApp:
         style=ttk.Style(r)
         if 'clam' in style.theme_names():style.theme_use('clam')
         style.configure('Special.TButton',font=('맑은 고딕',10),padding=(10,6),background=HEADER,foreground=TEXT,bordercolor=LINE,lightcolor=LINE,darkcolor=LINE)
-        style.map('Special.TButton',background=[('active','#44474c'),('pressed',BLUE)],foreground=[('disabled',MUTED)])
+        style.map('Special.TButton',background=[('active','#323944'),('pressed',BLUE)],foreground=[('disabled',MUTED)])
         style.configure('Vertical.TScrollbar',background=HEADER,troughcolor=CELL,bordercolor=LINE,arrowcolor=MUTED,lightcolor=LINE,darkcolor=LINE)
         from visual_theme import install_companion_buttons
         install_companion_buttons(r, style, (('Special.TButton','secondary',TEXT),))
@@ -452,7 +452,7 @@ class SpecialTableApp:
         row=next((row for row in self.displayed_state()['rows'] if row['id']==rid),None)
         if row is None:return
         text=row['cells'][col]
-        edit=tk.Text(self.table,wrap='word',bg='#383b40',fg=TEXT,insertbackground=TEXT,font=('맑은 고딕',10),padx=9,pady=6,highlightbackground=BLUE,highlightcolor=BLUE,highlightthickness=2,relief='flat',undo=True)
+        edit=tk.Text(self.table,wrap='word',bg='#293039',fg=TEXT,insertbackground=TEXT,font=('맑은 고딕',10),padx=9,pady=6,highlightbackground=BLUE,highlightcolor=BLUE,highlightthickness=2,relief='flat',undo=True)
         edit.insert('1.0',text);self.editor={'widget':edit,'anchor':widget,'row':rid,'col':col,'opened':text,'base':text,'row_cells':list(row['cells'])}
         self.position_editor();edit.focus_set();edit.mark_set('insert','end');edit.tag_add('sel','1.0','end')
         current=self.editor
