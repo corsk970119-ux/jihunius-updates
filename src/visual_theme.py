@@ -146,9 +146,9 @@ def install_visual_theme(window, style):
                  'Mode.TRadiobutton'):
         style.configure(name, font=('맑은 고딕', 10, 'normal'), padding=(10, 7))
     style.configure('DriveSmall.TButton', padding=(6, 7))
-    # 인수인계는 탭 줄 가운데에 조금 더 크게 둡니다.
+    # 인수인계는 위 줄 '소재 사용량 조사' 버튼과 같은 세로선·폭에 두고 크기는 조금 작게 합니다.
     for name in ('HandoverToggle.TButton', 'HandoverNotice.TButton'):
-        style.configure(name, padding=(24, 9))
+        style.configure(name, padding=(14, 6))
     style.configure('Title.TLabel', font=('맑은 고딕', 18, 'bold'))
     style.configure('TEntry', padding=(10, 6))
     for name in ('Accent.TButton', 'STL.Accent.TButton'):
@@ -158,7 +158,7 @@ def install_visual_theme(window, style):
     for name in ('Accent.TButton', 'Selected.AppTab.TButton', 'HandoverNotice.TButton'):
         style.configure(name, font=('맑은 고딕', 10, 'bold'))
     for name in ('HandoverToggle.TButton', 'HandoverNotice.TButton'):
-        style.configure(name, font=('맑은 고딕', 11, 'bold'))
+        style.configure(name, font=('맑은 고딕', 10, 'bold'))
     result = {'popup_icon': images['popup_icon'], 'images': images}
     window._jihunius_visual_theme = result
     return result

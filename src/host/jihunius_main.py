@@ -2980,7 +2980,8 @@ class IntegrationApp:
         self.header_status_label = self.make_stable_status_label(
             self.header_actions, self.status, "Status.TLabel", width=24, anchor="center")
         self.header_status_label.pack(side="right", padx=(12, 0))
-        for widget in (navigation_row, tabs, self.header_actions, self.header_status_label, self.handover_toggle):
+        for widget in (navigation_row, tabs, self.header_actions, self.header_status_label, self.handover_toggle,
+                       self.material_button):
             widget.bind("<Configure>", lambda event: self.window.after_idle(self.position_handover_button), add="+")
         self.window.after_idle(self.position_handover_button)
 
@@ -3700,6 +3701,12 @@ class IntegrationApp:
         if not self.handover_toggle.winfo_exists():
             return
         header = self.handover_toggle.master
+        anchor_button = getattr(self, 'material_button', None)
+        if anchor_button is not None and anchor_button.winfo_ismapped() and anchor_button.winfo_width() > 1:
+            # 위 줄 '소재 사용량 조사' 버튼과 왼쪽·오른쪽 끝을 맞춥니다.
+            left = anchor_button.winfo_rootx() - header.winfo_rootx()
+            self.handover_toggle.place(relx=0, x=left, width=anchor_button.winfo_width(), rely=0.5, anchor="w")
+            return
         last_tab = self.tab_buttons['wash']
         left = last_tab.winfo_rootx() + last_tab.winfo_width() - header.winfo_rootx()
         right = header.winfo_width()
