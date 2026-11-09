@@ -172,14 +172,14 @@ class Controller:
             self.dialog.deiconify();self.dialog.lift();return
         tk,ttk=self.app.tk,self.app.ttk
         dialog=tk.Toplevel(self.root);self.dialog=dialog
-        dialog.title('지후니우스 업데이트');dialog.configure(bg='#101216')
+        dialog.title('지후니우스 업데이트');dialog.configure(bg='#0e141d')
         dialog.geometry('640x460');dialog.minsize(560,430)
         dialog.transient(self.root);dialog.protocol('WM_DELETE_WINDOW',self.close_dialog)
         frame=ttk.Frame(dialog,padding=22);frame.pack(fill='both',expand=True)
         frame.columnconfigure(0,weight=1);frame.rowconfigure(2,weight=1)
         ttk.Label(frame,text='지후니우스 업데이트',style='Title.TLabel').grid(row=0,column=0,sticky='w',pady=(0,12))
         self.versions=tk.StringVar();ttk.Label(frame,textvariable=self.versions).grid(row=1,column=0,sticky='w',pady=(0,10))
-        self.notes=tk.Text(frame,height=8,wrap='word',bg='#181c21',fg='#e6edf5',relief='flat',padx=12,pady=12,
+        self.notes=tk.Text(frame,height=8,wrap='word',bg='#161e2c',fg='#e6edf5',relief='flat',padx=12,pady=12,
                            font=('맑은 고딕',10),highlightthickness=0)
         self.notes.grid(row=2,column=0,sticky='nsew')
         self.status=tk.StringVar();ttk.Label(frame,textvariable=self.status,wraplength=585,justify='left').grid(row=3,column=0,sticky='ew',pady=(12,10))

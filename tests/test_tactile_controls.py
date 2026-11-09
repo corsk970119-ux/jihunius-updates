@@ -33,7 +33,7 @@ class TactileControlsTests(unittest.TestCase):
                    2: {'light':'red','prm_no':'1234','_stale':True},
                    3: {'light':'yellow','prm_no':'invalid'}}
         app.apply_machine_status(records)
-        for machine, color in ((1,'#2fb36b'),(2,'#e5484d'),(3,'#f0c440'),(4,'#2a2f37')):
+        for machine, color in ((1,'#2fb36b'),(2,'#e5484d'),(3,'#f0c440'),(4,'#25334b')):
             tile, surface, number = app.machine_tiles[machine]
             self.assertEqual(tile.type(surface), 'polygon')
             self.assertEqual(tile.itemcget(surface,'fill'), color)
@@ -45,7 +45,7 @@ class TactileControlsTests(unittest.TestCase):
         self.assertEqual(app.window.tk.call('image','names'),before)
         app.apply_machine_status(records,online=False)
         for tile, surface, number in app.machine_tiles.values():
-            self.assertEqual(tile.itemcget(surface,'fill'),'#2a2f37')
+            self.assertEqual(tile.itemcget(surface,'fill'),'#25334b')
             self.assertEqual(tile.itemcget(number,'text'),'—')
         app.show_machine_details(1)
         self.assertTrue(app.machine_detail_dialog.winfo_exists())

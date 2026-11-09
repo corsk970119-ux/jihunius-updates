@@ -4,15 +4,15 @@ class HistoryUI:
     def __init__(self, app, folder, helper_source):
         self.app=app;self.root=app.window;self.dialog=None;self.rows={};self.signature=None
         style=app.ttk.Style(self.root)
-        style.configure('ErrorHistory.Treeview',background='#0c0e11',fieldbackground='#0c0e11',
+        style.configure('ErrorHistory.Treeview',background='#0b0f16',fieldbackground='#0b0f16',
                         foreground='#e7edf7',rowheight=28,borderwidth=0,font=('맑은 고딕',10))
         style.map('ErrorHistory.Treeview',background=[('selected','#284a79')],foreground=[('selected','#ffffff')])
-        style.configure('ErrorHistory.Treeview.Heading',background='#242a32',foreground='#e7edf7',
+        style.configure('ErrorHistory.Treeview.Heading',background='#212d42',foreground='#e7edf7',
                         padding=(8,8),font=('맑은 고딕',10,'bold'),relief='flat')
-        style.map('ErrorHistory.Treeview.Heading',background=[('active','#2e3640')])
-        style.configure('ErrorHistory.TCheckbutton',background='#101216',foreground='#ccced2')
-        style.map('ErrorHistory.TCheckbutton',background=[('active','#101216')],foreground=[('active','#ffffff')])
-        style.configure('ErrorHistory.TLabel',background='#101216',foreground='#9fa1a6',font=('맑은 고딕',9))
+        style.map('ErrorHistory.Treeview.Heading',background=[('active','#2a3a55')])
+        style.configure('ErrorHistory.TCheckbutton',background='#0e141d',foreground='#ccced2')
+        style.map('ErrorHistory.TCheckbutton',background=[('active','#0e141d')],foreground=[('active','#ffffff')])
+        style.configure('ErrorHistory.TLabel',background='#0e141d',foreground='#9fa1a6',font=('맑은 고딕',9))
         self.service=Service(_recorder.path,folder,helper_source)
         self.button=app.ttk.Button(getattr(app,'header_actions',app.title_label.master),text='오류 기록',style='Popup.TButton',command=self.open)
         self.button.pack(side='right',padx=(6,0))
@@ -37,7 +37,7 @@ class HistoryUI:
         tk=self.app.tk;ttk=self.app.ttk
         if self.dialog is not None and self.dialog.winfo_exists():
             self.dialog.lift();return
-        win=self.dialog=tk.Toplevel(self.root);win.title('오류 기록 · 전체 PC');win.configure(bg='#101216')
+        win=self.dialog=tk.Toplevel(self.root);win.title('오류 기록 · 전체 PC');win.configure(bg='#0e141d')
         win.geometry('1000x660');win.minsize(820,520);win.transient(self.root)
         win.protocol('WM_DELETE_WINDOW',self.close)
         body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
@@ -63,7 +63,7 @@ class HistoryUI:
         status_label.grid(row=3,column=0,sticky='ew',pady=10)
         body.bind('<Configure>',lambda event:status_label.configure(wraplength=max(300,event.width-40)),add='+')
         detail_frame=ttk.Frame(body);detail_frame.grid(row=4,column=0,sticky='nsew')
-        self.detail=tk.Text(detail_frame,height=8,wrap='word',bg='#0c0e11',fg='#e7edf7',relief='flat',padx=12,pady=10,
+        self.detail=tk.Text(detail_frame,height=8,wrap='word',bg='#0b0f16',fg='#e7edf7',relief='flat',padx=12,pady=10,
                             font=('맑은 고딕',10),state='disabled')
         detail_scroll=ttk.Scrollbar(detail_frame,command=self.detail.yview);self.detail.configure(yscrollcommand=detail_scroll.set)
         detail_scroll.pack(side='right',fill='y');self.detail.pack(fill='both',expand=True)
