@@ -2171,7 +2171,7 @@ def configure_app_style(window):
     style.configure("Status.TLabel", background="#10234a", foreground="#a7c9ff", padding=(14, 8),
                     font=("맑은 고딕", 10, "bold"))
     style.configure("TSeparator", background="#22355c")
-    style.configure("TEntry", fieldbackground="#050a14", bordercolor="#2c4274", padding=(12, 10))
+    style.configure("TEntry", fieldbackground="#050a14", bordercolor="#2e333d", padding=(12, 10))
     style.map("TEntry", fieldbackground=[("disabled", "#0f1a30")],
               foreground=[("disabled", "#818388")], bordercolor=[("focus", "#2a66f2")])
     style.configure("Accent.TButton", background="#2a66f2", foreground="#ffffff", borderwidth=0,
@@ -2179,7 +2179,7 @@ def configure_app_style(window):
     style.map("Accent.TButton", background=[("disabled", "#22355c"), ("active", "#2257d0")],
               foreground=[("disabled", "#8e9196")])
     style.configure("Secondary.TButton", background="#0e1a35", foreground="#ffffff",
-                    bordercolor="#5878b8", lightcolor="#5878b8", darkcolor="#5878b8",
+                    bordercolor="#4a515e", lightcolor="#4a515e", darkcolor="#4a515e",
                     padding=(22, 12), font=("맑은 고딕", 11, "bold"))
     style.map("Secondary.TButton", background=[("disabled", "#0f1a30"), ("active", "#15264a")],
               foreground=[("disabled", "#96999e"), ("!disabled", "#ffffff")])
@@ -2213,8 +2213,8 @@ def configure_app_style(window):
                     padding=(14, 9), font=("맑은 고딕", 10, "bold"))
     style.map("HandoverNotice.TButton", background=[("active", "#5a4815")])
     for scrollbar_style in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
-        style.configure(scrollbar_style, background="#3b5488", troughcolor="#050a14", borderwidth=0,
-                        bordercolor="#050a14", lightcolor="#3b5488", darkcolor="#3b5488", arrowcolor="#aebcd8",
+        style.configure(scrollbar_style, background="#3a404b", troughcolor="#050a14", borderwidth=0,
+                        bordercolor="#050a14", lightcolor="#3a404b", darkcolor="#3a404b", arrowcolor="#aebcd8",
                         arrowsize=12)
     return style
 
@@ -3085,7 +3085,7 @@ class IntegrationApp:
         self.drive_status_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self.drive_contents = tk.Listbox(drive_card, width=20, height=8, font=("맑은 고딕", 9),
                                          background="#050a14", foreground="#eaf0fc", relief="flat",
-                                         borderwidth=0, highlightthickness=1, highlightbackground="#2c4274",
+                                         borderwidth=0, highlightthickness=1, highlightbackground="#2e333d",
                                          highlightcolor="#2a66f2", selectbackground="#1d3f86",
                                          selectforeground="#eaf0fc", exportselection=False, selectmode="extended")
         self.drive_contents.grid(row=2, column=0, sticky="nsew")
@@ -3130,7 +3130,7 @@ class IntegrationApp:
         self.number_input = tk.Text(inputs, width=12, height=8, font=("Consolas", 12), wrap="word", undo=True,
                                     background="#050a14", foreground="#eaf0fc", insertbackground="#8db3ff",
                                     selectbackground="#1d3f86", selectforeground="#eaf0fc", relief="flat",
-                                    highlightthickness=1, highlightbackground="#2c4274", highlightcolor="#2a66f2",
+                                    highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2a66f2",
                                     padx=10, pady=6)
         self.number_input.grid(row=1, column=0, sticky="nsew")
         number_scrollbar = ttk.Scrollbar(inputs, orient="vertical", command=self.number_input.yview)
@@ -3191,7 +3191,7 @@ class IntegrationApp:
         ttk.Label(log_card, text="작업 기록 · 최근 100줄", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.log = tk.Text(log_card, width=30, height=10, font=("맑은 고딕", 9), wrap="word", state="disabled",
                            background="#050a14", foreground="#aebcd8", relief="flat", borderwidth=0,
-                           highlightthickness=1, highlightbackground="#2c4274", highlightcolor="#2c4274",
+                           highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2e333d",
                            padx=10, pady=6)
         self.log.grid(row=1, column=0, sticky="nsew")
         log_scrollbar = ttk.Scrollbar(log_card, orient="vertical", command=self.log.yview)
@@ -4050,7 +4050,7 @@ class IntegrationApp:
         content = self.tk.Text(content_frame, font=("맑은 고딕", 11), wrap="word", undo=True,
                                background="#050a14", foreground="#eaf0fc", insertbackground="#ffffff",
                                selectbackground="#1d3f86", relief="flat", padx=12, pady=12,
-                               highlightthickness=1, highlightbackground="#5878b8", highlightcolor="#8db3ff")
+                               highlightthickness=1, highlightbackground="#4a515e", highlightcolor="#8db3ff")
         content.grid(row=0, column=0, sticky="nsew")
         scrollbar = self.ttk.Scrollbar(content_frame, orient="vertical", command=content.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -4861,7 +4861,7 @@ class IntegrationApp:
         listing = self.tk.Listbox(frame, width=110, height=min(12, len(paths)), exportselection=False,
                                   font=("맑은 고딕", 10), background="#050a14", foreground="#eaf0fc",
                                   selectbackground="#2a66f2", selectforeground="#ffffff", relief="flat",
-                                  highlightthickness=1, highlightbackground="#5878b8", highlightcolor="#8db3ff")
+                                  highlightthickness=1, highlightbackground="#4a515e", highlightcolor="#8db3ff")
         listing.pack(fill="both", expand=True)
         horizontal = self.ttk.Scrollbar(frame, orient="horizontal", command=listing.xview)
         horizontal.pack(fill="x")
@@ -5167,7 +5167,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.10.1'
+SUITE_APP_VERSION = '2026.11.10.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

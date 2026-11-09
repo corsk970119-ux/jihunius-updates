@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkinter import font as tkfont
 
-BG, PANEL, TEXT, MUTED, LINE = '#060b16', '#060b16', '#e6edf5', '#b2b5bb', '#2c4274'
+BG, PANEL, TEXT, MUTED, LINE = '#060b16', '#060b16', '#e6edf5', '#b2b5bb', '#2e333d'
 FIELD, ACCENT, BUTTON, SELECT = '#050a14', '#2b466c', '#233046', '#2b466c'
 ROW_A, ROW_B, HEADER, BLUE = '#050a14', '#0a1224', '#0e1a35', '#95caff'
 YELLOW, YTEXT = '#f3d97a', '#27200d'
@@ -727,7 +727,7 @@ class App(tk.Tk):
                                 background='#22355c', bordercolor='#08101f', lightcolor='#22355c',
                                 darkcolor='#22355c', borderwidth=0)
                 for _option in ('background', 'lightcolor', 'darkcolor'):
-                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3b5488')]})
+                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3a404b')]})
             except Exception:
                 pass
 

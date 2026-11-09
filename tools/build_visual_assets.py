@@ -32,7 +32,7 @@ tiles={}
 for name,(fill,edge,active,pressed) in palettes.items():
  for state,c,b,focus in [('normal',fill,edge,False),('active',active,edge,False),('pressed',pressed,edge,False),('disabled','#0b1529','#22355c',False),('focus',fill,'#8db3ff',True),('focus_active',active,'#8db3ff',True)]:
   tiles[name+'_'+state]=tile(c,b,focus,kind=name,pressed=state=='pressed',disabled=state=='disabled')
-tiles.update(field_normal=tile('#050a14','#2c4274',kind='field'),field_disabled=tile('#0b1529','#22355c',kind='field'),field_focus=tile('#050a14','#8db3ff',True,kind='field'),card=tile('#060b16','#2c4274',kind='card'),nav=tile('#060b16','#060b16',kind='nav'),status=tile('#0e1a35','#0e1a35',kind='status'))
+tiles.update(field_normal=tile('#050a14','#2e333d',kind='field'),field_disabled=tile('#0b1529','#22355c',kind='field'),field_focus=tile('#050a14','#8db3ff',True,kind='field'),card=tile('#060b16','#2e333d',kind='card'),nav=tile('#060b16','#060b16',kind='nav'),status=tile('#0e1a35','#0e1a35',kind='status'))
 im=Image.new('RGBA',(56,56));d=ImageDraw.Draw(im)
 d.rounded_rectangle((19,3,51,35),radius=5,outline='#afb1b6',width=4);d.rounded_rectangle((4,18,36,50),radius=5,outline='#afb1b6',width=4)
 tiles['popup_icon']=encode(im.resize((14,14),Image.Resampling.LANCZOS))
@@ -63,7 +63,7 @@ node=nodes['_TILE_DATA'];lines=s.splitlines(True);lines[node.lineno-1:node.end_l
 switches={}
 for on in (False,True):
  im=Image.new('RGBA',(352,128));d=ImageDraw.Draw(im)
- d.rounded_rectangle((2,2,350,126),radius=62,fill='#2a66f2' if on else '#0f1a30',outline='#8db3ff' if on else '#3b5488',width=4)
+ d.rounded_rectangle((2,2,350,126),radius=62,fill='#2a66f2' if on else '#0f1a30',outline='#8db3ff' if on else '#3a404b',width=4)
  x=70 if on else 18;d.ellipse(((x-13)*4,3*4,(x+13)*4,29*4),fill='#ffffff' if on else '#aebcd8')
  switches[on]=encode(im.resize((88,32),Image.Resampling.LANCZOS))
 # Switch PNGs live in assets/; tools/build_app.py embeds them into app.pyw.

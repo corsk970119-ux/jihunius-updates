@@ -66,7 +66,7 @@ TOOTH_SUFFIX = re.compile(rf"_#?({TOOTH_NUMBER})_(\d+)$")
 SEARCH_PERIODS = ("최근 3일", "오늘", "지정 기간", "전체")
 UI_COLORS = {
     "background": "#060b16", "card": "#060b16", "field": "#050a14",
-    "text": "#eaf0fc", "muted": "#9fb2d6", "border": "#2c4274",
+    "text": "#eaf0fc", "muted": "#9fb2d6", "border": "#2e333d",
     "accent": "#8db3ff", "selection": "#1d3f86", "disabled": "#0f1a30",
 }
 
@@ -177,7 +177,7 @@ def configure_app_style(window):
     style.map("STL.Accent.TButton", background=[("disabled", "#22355c"), ("active", "#2257d0")],
               foreground=[("disabled", "#8e9196")])
     style.configure("STL.Secondary.TButton", background="#0e1a35", foreground="#ffffff",
-                    bordercolor="#5878b8", lightcolor="#5878b8", darkcolor="#5878b8",
+                    bordercolor="#4a515e", lightcolor="#4a515e", darkcolor="#4a515e",
                     padding=(10, 6), font=("맑은 고딕", 10, "bold"))
     style.map("STL.Secondary.TButton", background=[("disabled", colors["disabled"]), ("active", "#15264a")],
               foreground=[("disabled", "#96999e"), ("!disabled", "#ffffff")])
@@ -199,7 +199,7 @@ def configure_app_style(window):
                         bordercolor="#08101f", lightcolor="#22355c", darkcolor="#22355c",
                         arrowcolor="#aebcd8", arrowsize=9, gripcount=0)
         for option in ("background", "lightcolor", "darkcolor"):
-            style.map(name, **{option: [("pressed", "#8db3ff"), ("active", "#3b5488")]})
+            style.map(name, **{option: [("pressed", "#8db3ff"), ("active", "#3a404b")]})
     return style
 
 

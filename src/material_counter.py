@@ -53,7 +53,7 @@ MOVEMENT_NAMES = {'initial':'최초 재고', 'register':'최초 재고', 'receiv
                   'consume':'소재 사용', 'return':'교체 취소', 'cancel':'교체 취소',
                   'reversal':'교체 취소', 'reverse':'교체 취소'}
 PALETTE = dict(bg='#060b16', card='#060b16', field='#050a14', text='#eaf0fc',
-               muted='#9fb2d6', line='#2c4274', blue='#2a66f2', selected='#1d3f86',
+               muted='#9fb2d6', line='#2e333d', blue='#2a66f2', selected='#1d3f86',
                green='#72d9ad', yellow='#f1c676', red='#ed929c', danger='#b91c1c', danger_active='#991b1b')
 STATES = {'RUN': '가공 중', 'WAIT': '대기', 'HOLD': '일시정지',
           'ALARM': '알람', 'STOP': '정지', 'OFF': '전원 꺼짐'}
@@ -1300,7 +1300,7 @@ class Application:
                                 background='#22355c', bordercolor='#08101f', lightcolor='#22355c',
                                 darkcolor='#22355c', borderwidth=0)
                 for _option in ('background', 'lightcolor', 'darkcolor'):
-                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3b5488')]})
+                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3a404b')]})
             except Exception:
                 pass
         style.configure('.', font=(self.font, 10), background=PALETTE['bg'], foreground=PALETTE['text'])

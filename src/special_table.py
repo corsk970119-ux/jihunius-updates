@@ -303,7 +303,7 @@ class SpecialTableApp:
         style=ttk.Style(r)
         if 'clam' in style.theme_names():style.theme_use('clam')
         style.configure('Special.TButton',font=('맑은 고딕',10),padding=(10,6),background=HEADER,foreground=TEXT,bordercolor=LINE,lightcolor=LINE,darkcolor=LINE)
-        style.map('Special.TButton',background=[('active','#2c4274'),('pressed',BLUE)],foreground=[('disabled',MUTED)])
+        style.map('Special.TButton',background=[('active','#2e333d'),('pressed',BLUE)],foreground=[('disabled',MUTED)])
         style.configure('Vertical.TScrollbar',background=HEADER,troughcolor=CELL,bordercolor=LINE,arrowcolor=MUTED,lightcolor=LINE,darkcolor=LINE)
         from visual_theme import install_companion_buttons
         install_companion_buttons(r, style, (('Special.TButton','secondary',TEXT),))
