@@ -60,6 +60,7 @@ from contextlib import contextmanager, redirect_stdout
 from datetime import date, datetime, timezone
 import errno
 import hashlib
+import http.client
 from http.client import HTTPConnection
 from ipaddress import IPv4Address
 import json
@@ -126,31 +127,89 @@ MONITOR_STALE_SECONDS = 8.0
 MONITOR_GRACE_SECONDS = 20.0
 
 
+_MONITOR_ALLOWED = {
+    "monitoring_ajax_setting.php": "loadIPlist",
+    "monitoring_ajax_this_machine.php": "callUpdateMachineOne",
+}
+
+
+def _monitor_exchange(connection, endpoint, fields):
+    """요청 1회를 보내고 (결과, 연결 재사용 가능 여부)를 돌려줍니다."""
+    if _MONITOR_ALLOWED.get(endpoint) != fields.get("ajax_selector"):
+        raise ValueError("지원하지 않는 가공현황 조회입니다.")
+    connection.request("POST", "/" + endpoint, body=urlencode(fields).encode("ascii"),
+                       headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                                "Accept": "application/json", "Cache-Control": "no-cache"})
+    response = connection.getresponse()
+    if response.status != 200:
+        raise ValueError("가공현황 서버 응답 오류 ({})".format(response.status))
+    raw = response.read(131073)
+    if len(raw) > 131072:
+        raise ValueError("가공현황 응답이 너무 큽니다.")
+    reusable = not response.will_close and response.isclosed()
+    result = json.loads(raw.decode("utf-8-sig"))
+    if not isinstance(result, dict):
+        raise ValueError("가공현황 응답 형식을 확인해 주세요.")
+    return result, reusable
+
+
 def monitor_request(endpoint, fields):
     """NC Gate의 기존 조회 요청만 사용합니다. 이미지나 설정 변경은 요청하지 않습니다."""
-    allowed = {
-        "monitoring_ajax_setting.php": "loadIPlist",
-        "monitoring_ajax_this_machine.php": "callUpdateMachineOne",
-    }
-    if allowed.get(endpoint) != fields.get("ajax_selector"):
+    if _MONITOR_ALLOWED.get(endpoint) != fields.get("ajax_selector"):
         raise ValueError("지원하지 않는 가공현황 조회입니다.")
     connection = HTTPConnection(MONITOR_HOST, timeout=MONITOR_TIMEOUT)
     try:
-        connection.request("POST", "/" + endpoint, body=urlencode(fields).encode("ascii"),
-                           headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                                    "Accept": "application/json", "Cache-Control": "no-cache"})
-        response = connection.getresponse()
-        if response.status != 200:
-            raise ValueError("가공현황 서버 응답 오류 ({})".format(response.status))
-        raw = response.read(131073)
-        if len(raw) > 131072:
-            raise ValueError("가공현황 응답이 너무 큽니다.")
-        result = json.loads(raw.decode("utf-8-sig"))
-        if not isinstance(result, dict):
-            raise ValueError("가공현황 응답 형식을 확인해 주세요.")
-        return result
+        return _monitor_exchange(connection, endpoint, fields)[0]
     finally:
         connection.close()
+
+
+class MonitorClient:
+    """호기별 조회 연결을 유지해 3초마다 새 TCP 연결을 맺지 않습니다.
+
+    서버가 유지 연결을 지원하지 않거나(Connection: close) 끊으면 기존처럼 매번 새로 연결합니다.
+    재사용하던 연결이 끊긴 경우에만 새 연결로 한 번 다시 조회하며, 시간 초과는 재시도하지 않습니다.
+    """
+    STALE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+             http.client.RemoteDisconnected, http.client.CannotSendRequest,
+             http.client.ResponseNotReady, http.client.BadStatusLine)
+
+    def __init__(self, factory=None):
+        self.factory = factory or (lambda: HTTPConnection(MONITOR_HOST, timeout=MONITOR_TIMEOUT))
+        self.connection = None
+
+    def close(self):
+        connection, self.connection = self.connection, None
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+    def request(self, endpoint, fields):
+        if _MONITOR_ALLOWED.get(endpoint) != fields.get("ajax_selector"):
+            raise ValueError("지원하지 않는 가공현황 조회입니다.")
+        reused = self.connection is not None
+        if not reused:
+            self.connection = self.factory()
+        try:
+            result, reusable = _monitor_exchange(self.connection, endpoint, fields)
+        except self.STALE:
+            self.close()
+            if not reused:
+                raise
+            self.connection = self.factory()
+            try:
+                result, reusable = _monitor_exchange(self.connection, endpoint, fields)
+            except BaseException:
+                self.close()
+                raise
+        except BaseException:
+            self.close()
+            raise
+        if not reusable:
+            self.close()
+        return result
 
 
 def machine_state_light(state):
@@ -432,19 +491,25 @@ class MachineMonitor:
             cancel.set()
 
     def _poll_one(self, ip, cancel):
-        while not self.stopped.is_set() and not cancel.is_set():
-            record = None
-            try:
-                result = self.request("monitoring_ajax_this_machine.php",
-                                      {"ajax_selector": "callUpdateMachineOne", "ncgateIP": ip})
-                record = monitor_machine_record(result)
-            except Exception:
-                pass
-            if self.stopped.is_set() or cancel.is_set():
-                return
-            self.events.put(("machine_sample", ip, record, time.monotonic(), cancel))
-            if self.stopped.wait(MONITOR_INTERVAL):
-                return
+        client = MonitorClient() if self.request is monitor_request else None
+        request = client.request if client is not None else self.request
+        try:
+            while not self.stopped.is_set() and not cancel.is_set():
+                record = None
+                try:
+                    result = request("monitoring_ajax_this_machine.php",
+                                     {"ajax_selector": "callUpdateMachineOne", "ncgateIP": ip})
+                    record = monitor_machine_record(result)
+                except Exception:
+                    pass
+                if self.stopped.is_set() or cancel.is_set():
+                    return
+                self.events.put(("machine_sample", ip, record, time.monotonic(), cancel))
+                if self.stopped.wait(MONITOR_INTERVAL):
+                    return
+        finally:
+            if client is not None:
+                client.close()
 
 # 첨부 로고를 내장합니다. 외부 이미지 파일이나 추가 패키지는 필요하지 않습니다.
 APP_USER_MODEL_ID = "Jihunius.NCProgramManager"
@@ -3154,6 +3219,7 @@ class IntegrationApp:
         self.wash_app = WashApp(self, self.app_pages["wash"])
         visual = SuiteVisualTheme.install_visual_theme(window, self.style)
         self.material_quick.set_icons(visual["images"])
+        self.reserve_empty_button_width()
         for button in self._suite_buttons.values():
             button.configure(image=visual["popup_icon"], compound="right")
         # Keep the wash form compact within the same card surface as other pages.
@@ -4180,7 +4246,37 @@ class IntegrationApp:
         else:
             self.destination_text.set(str(self.destination))
             self.empty_button.configure(text="{} 드라이브 비우기".format(self.destination.drive or self.destination))
+        self.reserve_empty_button_width()
         self.apply_drive_contents(snapshot)
+
+    def reserve_empty_button_width(self):
+        """Keep the drive column width independent of the 'F: 드라이브 비우기' label.
+
+        Display-only: any failure leaves the layout exactly as before.
+        """
+        button = getattr(self, "empty_button", None)
+        try:
+            text = button.cget("text")
+            holder = button.master
+        except Exception:
+            return
+        labels = ["드라이브 비우기"] + ["{} 드라이브 비우기".format(item[:2]) for item in DESTINATION_CANDIDATES]
+        if text not in labels:
+            labels.append(text)
+        widest = 0
+        try:
+            for label in labels:
+                button.configure(text=label)
+                widest = max(widest, int(button.winfo_reqwidth()))
+            if widest > int(holder.grid_columnconfigure(0, "minsize") or 0):
+                holder.grid_columnconfigure(0, minsize=widest)
+        except Exception:
+            pass
+        finally:
+            try:
+                button.configure(text=text)
+            except Exception:
+                pass
 
     def cancel_drive_action(self, message=None):
         pending = getattr(self, "drive_action_pending", None)
@@ -5023,7 +5119,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.09.8'
+SUITE_APP_VERSION = '2026.11.09.9'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

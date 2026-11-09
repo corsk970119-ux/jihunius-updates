@@ -1,0 +1,47 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tk, Xvfb and Korean fonts
+        run: sudo apt-get update -q && sudo apt-get install -y -q python3-tk xvfb fonts-noto-cjk
+      - name: app.pyw is the build of src/
+        run: python tools/build_app.py --check
+      - name: Python 3.8 syntax (company PCs)
+        run: |
+          python - <<'PY'
+          import ast, pathlib
+          files = [pathlib.Path('apps/jihunius/app.pyw'), *pathlib.Path('src').rglob('*.py')]
+          for f in files:
+              ast.parse(f.read_text(encoding='utf-8'), filename=str(f), feature_version=(3, 8))
+          print('ok', len(files), 'files')
+          PY
+      - name: Unit and screen tests
+        run: xvfb-run -a -s "-screen 0 3840x1200x24" python -m unittest discover -s tests -p 'test_*.py'
+
+  windows:
+    # Reference run on real Windows Tk/fonts. Never blocks; read the log for layout differences.
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit and screen tests
+        run: python -m unittest discover -s tests -p "test_*.py"

@@ -1,6 +1,6 @@
 # 지후니우스 공개 업데이트
 
-현재 배포: **2026.11.04.2**. 드라이브 목록을 카드 정보 확인보다 먼저 표시하고, 이동식 드라이브가 아닌 경로의 불필요한 접근을 줄였습니다. 특수 돌출량의 상시 편집·우클릭 줄 삭제·PC 간 공유와 기존 업무 자동화는 유지합니다.
+현재 배포 버전은 `channels/stable.json`의 `version`이 기준입니다(README에 버전을 따로 적지 않습니다). 버전별 변경 내용은 `docs/releases/`와 업데이트 창의 안내에서 확인합니다.
 
 ## 처음 사용
 
@@ -45,18 +45,44 @@
 - 세척완료 MES/POP 자동화에는 PC 사이의 동시 실행 잠금이 없습니다. 같은 대상 작업은 한 PC에서 진행하세요. 이번 배포는 세척완료 로직을 바꾸지 않았습니다.
 - 회사 PC에서 노란 업데이트 알림이 보이지 않은 정확한 원인은 아직 확인되지 않았습니다. 공개 배포와 시작·주기 확인, 색상은 테스트 환경에서 정상이며, 새 표시로 각 PC의 버전과 실패 여부를 확인할 수 있습니다.
 
-`apps/jihunius/app.pyw`가 앱 기준본입니다. 업데이트 엔진 원본은 `src/update_engine.py`, 화면 원본은 `src/update_ui.py`입니다. 보조창 원본은 `src/protrusion.py`, `src/wash_log.py`, `src/special_table.py`이며 저장 연결은 `src/companion_update.py`, `src/companion_adapters.py`, `src/companions.py`, 창 배치는 `src/window_state.py`에서 관리합니다. 배포 준비 명령이 보조창과 업데이트 모듈을 자동으로 내장합니다.
+### 소스 구조와 빌드
 
-변경 내용을 UTF-8 텍스트로 작성한 뒤 아래 명령으로 새 버전을 준비합니다.
+배포 파일은 여전히 **한 개의 `.pyw`** 입니다(업데이트가 파일 하나를 내려받는 방식). 다만 `apps/jihunius/app.pyw`는 이제 **직접 고치지 않는 빌드 결과물**입니다. 아래 원본을 수정한 뒤 빌드합니다.
+
+| 원본 | 내용 |
+|---|---|
+| `src/host/jihunius_main.py` | 메인 화면·파일 가져오기·드라이브 정리·설비 모니터·인수인계 (`NAME = ...  # build:` 줄은 빌드 때 채워짐) |
+| `src/host/stl_finder.py` | STL 찾기 |
+| `src/host/wash_mes.py`, `src/host/wash_pop.py` | MES/POP 세척완료 자동화 |
+| `src/host/card_modifier_10_30.py` | 카드에 복사되는 수정10.30 스크립트 |
+| `src/host/windows_tray.py` | 시스템 트레이 |
+| `src/*.py` | 돌출량·세척일보·특수 돌출량·소재 사용량 조사·오류 기록·업데이트 |
+| `assets/` | 앱 아이콘, 알림 스위치 이미지, 알림음 |
 
 ```sh
-python tools/prepare_release.py 2026.11.04.2 --notes docs/changes.txt
+python tools/build_app.py            # 원본 → apps/jihunius/app.pyw
+python tools/build_app.py --check    # app.pyw가 원본의 빌드와 같은지 확인
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-새 버전에서 기존 기능과 실제 Windows 동작을 검증한 뒤 `apps/`, `dist/`, 새 `releases/` 파일, `channels/stable.json`을 **한 커밋**으로 올립니다. 이미 배포한 버전 파일은 덮어쓰지 않고 새 번호를 부여합니다. `.gitattributes`는 파일 바이트가 체크아웃 환경에 따라 바뀌지 않도록 유지합니다.
+`tests/test_build_app.py`가 커밋된 `app.pyw`와 원본 빌드가 바이트 단위로 같은지 검사합니다. 같은 원본이면 어느 PC에서 빌드해도 같은 파일이 나옵니다.
 
-앱이 읽는 정식 배포 기준은 공개 `channels/stable.json`입니다. 소스 수정만으로 배포되지 않습니다. GitHub Releases 화면에 설명만 등록해도 자동 적용되지 않습니다.
+### 배포
+
+변경 내용을 UTF-8 텍스트로 작성한 뒤 새 버전을 준비합니다. 버전 번호는 `src/host/jihunius_main.py`에도 자동 반영됩니다.
+
+```sh
+python tools/prepare_release.py 2026.11.09.9 --notes docs/changes.txt
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+새 버전에서 기존 기능과 실제 Windows 동작을 검증한 뒤 `src/`, `apps/`, `dist/`, 새 `releases/` 파일, `channels/stable.json`을 **한 커밋**으로 올립니다. 이미 배포한 버전 파일은 덮어쓰지 않고 새 번호를 부여합니다. `.gitattributes`는 파일 바이트가 체크아웃 환경에 따라 바뀌지 않도록 유지합니다.
+
+앱이 읽는 정식 배포 기준은 `main` 브랜치의 `channels/stable.json`입니다. 다른 브랜치에 올린 수정이나 소스 수정만으로는 배포되지 않습니다. GitHub Releases 화면에 설명만 등록해도 자동 적용되지 않습니다.
+
+### 자동 테스트
+
+`main`과 작업 브랜치에 올리면 GitHub Actions(`.github/workflows/tests.yml`)가 Linux(Xvfb)에서 전체 테스트를 실행하고, Windows에서도 참고용으로 실행합니다. 화면 배치 검사 일부는 글꼴에 따라 결과가 달라질 수 있어 Windows 결과는 참고용입니다.
 
 ## 검증 범위
 
