@@ -36,6 +36,61 @@ def _cu_read(path):
         return {}
 
 
+class _CuExistingProcess:
+    """Observe one process lifetime without terminating or claiming another PID."""
+    def __init__(self,pid,started=None):
+        if type(pid) is not int or pid<=0:raise ValueError('Invalid material process')
+        self.pid=pid;self._handle=None;self._closed=False
+        if _cu_os.name=='nt':
+            import ctypes
+            from ctypes import wintypes as w
+            self._kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            self._kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];self._kernel.OpenProcess.restype=w.HANDLE
+            self._kernel.GetProcessTimes.argtypes=[w.HANDLE]+[ctypes.POINTER(w.FILETIME)]*4;self._kernel.GetProcessTimes.restype=w.BOOL
+            self._kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD];self._kernel.WaitForSingleObject.restype=w.DWORD
+            self._kernel.CloseHandle.argtypes=[w.HANDLE];self._kernel.CloseHandle.restype=w.BOOL
+            self._handle=self._kernel.OpenProcess(0x100000|0x1000,False,pid)
+            if not self._handle:
+                self._handle=None;raise OSError('소재 조사 프로세스를 확인하지 못했습니다.')
+            stamps=[w.FILETIME() for _ in range(4)]
+            if not self._kernel.GetProcessTimes(self._handle,*[ctypes.byref(t) for t in stamps]):
+                self.close();raise OSError('소재 조사 실행 시각을 확인하지 못했습니다.')
+            self.started=str((stamps[0].dwHighDateTime<<32)|stamps[0].dwLowDateTime)
+        else:
+            self.started=self._posix_stamp()
+        if started is not None and self.started!=started:
+            self.close();raise ValueError('Material process lifetime changed')
+        if self.poll() is not None:
+            self.close();raise OSError('Material process already exited')
+
+    def _posix_stamp(self):
+        return _CuPath('/proc/{}/stat'.format(self.pid)).read_text().split(') ',1)[1].split()[19]
+
+    def poll(self):
+        if self._closed:return 0
+        if self._handle is not None:
+            result=self._kernel.WaitForSingleObject(self._handle,0)
+            if result==258:return None
+            if result!=0:raise OSError('소재 조사 종료 상태를 확인하지 못했습니다.')
+        else:
+            try:
+                if self._posix_stamp()==self.started:
+                    # A zombie has exited even before its original parent reaps it.
+                    state=_CuPath('/proc/{}/stat'.format(self.pid)).read_text().split(') ',1)[1].split()[0]
+                    if state!='Z':return None
+            except (OSError,IndexError):pass
+        self.close();return 0
+
+    def close(self):
+        if self._handle is not None:
+            self._kernel.CloseHandle(self._handle);self._handle=None
+        self._closed=True
+
+    def __del__(self):
+        try:self.close()
+        except Exception:pass
+
+
 class CompanionUpdateBridge:
     def __init__(self, root, adapter):
         self.root, self.adapter = root, adapter

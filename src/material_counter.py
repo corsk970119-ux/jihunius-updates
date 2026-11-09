@@ -130,25 +130,33 @@ def request_json(endpoint, fields, host=HOST, port=None):
         connection.close()
 
 
+class InstanceAlreadyRunning(RuntimeError):
+    def __init__(self,path):
+        self.path=str(path)
+        super().__init__('소재카운터가 이미 실행 중입니다. 기존 창에 다시 연결해주세요.')
+
+
 class InstanceLock:
     """OS가 해제하는 파일 잠금. 종료된 PID 파일 때문에 실행이 막히지 않는다."""
     def __init__(self, path):
         self.file = open(path, 'a+b')
-        self.file.seek(0)
-        if not self.file.read(1):
-            self.file.write(b'0')
-            self.file.flush()
-        self.file.seek(0)
         try:
+            # Windows byte locks are mandatory: even reading the sentinel
+            # before acquiring the lock can fail with bare EACCES. Locking
+            # beyond EOF is supported, so no sentinel I/O is necessary.
+            self.file.seek(0)
             if os.name == 'nt':
                 import msvcrt
                 msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
                 fcntl.flock(self.file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (OSError, IOError):
+        except OSError as exc:
             self.file.close()
-            raise RuntimeError('소재카운터가 이미 실행 중입니다. 작업표시줄에서 기존 창을 열어주세요.')
+            import errno
+            if exc.errno in (errno.EACCES,errno.EAGAIN,errno.EDEADLK):
+                raise InstanceAlreadyRunning(path) from exc
+            raise
 
     def close(self):
         self.file.close()

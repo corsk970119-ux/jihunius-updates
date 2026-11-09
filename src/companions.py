@@ -98,6 +98,25 @@ class CompanionWindows:
             return bool(self.user.AllowSetForegroundWindow(pid))
         return False
 
+    def material_pid(self,title):
+        """Legacy recovery: only one exact main Tk window, including hidden ones."""
+        if self.user is None:return None
+        matches=set()
+        def visit(hwnd,ignored):
+            length=self.user.GetWindowTextLengthW(hwnd)
+            if length!=len(title):return True
+            text=ctypes.create_unicode_buffer(length+1)
+            self.user.GetWindowTextW(hwnd,text,length+1)
+            kind=ctypes.create_unicode_buffer(128)
+            self.user.GetClassNameW(hwnd,kind,128)
+            if text.value==title and kind.value=='TkTopLevel':
+                pid=self.w.DWORD();self.user.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+                if pid.value:matches.add(pid.value)
+            return True
+        callback=self.callback_type(visit)
+        if not self.user.EnumWindows(callback,0):return None
+        return next(iter(matches)) if len(matches)==1 else None
+
     def close(self, pid, title):
         if self.user is None:
             raise RuntimeError("이 환경에서는 열린 창을 직접 닫은 뒤 완전 종료해 주세요.")
@@ -125,6 +144,59 @@ class CompanionManager:
         self._lock = threading.RLock()
         base = Path(os.environ.get("LOCALAPPDATA") or str(Path.home()))
         self.cache = base / "JihuniusSuite" / "companions"
+        self._material_show_requested=False
+        self._material_error=''
+        self._recovered_material=False
+
+    def _material_session(self,record):
+        session=record.get('session');nonce=record.get('nonce')
+        if not isinstance(session,str) or not isinstance(nonce,str) or not re.fullmatch('[0-9a-f]{32}',nonce):return None
+        folder=Path(session)
+        # Only local, direct child control folders created by this suite.
+        if folder.parent!=self.cache/'control' or not re.fullmatch('[0-9a-f]{32}',folder.name):return None
+        status=_cu_read(folder/'material-status.json')
+        stamp=status.get('at',record.get('at',0))
+        if type(stamp) not in (int,float) or not 0<=time.time()-stamp<15:return None
+        if status and status.get('nonce')!=nonce:return None
+        return folder,nonce
+
+    def _reuse_material(self,show):
+        base=self.cache.parent.parent/'MaterialCounter'
+        record=_cu_read(base/'ui-instance.json')
+        candidates=[]
+        session=self._material_session(record)
+        if session and isinstance(record.get('started'),str):candidates.append((record,session))
+        # Versions through .6 did not publish a PID registry. Recover only a
+        # unique fresh material session for this PC and an exact Tk main window.
+        if not candidates:
+            pc_id=_cu_read(base/'sync-settings.json').get('pc_id')
+            legacy=[]
+            if isinstance(pc_id,str) and len(pc_id)==32:
+                try:
+                    folders=sorted((p for p in (self.cache/'control').iterdir() if p.is_dir()),
+                                   key=lambda p:p.stat().st_mtime,reverse=True)[:256]
+                except OSError:folders=[]
+                for folder in folders:
+                    status=_cu_read(folder/'material-status.json')
+                    quick=status.get('quick',{})
+                    if not isinstance(quick,dict) or quick.get('client')!=pc_id:continue
+                    candidate=dict(session=str(folder),nonce=status.get('nonce'),at=status.get('at'))
+                    found=self._material_session(candidate)
+                    if found:legacy.append((candidate,found))
+                if len(legacy)==1:
+                    pid=self.backend.material_pid(self.payloads['material']['title'])
+                    if type(pid) is int and pid>0:
+                        legacy[0][0]['pid']=pid;candidates=legacy
+        for record,session in candidates:
+            try:process=_CuExistingProcess(record.get('pid'),record.get('started'))
+            except (OSError,ValueError):continue
+            self.processes['material']=process;self.sessions['material']=session
+            self._recovered_material=True
+            if show:
+                self.backend.allow_foreground(process.pid)
+                self.material_control('show')
+            return True
+        return False
 
     def _descriptor(self, key):
         if key not in ("protrusion", "wash-log", "special-table", "material") or key not in self.payloads:
@@ -167,11 +239,22 @@ class CompanionManager:
         with self._lock:
             ended = [key for key, process in self.processes.items() if process.poll() is not None]
             for key in ended:
+                duplicate=key=='material' and self.processes[key].poll()==73
+                if key=='material':self._recovered_material=False
                 del self.processes[key]
                 self.close_requests.pop(key, None)
                 if self.update_save is None or key not in self.update_save['keys']:
                     self._clear_session(key)
+                if duplicate and self.update_save is None:
+                    if not self._reuse_material(self._material_show_requested):
+                        self._material_error=('이미 실행 중인 소재 조사 창의 연결 정보를 확인하지 못했습니다.\n'
+                            '이 PC의 이전 지후니우스를 완전 종료한 뒤 다시 열어주세요.\n'
+                            '소재 기록과 설정 파일은 그대로 보존되어 있습니다.')
             return list(self.processes)
+
+    def pop_material_error(self):
+        message=self._material_error;self._material_error=''
+        return message
 
     def _clear_session(self, key):
         session = self.sessions.pop(key, None)
@@ -199,6 +282,9 @@ class CompanionManager:
             if key in self.running_keys():
                 self.focus(key)
                 return False
+            if key=='material':
+                self._material_show_requested=not hidden
+                if self._reuse_material(not hidden):return False
             payload = self._extract(key, item)
             executable = Path(sys.executable)
             if os.name == "nt":
@@ -236,6 +322,7 @@ class CompanionManager:
             if key == 'material':
                 # Grant focus without changing visibility before the child decides
                 # whether to hide or restore. Showing first would invert a reopen.
+                self._material_show_requested=True
                 self.backend.allow_foreground(self.processes[key].pid)
                 self.material_control('toggle')
                 return False
@@ -265,6 +352,14 @@ class CompanionManager:
             if self.update_save is not None:
                 raise RuntimeError('업데이트 저장 요청이 이미 진행 중입니다.')
             keys = self.running_keys()
+            if 'material' in keys and self._recovered_material:
+                # An older parent can delete this shared session as soon as the
+                # child exits, before we read its closed acknowledgment. Keep the
+                # save/close protocol strict; a graceful restart creates our own
+                # session instead of racing that parent's cleanup.
+                raise RuntimeError('이전 실행본의 소재 조사 창에 다시 연결한 상태입니다.\n'
+                    '지후니우스를 완전 종료하고 다시 실행한 뒤 업데이트해주세요.\n'
+                    '소재 기록과 저장 확인 대기 입력은 유지됩니다.')
             if any(key not in self.sessions for key in keys):
                 raise RuntimeError('이전 버전의 보조창을 저장하고 닫은 뒤 다시 눌러 주세요.')
             self.update_save = {'id': uuid.uuid4().hex, 'keys': keys,

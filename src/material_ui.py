@@ -563,22 +563,61 @@ def boot():
             identify('Jihunius.MaterialCounter')
         except (AttributeError, OSError):
             pass
-    folder=core.default_folder();folder.mkdir(parents=True,exist_ok=True)
-    root=tk.Tk();root.withdraw();lock=None;session=None
+    folder=core.default_folder()
+    root=tk.Tk();root.withdraw();lock=None;session=None;instance=None
+    stage='로컬 설정 폴더';target=folder
     try:
+        folder.mkdir(parents=True,exist_ok=True)
+        stage='실행 잠금';target=folder/'sync-ui.lock'
         lock=core.InstanceLock(folder/'sync-ui.lock')
+        stage='이 PC 연결 설정';target=folder/'sync-settings.json'
         shared=os.environ.get('JIHUNIUS_MATERIAL_SHARED',DEFAULT_SHARE)
         session=ClientSession(folder,shared)
+        stage='소재 조사 화면';target=folder
         app=SyncedApplication(root,session)
         if hasattr(core,'CompanionWindowState'):app.placement=core.CompanionWindowState(root,'material')
         if hasattr(core,'CompanionUpdateBridge'):app.update_bridge=core.CompanionUpdateBridge(root,MaterialUpdateAdapter(app))
+        control=os.environ.get('JIHUNIUS_UPDATE_SESSION','');nonce=os.environ.get('JIHUNIUS_UPDATE_NONCE','')
+        if control and len(nonce)==32 and hasattr(core,'_CuExistingProcess'):
+            stage='기존 창 연결 정보';target=folder/'ui-instance.json'
+            process=core._CuExistingProcess(os.getpid())
+            try:instance=dict(pid=process.pid,started=process.started,session=control,nonce=nonce,at=time.time())
+            finally:process.close()
+            atomic_json(target,instance)
         if os.environ.get('JIHUNIUS_MATERIAL_HIDDEN')!='1':root.after_idle(app.show_front)
         else:session.visible=False
+        stage='소재 조사 실행';target=folder
         root.mainloop()
+    except core.InstanceAlreadyRunning:
+        if os.environ.get('JIHUNIUS_UPDATE_SESSION'):
+            # Another concurrently launched client may still be building its UI.
+            # Only this redundant child waits; the main GUI remains responsive.
+            deadline=time.monotonic()+2
+            while time.monotonic()<deadline:
+                try:active=read_json(folder/'ui-instance.json',{})
+                except (OSError,ValueError):active={}
+                if isinstance(active,dict) and active.get('pid') and active.get('started') and hasattr(core,'_CuExistingProcess'):
+                    try:existing=core._CuExistingProcess(active['pid'],active['started'])
+                    except (OSError,ValueError):pass
+                    else:
+                        existing.close();break
+                time.sleep(.05)
+            raise SystemExit(73)  # Parent reattaches the existing session.
+        messagebox.showerror(TITLE,'소재 조사 창이 이미 실행 중입니다. 지후니우스에서 기존 창을 열어주세요.',parent=root)
     except Exception as exc:
-        messagebox.showerror(TITLE,str(exc),parent=root)
+        import traceback
+        recorder=getattr(core,'_err_module',None)
+        if recorder:
+            recorder.capture(str(exc),feature=TITLE,stage=stage,detail=traceback.format_exc())
+        path=getattr(exc,'filename',None) or target
+        messagebox.showerror(TITLE,'소재 조사 창을 열지 못했습니다.\n단계: {}\n경로: {}\n\n{}'.format(stage,path,exc),parent=root)
     finally:
         if session is not None:session.close();session.thread.join(15)
+        if instance is not None:
+            try:
+                path=folder/'ui-instance.json'
+                if read_json(path,{})==instance:path.unlink()
+            except (OSError,ValueError):pass
         if lock is not None:lock.close()
         try:root.destroy()
         except Exception:pass
