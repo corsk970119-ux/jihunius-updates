@@ -2154,67 +2154,67 @@ def configure_app_style(window):
     from tkinter import ttk
     style = ttk.Style(window)
     style.theme_use("clam")
-    window.configure(background="#0e141d")
-    style.configure(".", font=("맑은 고딕", 10), foreground="#e7edf7")
-    style.configure("TFrame", background="#0e141d")
-    style.configure("Card.TFrame", background="#141b28", borderwidth=1, relief="solid",
-                    bordercolor="#141b28", lightcolor="#141b28", darkcolor="#141b28")
-    style.configure("TLabel", background="#0e141d")
+    window.configure(background="#060b16")
+    style.configure(".", font=("맑은 고딕", 10), foreground="#eaf0fc")
+    style.configure("TFrame", background="#060b16")
+    style.configure("Card.TFrame", background="#060b16", borderwidth=1, relief="solid",
+                    bordercolor="#060b16", lightcolor="#060b16", darkcolor="#060b16")
+    style.configure("TLabel", background="#060b16")
     style.configure("Title.TLabel", font=("맑은 고딕", 22, "bold"))
-    style.configure("Subtitle.TLabel", foreground="#9fa1a6")
-    style.configure("Section.TLabel", background="#141b28", font=("맑은 고딕", 11, "bold"))
-    style.configure("Card.TLabel", background="#141b28")
-    style.configure("Caption.TLabel", background="#141b28", foreground="#9fa1a6", font=("맑은 고딕", 9))
-    style.configure("Drive.TLabel", background="#141b28", foreground="#85b4ff", font=("맑은 고딕", 12, "bold"))
-    style.configure("AlarmNotice.TLabel", background="#141b28", foreground="#ffd166",
+    style.configure("Subtitle.TLabel", foreground="#9fb2d6")
+    style.configure("Section.TLabel", background="#060b16", font=("맑은 고딕", 11, "bold"))
+    style.configure("Card.TLabel", background="#060b16")
+    style.configure("Caption.TLabel", background="#060b16", foreground="#9fb2d6", font=("맑은 고딕", 9))
+    style.configure("Drive.TLabel", background="#060b16", foreground="#8db3ff", font=("맑은 고딕", 12, "bold"))
+    style.configure("AlarmNotice.TLabel", background="#060b16", foreground="#ffd166",
                     font=("맑은 고딕", 15, "bold"))
-    style.configure("Status.TLabel", background="#203657", foreground="#a7c9ff", padding=(14, 8),
+    style.configure("Status.TLabel", background="#10234a", foreground="#a7c9ff", padding=(14, 8),
                     font=("맑은 고딕", 10, "bold"))
-    style.configure("TSeparator", background="#2a3a55")
-    style.configure("TEntry", fieldbackground="#0b0f16", bordercolor="#2d3e5b", padding=(12, 10))
-    style.map("TEntry", fieldbackground=[("disabled", "#202c41")],
-              foreground=[("disabled", "#818388")], bordercolor=[("focus", "#3d7ef5")])
-    style.configure("Accent.TButton", background="#3d7ef5", foreground="#ffffff", borderwidth=0,
+    style.configure("TSeparator", background="#22355c")
+    style.configure("TEntry", fieldbackground="#050a14", bordercolor="#2c4274", padding=(12, 10))
+    style.map("TEntry", fieldbackground=[("disabled", "#0f1a30")],
+              foreground=[("disabled", "#818388")], bordercolor=[("focus", "#2a66f2")])
+    style.configure("Accent.TButton", background="#2a66f2", foreground="#ffffff", borderwidth=0,
                     padding=(22, 12), font=("맑은 고딕", 11, "bold"))
-    style.map("Accent.TButton", background=[("disabled", "#2d4266"), ("active", "#2f6be0")],
+    style.map("Accent.TButton", background=[("disabled", "#22355c"), ("active", "#2257d0")],
               foreground=[("disabled", "#8e9196")])
-    style.configure("Secondary.TButton", background="#26344d", foreground="#ffffff",
-                    bordercolor="#7b7d82", lightcolor="#7b7d82", darkcolor="#7b7d82",
+    style.configure("Secondary.TButton", background="#0e1a35", foreground="#ffffff",
+                    bordercolor="#5878b8", lightcolor="#5878b8", darkcolor="#5878b8",
                     padding=(22, 12), font=("맑은 고딕", 11, "bold"))
-    style.map("Secondary.TButton", background=[("disabled", "#202c41"), ("active", "#2f405f")],
+    style.map("Secondary.TButton", background=[("disabled", "#0f1a30"), ("active", "#15264a")],
               foreground=[("disabled", "#96999e"), ("!disabled", "#ffffff")])
-    style.configure("DriveSmall.TButton", background="#26344d", foreground="#ffffff", borderwidth=0,
+    style.configure("DriveSmall.TButton", background="#0e1a35", foreground="#ffffff", borderwidth=0,
                     padding=(6, 3), font=("맑은 고딕", 9))
-    style.map("DriveSmall.TButton", background=[("disabled", "#202c41"), ("active", "#2f405f")],
+    style.map("DriveSmall.TButton", background=[("disabled", "#0f1a30"), ("active", "#15264a")],
               foreground=[("disabled", "#96999e")])
-    style.configure("Danger.TButton", background="#141b28", foreground="#f593a5", bordercolor="#633b4b",
-                    lightcolor="#633b4b", darkcolor="#633b4b", padding=(14, 10), font=("맑은 고딕", 10, "bold"))
-    style.map("Danger.TButton", background=[("disabled", "#202c41"), ("active", "#24324a")],
+    style.configure("Danger.TButton", background="#060b16", foreground="#ffb7c5", bordercolor="#8a3b4e",
+                    lightcolor="#8a3b4e", darkcolor="#8a3b4e", padding=(14, 10), font=("맑은 고딕", 10, "bold"))
+    style.map("Danger.TButton", background=[("disabled", "#0f1a30"), ("active", "#15254a")],
               foreground=[("disabled", "#7d7f84")])
     style.layout("Mode.TRadiobutton", style.layout("TButton"))
-    style.configure("Mode.TRadiobutton", background="#0e141d", foreground="#a9abaf", borderwidth=0,
+    style.configure("Mode.TRadiobutton", background="#060b16", foreground="#aebcd8", borderwidth=0,
                     padding=(14, 11), font=("맑은 고딕", 10, "bold"))
-    style.map("Mode.TRadiobutton", background=[("disabled", "#202c41"), ("selected", "#3d7ef5"),
-                                               ("active", "#243249")],
+    style.map("Mode.TRadiobutton", background=[("disabled", "#0f1a30"), ("selected", "#2a66f2"),
+                                               ("active", "#15254a")],
               foreground=[("disabled", "#84868b"), ("selected", "#ffffff")])
-    style.configure("Handover.TNotebook", background="#141b28", borderwidth=0, tabmargins=(0, 0, 0, 12))
-    style.configure("Handover.TNotebook.Tab", background="#233047", foreground="#a9abaf",
+    style.configure("Handover.TNotebook", background="#060b16", borderwidth=0, tabmargins=(0, 0, 0, 12))
+    style.configure("Handover.TNotebook.Tab", background="#0e1a35", foreground="#aebcd8",
                     padding=(14, 9), font=("맑은 고딕", 11, "bold"))
-    style.map("Handover.TNotebook.Tab", background=[("selected", "#3d7ef5")],
+    style.map("Handover.TNotebook.Tab", background=[("selected", "#2a66f2")],
               foreground=[("selected", "#ffffff")])
-    style.configure("Handover.Treeview", background="#0b0f16", fieldbackground="#0b0f16",
-                    foreground="#e7edf7", borderwidth=0, rowheight=38, font=("맑은 고딕", 10))
-    style.map("Handover.Treeview", background=[("selected", "#284a79")],
+    style.configure("Handover.Treeview", background="#050a14", fieldbackground="#050a14",
+                    foreground="#eaf0fc", borderwidth=0, rowheight=38, font=("맑은 고딕", 10))
+    style.map("Handover.Treeview", background=[("selected", "#1d3f86")],
               foreground=[("selected", "#ffffff")])
-    style.configure("HandoverToggle.TButton", background="#1f2b3f", foreground="#a7c9ff", borderwidth=0,
+    style.configure("HandoverToggle.TButton", background="#0e1a35", foreground="#a7c9ff", borderwidth=0,
                     padding=(14, 9), font=("맑은 고딕", 10, "bold"))
-    style.map("HandoverToggle.TButton", background=[("active", "#2b3b56")])
+    style.map("HandoverToggle.TButton", background=[("active", "#15264a")])
     style.configure("HandoverNotice.TButton", background="#4a3b10", foreground="#ffd166", borderwidth=0,
                     padding=(14, 9), font=("맑은 고딕", 10, "bold"))
     style.map("HandoverNotice.TButton", background=[("active", "#5a4815")])
     for scrollbar_style in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
-        style.configure(scrollbar_style, background="#344769", troughcolor="#0b0f16", borderwidth=0,
-                        bordercolor="#0b0f16", lightcolor="#344769", darkcolor="#344769", arrowcolor="#a9abaf",
+        style.configure(scrollbar_style, background="#3b5488", troughcolor="#050a14", borderwidth=0,
+                        bordercolor="#050a14", lightcolor="#3b5488", darkcolor="#3b5488", arrowcolor="#aebcd8",
                         arrowsize=12)
     return style
 
@@ -2655,8 +2655,8 @@ class WashApp:
         self.mes=load_wash_module(WASH_MES_SOURCE,'jihuni_wash_mes')
         self.pop=load_wash_module(WASH_POP_SOURCE,'jihuni_wash_pop')
         style=ttk.Style(self.root)
-        style.configure('Wash.TCombobox',fieldbackground='#141b28',background='#26344d',foreground='#ffffff',padding=6)
-        style.map('Wash.TCombobox',fieldbackground=[('readonly','#141b28')],foreground=[('readonly','#ffffff')],selectbackground=[('readonly','#141b28')],selectforeground=[('readonly','#ffffff')])
+        style.configure('Wash.TCombobox',fieldbackground='#060b16',background='#0e1a35',foreground='#ffffff',padding=6)
+        style.map('Wash.TCombobox',fieldbackground=[('readonly','#060b16')],foreground=[('readonly','#ffffff')],selectbackground=[('readonly','#060b16')],selectforeground=[('readonly','#ffffff')])
         body=ttk.Frame(parent,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text='세척완료',style='Title.TLabel').pack(anchor='w')
         ttk.Label(body,text='MES 1~10호기 전체 확인 → POP 조회·체크 → 저장',font=('맑은 고딕',12,'bold')).pack(anchor='w',pady=(8,6))
@@ -2796,7 +2796,7 @@ class WashApp:
     def show_completion(self,title,brief):
         import tkinter as tk
         from tkinter import ttk
-        dialog=tk.Toplevel(self.root);dialog.title(title);dialog.configure(bg='#0b0f16')
+        dialog=tk.Toplevel(self.root);dialog.title(title);dialog.configure(bg='#050a14')
         dialog.transient(self.root)
         width=min(760,dialog.winfo_screenwidth()-80);height=min(540,dialog.winfo_screenheight()-100)
         x=max(0,(dialog.winfo_screenwidth()-width)//2);y=max(0,(dialog.winfo_screenheight()-height)//2)
@@ -2804,7 +2804,7 @@ class WashApp:
         body=ttk.Frame(dialog,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text=title,font=('맑은 고딕',17,'bold')).pack(anchor='w',pady=(0,12))
         area=ttk.Frame(body);area.pack(fill='both',expand=True)
-        text=tk.Text(area,bg='#0b0f16',fg='#e7edf7',font=('맑은 고딕',11),wrap='word',relief='flat',padx=8,pady=8)
+        text=tk.Text(area,bg='#050a14',fg='#eaf0fc',font=('맑은 고딕',11),wrap='word',relief='flat',padx=8,pady=8)
         scroll=ttk.Scrollbar(area,orient='vertical',command=text.yview);text.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right',fill='y');text.pack(side='left',fill='both',expand=True)
         text.insert('1.0',brief);text.configure(state='disabled')
@@ -3084,10 +3084,10 @@ class IntegrationApp:
             drive_card, self.drive_contents_status, "Caption.TLabel", width=1, anchor="w")
         self.drive_status_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self.drive_contents = tk.Listbox(drive_card, width=20, height=8, font=("맑은 고딕", 9),
-                                         background="#0b0f16", foreground="#e7edf7", relief="flat",
-                                         borderwidth=0, highlightthickness=1, highlightbackground="#2d3e5b",
-                                         highlightcolor="#3d7ef5", selectbackground="#284a79",
-                                         selectforeground="#e7edf7", exportselection=False, selectmode="extended")
+                                         background="#050a14", foreground="#eaf0fc", relief="flat",
+                                         borderwidth=0, highlightthickness=1, highlightbackground="#2c4274",
+                                         highlightcolor="#2a66f2", selectbackground="#1d3f86",
+                                         selectforeground="#eaf0fc", exportselection=False, selectmode="extended")
         self.drive_contents.grid(row=2, column=0, sticky="nsew")
         drive_scrollbar = ttk.Scrollbar(drive_card, orient="vertical", command=self.drive_contents.yview)
         drive_scrollbar.grid(row=2, column=1, sticky="ns")
@@ -3100,8 +3100,8 @@ class IntegrationApp:
         self.drive_contents.bind("<Button-3>", self.show_drive_menu)
         self.drive_contents.bind("<Delete>", self.start_drive_delete)
         window.bind("<F5>", self.refresh_active_tab)
-        self.drive_menu = tk.Menu(window, tearoff=False, background="#141b28", foreground="#ffffff",
-                                  activebackground="#3d7ef5", activeforeground="#ffffff",
+        self.drive_menu = tk.Menu(window, tearoff=False, background="#060b16", foreground="#ffffff",
+                                  activebackground="#2a66f2", activeforeground="#ffffff",
                                   disabledforeground="#818388", font=("맑은 고딕", 10))
         self.drive_menu.add_command(label="이름 변경", accelerator="F2", command=self.start_rename)
         self.drive_menu.add_command(label="선택 파일 삭제", accelerator="Delete", command=self.start_drive_delete)
@@ -3128,9 +3128,9 @@ class IntegrationApp:
         ttk.Label(inputs, text="프로그램 번호", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 6))
         self.number_input = tk.Text(inputs, width=12, height=8, font=("Consolas", 12), wrap="word", undo=True,
-                                    background="#0b0f16", foreground="#e7edf7", insertbackground="#85b4ff",
-                                    selectbackground="#284a79", selectforeground="#e7edf7", relief="flat",
-                                    highlightthickness=1, highlightbackground="#2d3e5b", highlightcolor="#3d7ef5",
+                                    background="#050a14", foreground="#eaf0fc", insertbackground="#8db3ff",
+                                    selectbackground="#1d3f86", selectforeground="#eaf0fc", relief="flat",
+                                    highlightthickness=1, highlightbackground="#2c4274", highlightcolor="#2a66f2",
                                     padx=10, pady=6)
         self.number_input.grid(row=1, column=0, sticky="nsew")
         number_scrollbar = ttk.Scrollbar(inputs, orient="vertical", command=self.number_input.yview)
@@ -3157,13 +3157,16 @@ class IntegrationApp:
         board_header = ttk.Frame(details, style="Card.TFrame", borderwidth=0)
         board_header.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 8))
         ttk.Label(board_header, text="설비 · 소재 사용량 조사", style="Section.TLabel").pack(side="left")
-        alert_controls = ttk.Frame(board_header, style="Card.TFrame", borderwidth=0)
-        alert_controls.pack(side="right")
         quick_cells = self.build_machine_monitor(details)
-        self.machine_alert_toggle = tk.Canvas(alert_controls, width=174, height=48, background="#141b28",
-                                             highlightthickness=1, highlightbackground="#141b28",
-                                             highlightcolor="#85b4ff", borderwidth=0, takefocus=True, cursor="hand2")
-        self.machine_alert_toggle.pack(side="left", padx=(0, 16))
+        # N3: 머신 알림 스위치와 알림 설정은 윗줄 7호기 옆 빈 칸에 둡니다(명령·바인딩은 그대로).
+        alert_controls = ttk.Frame(details, style="Card.TFrame", padding=(10, 6))
+        alert_controls.grid(row=1, column=4, sticky="nsew", pady=(0, 10))
+        alert_controls.columnconfigure(0, weight=1)
+        self.machine_alert_controls = alert_controls
+        self.machine_alert_toggle = tk.Canvas(alert_controls, width=174, height=48, background="#060b16",
+                                             highlightthickness=1, highlightbackground="#060b16",
+                                             highlightcolor="#8db3ff", borderwidth=0, takefocus=True, cursor="hand2")
+        self.machine_alert_toggle.grid(row=0, column=0, sticky="w")
         self.machine_alert_switch_images = {enabled: tk.PhotoImage(master=window, data=data, format="png")
                                             for enabled, data in MACHINE_ALERT_SWITCH_PNGS.items()}
         def switch_alert(event=None):
@@ -3175,7 +3178,7 @@ class IntegrationApp:
         self.machine_alert_toggle.bind('<Return>', switch_alert)
         self.machine_alert_settings_button = ttk.Button(alert_controls, text="알림 설정",
                                                         command=self.show_machine_alert_settings, style="Secondary.TButton")
-        self.machine_alert_settings_button.pack(side="left")
+        self.machine_alert_settings_button.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         self.update_machine_alert_toggle()
 
         self.material_quick = SuiteMaterialQuick.QuickPanel(self, details, cells=quick_cells, header=board_header)
@@ -3187,8 +3190,9 @@ class IntegrationApp:
         log_card.rowconfigure(1, weight=1)
         ttk.Label(log_card, text="작업 기록 · 최근 100줄", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.log = tk.Text(log_card, width=30, height=10, font=("맑은 고딕", 9), wrap="word", state="disabled",
-                           background="#0b0f16", foreground="#a9abaf", relief="flat", borderwidth=0,
-                           highlightthickness=0, padx=10, pady=6)
+                           background="#050a14", foreground="#aebcd8", relief="flat", borderwidth=0,
+                           highlightthickness=1, highlightbackground="#2c4274", highlightcolor="#2c4274",
+                           padx=10, pady=6)
         self.log.grid(row=1, column=0, sticky="nsew")
         log_scrollbar = ttk.Scrollbar(log_card, orient="vertical", command=self.log.yview)
         log_scrollbar.grid(row=1, column=1, sticky="ns")
@@ -3227,6 +3231,7 @@ class IntegrationApp:
         self.reserve_empty_button_width()
         for button in self._suite_buttons.values():
             button.configure(image=visual["popup_icon"], compound="right")
+        self.apply_n3_marks(visual["images"])
         # Keep the wash form compact within the same card surface as other pages.
         wash_body = self.app_pages["wash"].winfo_children()[0]
         wash_body.configure(style="RoundedCard.TFrame", padding=20)
@@ -3385,9 +3390,9 @@ class IntegrationApp:
         canvas = self.machine_alert_toggle
         enabled = self.machine_alert_enabled
         canvas.delete('all')
-        canvas.create_text(4, 14, text='머신 알림', anchor='w', fill='#e7edf7', font=('맑은 고딕', 10, 'bold'))
+        canvas.create_text(4, 14, text='머신 알림', anchor='w', fill='#eaf0fc', font=('맑은 고딕', 10, 'bold'))
         canvas.create_text(4, 34, text='{}대 선택'.format(len(self.machine_alert_selected)), anchor='w',
-                           fill='#9fa1a6', font=('맑은 고딕', 9))
+                           fill='#9fb2d6', font=('맑은 고딕', 9))
         canvas.create_image(81, 8, anchor='nw', image=self.machine_alert_switch_images[enabled])
         canvas.create_text(112 if enabled else 137, 24, text='ON' if enabled else 'OFF',
                            fill='#ffffff', font=('맑은 고딕', 10, 'bold'))
@@ -3429,7 +3434,7 @@ class IntegrationApp:
         dialog = self.tk.Toplevel(self.window)
         self.machine_alert_settings_dialog = dialog
         dialog.title('머신 알림 설정'); dialog.transient(self.window)
-        dialog.configure(background='#0e141d'); dialog.resizable(False, False)
+        dialog.configure(background='#060b16'); dialog.resizable(False, False)
         frame = self.ttk.Frame(dialog, padding=22); frame.pack(fill='both', expand=True)
         self.ttk.Label(frame, text='알림 받을 호기', style='Subtitle.TLabel').pack(anchor='w')
         self.ttk.Label(frame, text='초록 → 빨강·노랑·회색일 때 호기 완료 알림\n프로그램번호 변경·초록 복귀 시 알림 없음',
@@ -3437,18 +3442,18 @@ class IntegrationApp:
         enabled = self.tk.BooleanVar(value=self.machine_alert_enabled)
         sound = self.tk.BooleanVar(value=self.machine_alert_sound)
         self.machine_alert_sound_var = sound
-        self.tk.Checkbutton(frame, text='머신 알림 켜기', variable=enabled, background='#0e141d',
-                            foreground='#e7edf7', selectcolor='#1f2b3f', activebackground='#0e141d',
+        self.tk.Checkbutton(frame, text='머신 알림 켜기', variable=enabled, background='#060b16',
+                            foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
                             activeforeground='#ffffff', font=('맑은 고딕', 10)).pack(anchor='w', pady=(0, 10))
-        self.tk.Checkbutton(frame, text='알림 소리 켜기', variable=sound, background='#0e141d',
-                            foreground='#e7edf7', selectcolor='#1f2b3f', activebackground='#0e141d',
+        self.tk.Checkbutton(frame, text='알림 소리 켜기', variable=sound, background='#060b16',
+                            foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
                             activeforeground='#ffffff', font=('맑은 고딕', 10)).pack(anchor='w', pady=(0, 10))
         sound_kind = self.tk.StringVar(value=self.machine_alert_sound_kind)
         sound_choices = self.ttk.Frame(frame); sound_choices.pack(fill='x', pady=(0, 10))
         for label, value in (('기본 시스템 소리', 'system'), ('톡 소리', 'tap')):
             self.tk.Radiobutton(sound_choices, text=label, value=value, variable=sound_kind,
-                                background='#0e141d', foreground='#e7edf7', selectcolor='#1f2b3f',
-                                activebackground='#0e141d', activeforeground='#ffffff',
+                                background='#060b16', foreground='#eaf0fc', selectcolor='#0e1a35',
+                                activebackground='#060b16', activeforeground='#ffffff',
                                 command=lambda: update_volume_state()).pack(side='left', padx=(0, 16))
         volume = self.tk.DoubleVar(value=self.machine_alert_volume)
         volume_text = self.tk.StringVar(value='음량 {}%'.format(self.machine_alert_volume))
@@ -3476,8 +3481,8 @@ class IntegrationApp:
         for row, numbers in enumerate(((1, 3, 5, 7), (2, 4, 6, 8, 9))):
             for column, number in enumerate(numbers):
                 var = self.tk.BooleanVar(value=number in self.machine_alert_selected); variables[number] = var
-                self.tk.Checkbutton(grid, text='{}호기'.format(number), variable=var, background='#0e141d',
-                                    foreground='#e7edf7', selectcolor='#1f2b3f', activebackground='#0e141d',
+                self.tk.Checkbutton(grid, text='{}호기'.format(number), variable=var, background='#060b16',
+                                    foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
                                     activeforeground='#ffffff', font=('맑은 고딕', 11), padx=14, pady=9
                                     ).grid(row=row, column=column, sticky='w')
         self.machine_alert_setting_vars = variables
@@ -3624,7 +3629,7 @@ class IntegrationApp:
                 cell.grid(row=row + 1, column=column, sticky="ew", padx=(0, 10 if column < 4 else 0),
                           pady=(0, 10 if row == 0 else 0))
                 cell.columnconfigure(0, weight=1)
-                tile = self.tk.Canvas(cell, width=150, height=56, background="#141b28",
+                tile = self.tk.Canvas(cell, width=150, height=56, background="#060b16",
                                       highlightthickness=0, borderwidth=0,
                                       takefocus=True, cursor="hand2")
                 tile.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -3649,7 +3654,7 @@ class IntegrationApp:
 
     @staticmethod
     def shape_machine_tile(canvas, light, width, height):
-        w, h, r = max(width, 24) - 1, max(height, 24) - 1, 8
+        w, h, r = max(width, 24) - 1, max(height, 24) - 1, 4
         canvas.coords(light, 1 + r, 1, w - r, 1, w, 1, w, 1 + r, w, h - r, w, h, w - r, h,
                       1 + r, h, 1, h, 1, h - r, 1, 1 + r, 1, 1)
         canvas.coords('machine_state', w - 11, 15)
@@ -3674,6 +3679,23 @@ class IntegrationApp:
             tile.itemconfigure(number, text=value, fill=ink)
         self.refresh_machine_details()
 
+    def apply_n3_marks(self, images):
+        """N3 화면 표시만 더합니다: 작업 모드 선택 표시, 고정 제목 앞 막대. 명령·값은 그대로입니다."""
+        try:
+            for button in self.mode_buttons:
+                button.configure(image=(images["radio_off"], "selected", images["radio_on"]), compound="left")
+            pending = [self.window]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                if (widget.winfo_class() == "TLabel" and str(widget.cget("style")) in ("Section.TLabel", "STL.Section.TLabel")
+                        and not str(widget.cget("textvariable")) and str(widget.cget("text"))
+                        and not str(widget.cget("image"))):
+                    widget.configure(image=images["heading_bar"], compound="left")
+        except Exception:
+            # 표시 장식이 실패해도 작업 기능에는 영향이 없어야 합니다.
+            pass
+
     def position_handover_button(self):
         if not self.handover_toggle.winfo_exists():
             return
@@ -3696,14 +3718,14 @@ class IntegrationApp:
         self.machine_detail_selected = machine
         dialog = self.tk.Toplevel(self.window)
         self.machine_detail_dialog = dialog
-        dialog.transient(self.window);dialog.configure(background="#101620")
+        dialog.transient(self.window);dialog.configure(background="#060b16")
         dialog.geometry("460x530");dialog.minsize(400, 510)
         frame = self.ttk.Frame(dialog, padding=20);frame.pack(fill="both", expand=True)
         self.machine_detail_title = self.tk.StringVar()
         self.ttk.Label(frame, textvariable=self.machine_detail_title, style="Title.TLabel").pack(anchor="w")
         self.machine_detail_status = self.tk.StringVar()
         self.machine_detail_status_label = self.tk.Label(frame, textvariable=self.machine_detail_status,
-                                                         background="#2a3a55", foreground="#ffffff",
+                                                         background="#22355c", foreground="#ffffff",
                                                          font=("맑은 고딕", 11, "bold"), padx=14, pady=8)
         self.machine_detail_status_label.pack(anchor="w", pady=(8, 16))
         table = self.ttk.Frame(frame, style="Card.TFrame", padding=16);table.pack(fill="both", expand=True)
@@ -3735,7 +3757,7 @@ class IntegrationApp:
         dialog.title(title);self.machine_detail_title.set(title)
         states = {"RUN": "가공 중", "ALARM": "알람", "WAIT": "대기", "HOLD": "일시 정지", "STOP": "정지", "OFF": "꺼짐"}
         state = record.get('state', '')
-        self.machine_detail_status_label.configure(background={"RUN": "#246b48", "ALARM": "#963e49", "WAIT": "#a88830", "HOLD": "#a88830"}.get(state, "#2a3a55"))
+        self.machine_detail_status_label.configure(background={"RUN": "#246b48", "ALARM": "#963e49", "WAIT": "#a88830", "HOLD": "#a88830"}.get(state, "#22355c"))
         status = (states.get(state, '상태 미확인') + (f" · {state}" if state else '')) if record else '최신 응답 없음 · 연결 확인 중'
         if record.get('_stale'):
             status = '연결 확인 중 · 마지막 확인 상태: ' + states.get(state, state)
@@ -4007,7 +4029,7 @@ class IntegrationApp:
         dialog = self.tk.Toplevel(self.window)
         self.handover_dialog = dialog
         dialog.title("인수인계사항 작성" if note is None else "인수인계사항 보기")
-        dialog.configure(background="#0e141d")
+        dialog.configure(background="#060b16")
         dialog.transient(self.window)
         dialog.geometry("640x530")
         dialog.minsize(480, 400)
@@ -4026,9 +4048,9 @@ class IntegrationApp:
         content_frame.columnconfigure(0, weight=1)
         content_frame.rowconfigure(0, weight=1)
         content = self.tk.Text(content_frame, font=("맑은 고딕", 11), wrap="word", undo=True,
-                               background="#0b0f16", foreground="#e7edf7", insertbackground="#ffffff",
-                               selectbackground="#284a79", relief="flat", padx=12, pady=12,
-                               highlightthickness=1, highlightbackground="#405881", highlightcolor="#85b4ff")
+                               background="#050a14", foreground="#eaf0fc", insertbackground="#ffffff",
+                               selectbackground="#1d3f86", relief="flat", padx=12, pady=12,
+                               highlightthickness=1, highlightbackground="#5878b8", highlightcolor="#8db3ff")
         content.grid(row=0, column=0, sticky="nsew")
         scrollbar = self.ttk.Scrollbar(content_frame, orient="vertical", command=content.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -4142,7 +4164,7 @@ class IntegrationApp:
         dialog = tk.Toplevel(self.window)
         self.program_path_dialog = dialog
         dialog.title('NC프로그램 경로 설정')
-        dialog.configure(bg='#0e141d')
+        dialog.configure(bg='#060b16')
         dialog.transient(self.window)
         dialog.geometry('680x190')
         dialog.minsize(520, 190)
@@ -4630,7 +4652,7 @@ class IntegrationApp:
     def ask_rename_name(self, path):
         dialog = self.tk.Toplevel(self.window)
         dialog.title("파일 이름 변경")
-        dialog.configure(background="#0e141d")
+        dialog.configure(background="#060b16")
         dialog.transient(self.window)
         dialog.grab_set()
         frame = self.ttk.Frame(dialog, padding=20)
@@ -4829,7 +4851,7 @@ class IntegrationApp:
     def choose_candidate(self, number, paths):
         dialog = self.tk.Toplevel(self.window)
         dialog.title("O{} 파일 선택".format(number))
-        dialog.configure(background="#0e141d")
+        dialog.configure(background="#060b16")
         dialog.transient(self.window)
         dialog.grab_set()
         frame = self.ttk.Frame(dialog, padding=20)
@@ -4837,9 +4859,9 @@ class IntegrationApp:
         self.ttk.Label(frame, text="같은 번호가 여러 곳에 있습니다. 가져올 파일을 선택하세요.",
                        font=("맑은 고딕", 11, "bold")).pack(anchor="w", pady=(0, 12))
         listing = self.tk.Listbox(frame, width=110, height=min(12, len(paths)), exportselection=False,
-                                  font=("맑은 고딕", 10), background="#0b0f16", foreground="#e7edf7",
-                                  selectbackground="#3d7ef5", selectforeground="#ffffff", relief="flat",
-                                  highlightthickness=1, highlightbackground="#405881", highlightcolor="#85b4ff")
+                                  font=("맑은 고딕", 10), background="#050a14", foreground="#eaf0fc",
+                                  selectbackground="#2a66f2", selectforeground="#ffffff", relief="flat",
+                                  highlightthickness=1, highlightbackground="#5878b8", highlightcolor="#8db3ff")
         listing.pack(fill="both", expand=True)
         horizontal = self.ttk.Scrollbar(frame, orient="horizontal", command=listing.xview)
         horizontal.pack(fill="x")
@@ -5019,7 +5041,7 @@ class IntegrationApp:
         self._suite_close_dialog = dialog
         dialog.withdraw()
         dialog.title('지후니우스 종료')
-        dialog.configure(background='#0e141d')
+        dialog.configure(background='#060b16')
         dialog.transient(self.window)
         dialog.resizable(False, False)
         frame = self.ttk.Frame(dialog, padding=22)
@@ -5145,7 +5167,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.09.12'
+SUITE_APP_VERSION = '2026.11.10.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

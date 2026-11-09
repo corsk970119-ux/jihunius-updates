@@ -52,8 +52,8 @@ DEFAULT_MATERIAL_TYPE = '10B'
 MOVEMENT_NAMES = {'initial':'최초 재고', 'register':'최초 재고', 'receive':'입고', 'adjust':'실사 조정',
                   'consume':'소재 사용', 'return':'교체 취소', 'cancel':'교체 취소',
                   'reversal':'교체 취소', 'reverse':'교체 취소'}
-PALETTE = dict(bg='#0e141d', card='#141b28', field='#0b0f16', text='#e7edf7',
-               muted='#9fa1a6', line='#2d3e5b', blue='#3d7ef5', selected='#284a79',
+PALETTE = dict(bg='#060b16', card='#060b16', field='#050a14', text='#eaf0fc',
+               muted='#9fb2d6', line='#2c4274', blue='#2a66f2', selected='#1d3f86',
                green='#72d9ad', yellow='#f1c676', red='#ed929c', danger='#b91c1c', danger_active='#991b1b')
 STATES = {'RUN': '가공 중', 'WAIT': '대기', 'HOLD': '일시정지',
           'ALARM': '알람', 'STOP': '정지', 'OFF': '전원 꺼짐'}
@@ -1201,7 +1201,7 @@ def make_rounded_button(tk, parent, **options):
                 if disabled:
                     front=self.winfo_rgb(fill);back=self.winfo_rgb(self._round_surface)
                     fill='#'+''.join('{:02x}'.format(round((a*.64+b*.36)/257)) for a,b in zip(front,back))
-                border='#85b4ff' if self._round_focus and not disabled else PALETTE['line']
+                border='#8db3ff' if self._round_focus and not disabled else PALETTE['line']
                 signature=(w,h,fill,border)
                 if signature==self._round_signature:return
                 self._round_signature=signature
@@ -1291,6 +1291,18 @@ class Application:
     def _style(self):
         style = self.ttk.Style(self.root)
         style.theme_use('clam')
+        # N3: 얇은 스크롤바(화살표 없음) — 메인 창과 같은 모양. 스크롤 동작은 그대로입니다.
+        for _orient, _sticky in (('Vertical', 'ns'), ('Horizontal', 'ew')):
+            try:
+                style.layout(_orient + '.TScrollbar', [(_orient + '.Scrollbar.trough', {'sticky': _sticky, 'children': [
+                    (_orient + '.Scrollbar.thumb', {'unit': '1', 'expand': '1', 'sticky': 'nsew'})]})])
+                style.configure(_orient + '.TScrollbar', arrowsize=9, gripcount=0, troughcolor='#08101f',
+                                background='#22355c', bordercolor='#08101f', lightcolor='#22355c',
+                                darkcolor='#22355c', borderwidth=0)
+                for _option in ('background', 'lightcolor', 'darkcolor'):
+                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3b5488')]})
+            except Exception:
+                pass
         style.configure('.', font=(self.font, 10), background=PALETTE['bg'], foreground=PALETTE['text'])
         style.configure('TFrame', background=PALETTE['bg'])
         style.configure('TLabel', background=PALETTE['bg'], foreground=PALETTE['text'])
@@ -1403,7 +1415,7 @@ class Application:
             self.label(board,heading,color=PALETTE['muted'],bg=PALETTE['bg']).grid(row=0,column=j,sticky='nsew',pady=(0,1),ipady=8)
         self.rows = {}
         for n in MACHINES:
-            bg = PALETTE['card'] if n%2 else '#151d2a'
+            bg = PALETTE['card'] if n%2 else '#0a1224'
             row_card=self.rounded_panel(board,fill=bg,radius=11)
             row_card.grid(row=n,column=0,columnspan=len(widths),sticky='nsew',pady=(0,4))
             # All headings and machine cells belong to ONE grid. Independent
