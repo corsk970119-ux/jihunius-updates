@@ -5141,7 +5141,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.09.10'
+SUITE_APP_VERSION = '2026.11.09.11'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
