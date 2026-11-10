@@ -913,6 +913,27 @@ CHECK_SETTLE_SECONDS=4.0
 LARGE_LIST_SUMMARY_READING=False
 
 
+def describe_cover(api,view,key):
+    """체크 칸 자리를 실제로 차지한 창이 무엇인지(오류 기록용 글). 입력은 보내지 않으며, 알아내지 못하면 빈 글."""
+    try:
+        cell=view['selection_cells'][key]['bounds']
+        u=api.u;hit=u.WindowFromPoint(wintypes.POINT(round(cell[0]+cell[2]/2),round(cell[1]+cell[3]/2)))
+        if not hit:return '창 없음'
+        def text(function,handle):
+            buffer=ctypes.create_unicode_buffer(256);function(wintypes.HWND(handle),buffer,256)
+            return buffer.value.strip()[:60]
+        parts=['종류 '+(text(u.GetClassNameW,hit) or '?')]
+        pid=wintypes.DWORD();u.GetWindowThreadProcessId(wintypes.HWND(hit),ctypes.byref(pid))
+        if u.IsChild(wintypes.HWND(view['handle']),wintypes.HWND(hit)):parts.append('POP 표 안쪽 창')
+        elif pid.value==api.target.get('pid'):parts.append('POP의 다른 창')
+        else:parts.append('다른 프로그램')
+        root=u.GetAncestor(wintypes.HWND(hit),2)
+        title=text(u.GetWindowTextW,root) if root else ''
+        if title:parts.append('창 제목 '+title)
+        return ' · '.join(parts)
+    except Exception:return ''
+
+
 def summary_values(row):
     """행 요약값 'a;b;c;'를 셀 값 목록으로 바꿉니다. 형식이 확실하지 않으면 None."""
     value=row.get('value')
@@ -971,7 +992,8 @@ def pop_view(report, map_visible=True, baseline_raw=None, summary_rows=False):
                 cb=bounds(c)
                 if (not c.get('offscreen') and cb[2]>0 and cb[3]>0 and abs(cb[0]-hb[0])<=3
                         and abs(cb[2]-hb[2])<=3 and cb[1]>=rb[1]-2 and cb[1]+cb[3]<=rb[1]+rb[3]+2):cs.append(c)
-            if len(cs)!=1:raise RuntimeError('POP '+name+' 셀 위치를 확실히 구분하지 못했습니다. 화면을 확인해 주세요.')
+            if len(cs)!=1:raise RuntimeError('POP '+name+' 셀 위치를 확실히 구분하지 못했습니다. 화면을 확인해 주세요.'
+                                             f' ({i}번째 줄 · 맞는 칸 {len(cs)}개 · 이 줄의 칸 {len(cells)}개)')
             cell=cs[0];cn=cell.get('name','').strip()
             if cn and not (cn==name or re.match(re.escape(name)+r'\s+(?:row|행)\s*\d+',cn,re.I)):
                 raise RuntimeError('POP 열 이름과 셀 위치가 일치하지 않습니다: '+name)
@@ -1292,7 +1314,7 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
     current=coverage['current_view'];pending=set(targets);done=[];moves=0;stalled=0
     grid_target={'handle':coverage['handle'],'pid':target.get('pid',0),'title':'POP 결과표',
                  'mode':'mes_rows' if coverage['summary_supported'] else 'pop_full'}
-    select=coverage['columns']['선택']
+    select=coverage['columns']['선택'];cover_notes={}
     def read(label,allowed=()):
         if stop.is_set():raise Stopped('사용자 중지 — 이미 체크된 행은 그대로 유지됩니다.')
         r=capture(grid_target,label,stop);emit('capture',r)
@@ -1309,6 +1331,8 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
             except RuntimeError as error:
                 # 가림 검사는 입력을 보내기 전에 하므로 이 행은 아직 눌리지 않았습니다.
                 if '가려져' not in str(error):raise
+                cover_notes[key]=describe_cover(api,view,key)
+                emit('log',f'{key}번째 줄 체크 칸이 가려짐'+(' — '+cover_notes[key] if cover_notes[key] else ''))
                 covered.append(key);continue
             clicks[key]+=1
             emit('check',{'row':key,'project':targets[key],'status':'attempt'})
@@ -1381,7 +1405,10 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
                 unchanged=settle(batch,'POP 화면 단위 체크 확인' if rounds==1 else 'POP 미반영 항목 재확인')
                 if covered and unchanged:
                     covers+=1
-                    if covers>3:raise RuntimeError('체크 칸이 다른 창에 계속 가려져 있어 중단했습니다. POP 화면을 확인해 주세요.')
+                    if covers>3:
+                        seen_covers=sorted({note for note in cover_notes.values() if note})
+                        raise RuntimeError('체크 칸이 다른 창에 계속 가려져 있어 중단했습니다. POP 화면을 확인해 주세요.'
+                                           +(' (가린 창: '+' / '.join(seen_covers)+')' if seen_covers else ''))
                     emit('log',f'체크 칸이 잠시 가려져 있어 기다렸다 다시 확인합니다({covers}/3).')
                     if stop.wait(1.0):raise Stopped('사용자 중지')
                     # 기다리는 동안 늦게 반영됐을 수 있으므로, 다시 누르기 직전의 화면으로 판단합니다.

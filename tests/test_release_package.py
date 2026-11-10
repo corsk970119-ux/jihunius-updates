@@ -46,7 +46,8 @@ APPROVED_READER_LIMITS=(
  ("else '330초 제한 시간'","else '45초 제한 시간'"))
 
 # Approved 2026-11-11: large-list reading/check-settling (see the comment at the comparison below).
-LARGE_LIST_FUNCTIONS={'pop_view','collect_pop','check_matched','pop_steps','summary_values','read_settled'}
+LARGE_LIST_FUNCTIONS={'pop_view','collect_pop','check_matched','pop_steps','summary_values','read_settled',
+                      'describe_cover'}  # describe_cover: 오류 기록용 글만 만듦(입력 없음)
 LARGE_LIST_ADDITIONS={'SummaryUnavailable','TRANSIENT_VIEW_ERRORS','CHECK_SETTLE_SECONDS','LARGE_LIST_SUMMARY_READING'}
 
 def approved_reader_limits(text):

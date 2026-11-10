@@ -296,7 +296,9 @@ def compose_detail(context='', trace='', environment_line='', limit=16000):
     parts = []
     if environment_line: parts.append('[환경] ' + str(environment_line)[:300])
     context = str(context or '').strip()
-    if context: parts.append('[진단]\n' + context[:6000])
+    # 길면 가운데를 줄입니다: 앞쪽 요약과 가장 최근 진행 기록(끝부분)이 제일 중요합니다.
+    if len(context) > 6000: context = context[:1500] + '\n… (가운데 생략) …\n' + context[-4400:]
+    if context: parts.append('[진단]\n' + context)
     trace = str(trace or '').strip()
     if trace:
         used = sum(len(p) + 1 for p in parts)
@@ -340,9 +342,17 @@ _recorder=None
 
 
 def capture(message, feature=None, stage='', detail='', work='', context=''):
-    """context: 그 기능이 아는 진단 정보(몇 줄). 상세 정보의 [진단] 자리에 들어갑니다."""
+    """context: 그 기능이 아는 진단 정보(몇 줄). 상세 정보의 [진단] 자리에 들어갑니다.
+
+    추적 정보를 따로 주지 않아도, 예외 객체나 처리 중인 예외가 있으면 그 추적을 자동으로 남깁니다.
+    """
     if _recorder is not None:
-        try:_recorder.capture(message,feature,stage,detail,work,context)
+        try:
+            if not detail:
+                if isinstance(message,BaseException) and message.__traceback__ is not None:
+                    detail=''.join(traceback.format_exception(type(message),message,message.__traceback__))
+                elif sys.exc_info()[0] is not None:detail=traceback.format_exc()
+            _recorder.capture(message,feature,stage,detail,work,context)
         except Exception:pass
 
 
@@ -362,7 +372,9 @@ def install(feature, version, path=None):
         def wrapped(title=None,message=None,_original=original,_name=name,**options):
             text=str(message or '')
             if _name=='showerror' or any(word in text for word in ('실패','오류','못했','충돌','누락')):
-                capture(text,stage=str(title or '오류 알림'))
+                # 처리 중인 예외가 없으면, 이 알림 창을 띄운 코드 위치를 남깁니다.
+                where='' if sys.exc_info()[0] is not None else '알림 창을 띄운 위치:\n'+''.join(traceback.format_stack(limit=9)[:-1])
+                capture(text,stage=str(title or '오류 알림'),detail=where)
             return _original(title,message,**options)
         setattr(messagebox,name,wrapped)
     old_tk=tk.Tk.report_callback_exception

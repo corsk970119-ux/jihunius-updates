@@ -30,6 +30,30 @@ class DetailLayoutTests(unittest.TestCase):
         plain = next(r for r in rows if r['feature'] == '지후니우스')
         self.assertEqual(plain['detail'], '[환경] TestOS · Python 3.8')
 
+    def test_long_context_keeps_summary_and_latest_lines(self):
+        context = '요약 줄\n' + '\n'.join('기록 {:04d} '.format(i) + 'x' * 60 for i in range(400))
+        text = eh.compose_detail(context, 'trace', 'env')
+        self.assertIn('요약 줄', text); self.assertIn('기록 0399', text); self.assertIn('(가운데 생략)', text)
+        self.assertNotIn('기록 0200', text); self.assertLessEqual(len(text), 16384)
+
+    def test_traceback_is_recorded_even_when_the_caller_passes_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = eh._recorder
+            eh._recorder = eh.Recorder(Path(tmp) / 'h.sqlite', '지후니우스', 'test')
+            try:
+                try: raise OSError('공유 폴더 없음')
+                except OSError as error: eh.capture(error, feature='인수인계', stage='읽기')   # 예외 객체
+                try: {}['없는키']
+                except KeyError: eh.capture('설정 읽기 실패', feature='설정', stage='불러오기')    # 처리 중인 예외
+                eh.capture('그냥 안내', feature='안내', stage='표시')                               # 예외 없음
+                eh._recorder.events.join(); eh._recorder.close()
+                rows = {r['feature']: r['detail'] for r in eh.LocalStore(Path(tmp) / 'h.sqlite').view()['records']}
+            finally:
+                eh._recorder = previous
+        self.assertIn("[추적]\nTraceback", rows['인수인계']); self.assertIn('OSError: 공유 폴더 없음', rows['인수인계'])
+        self.assertIn("KeyError: '없는키'", rows['설정'])
+        self.assertNotIn('[추적]', rows['안내'])
+
     def test_environment_never_raises(self):
         self.assertIn('Python', eh.environment())
 
@@ -39,6 +63,7 @@ class WashDiagnosticsTests(unittest.TestCase):
         module = load_app()
         app = module.WashApp.__new__(module.WashApp)
         app.started = time.monotonic() - 95; app.trail = []; app.reads = []; app.progress = {}; app.last_result = None
+        app.run_sequence = '07'
         app.stop = SimpleNamespace(is_set=lambda: False); app.events = SimpleNamespace(put=lambda item: None)
         return module, app
 
@@ -51,11 +76,12 @@ class WashDiagnosticsTests(unittest.TestCase):
             for index in range(60):
                 app.emit('log', '진행 {}'.format(index))
             app.emit('result', {'coverage': {'declared_rows': 72, 'summary_supported': True, 'top_verified': True,
-                                             'wheel_moves': 4, 'basis': 'MSAA 전체 행과 셀 직접 판독'},
+                                             'wheel_moves': 4, 'basis': 'MSAA 전체 행과 셀 직접 판독',
+                                             'raw': [['선택안됨'] * 23] * 72, 'current_view': {'visible': dict.fromkeys(range(18))}},
                                 'matching': {'matched': [1] * 40, 'already_selected': [1, 2]}})
             for _ in range(12): app.emit('check', {'status': 'attempt'})
             for _ in range(11): app.emit('check', {'status': 'verified'})
-            app.reads += [('POP 조회 후 전체 목록 1회 판독', 'pop_full', 61.2, 5120), ('POP 맨 위 이동 1', 'mes_rows', 0.8, 300)]
+            app.reads += [('POP 조회 후 전체 목록 1회 판독', 'pop_full', 61.2, 5120), ('POP 아래로 확인 1', 'mes_rows', 0.8, 300)]
             app.emit('reading', ('POP 미반영 항목 재확인', time.monotonic()))
             app.emit('error', '버튼이 다른 창에 가려져 있어 중단했습니다.')
         finally:
@@ -63,12 +89,15 @@ class WashDiagnosticsTests(unittest.TestCase):
         (args, kwargs), = captured
         self.assertEqual(kwargs['stage'], 'POP 미반영 항목 재확인')
         context = kwargs['context']
-        for expected in ('경과 9', 'POP 목록 72줄 · 행 요약값 사용 · 맨 위 확인 예 · 맨 아래 확인 아니오 · 스크롤 4회',
+        for expected in ('경과 9', '세척순번 07', 'POP 표: 한 줄 23칸 · 화면에 보이는 줄 18',
+                         'POP 목록 72줄 · 행 요약값 사용 · 맨 위 확인 예 · 맨 아래 확인 아니오 · 아래로 이동 1회',
                          '매칭 대상 40개 · 이미 선택 2개', '체크 클릭 12회 · 체크 확인 11개',
                          '화면 판독 2회 · 합계 62.0초 · 가장 오래: POP 조회 후 전체 목록 1회 판독 (pop_full · 61.2초 · 항목 5120개)',
-                         '[진행 기록 · 최근 40줄]', '진행 59', '중단: 버튼이 다른 창에 가려져'):
+                         '마지막 판독: POP 조회 후 전체 목록 1회 판독 (pop_full · 61.2초) → POP 아래로 확인 1 (mes_rows · 0.8초)',
+                         '[진행 기록 · 처음 8줄 + 최근 32줄]', '진행 0\n', '진행 7\n', '줄 생략', '진행 59',
+                         '중단: 버튼이 다른 창에 가려져'):
             self.assertIn(expected, context)
-        self.assertNotIn('진행 19\n', context)   # 최근 40줄만
+        self.assertNotIn('진행 19\n', context)   # 가운데는 줄임: 시작 상황과 멈추기 직전이 남음
 
     def test_diagnostics_failure_never_blocks_the_error_record(self):
         module, app = self.wash()

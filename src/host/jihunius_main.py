@@ -2758,24 +2758,27 @@ class WashApp:
         self.root.after(80,self.poll)
 
     def note(self,text):
-        """오류가 났을 때 함께 남길 진행 기록(최근 40줄). 자동 작업에는 영향을 주지 않습니다."""
+        """오류가 났을 때 함께 남길 진행 기록. 자동 작업에는 영향을 주지 않습니다."""
         try:
             trail=self.trail
-            trail.append('{:7.1f}초  {}'.format(time.monotonic()-self.started,str(text).replace('\n',' ')[:200]))
-            del trail[:-40]
+            trail.append('{:7.1f}초  {}'.format(time.monotonic()-self.started,str(text).replace('\n',' ')[:160]))
+            del trail[8:-400]    # 처음 8줄과 최근 400줄만 보관
         except Exception:pass
 
     def diagnostics(self):
         """세척완료가 멈춘 순간의 상황 요약. 오류 기록의 [진단] 자리에 들어갑니다."""
         try:
-            lines=['경과 {:.1f}초'.format(time.monotonic()-self.started)]
+            lines=['경과 {:.1f}초 · 세척순번 {}'.format(time.monotonic()-self.started,getattr(self,'run_sequence','?'))]
             result=getattr(self,'last_result',None) or {}
             coverage=result.get('coverage') or {}
             if coverage:
-                lines.append('POP 목록 {}줄 · 행 요약값 {} · 맨 위 확인 {} · 맨 아래 확인 {} · 스크롤 {}회'.format(
+                raw=coverage.get('raw') or []
+                lines.append('POP 표: 한 줄 {}칸 · 화면에 보이는 줄 {}'.format(
+                    len(raw[0]) if raw else '?',len((coverage.get('current_view') or {}).get('visible',()))))
+                lines.append('POP 목록 {}줄 · 행 요약값 {} · 맨 위 확인 {} · 맨 아래 확인 {} · 아래로 이동 {}회'.format(
                     coverage.get('declared_rows','?'),'사용' if coverage.get('summary_supported') else '미사용',
                     '예' if coverage.get('top_verified') else '아니오','예' if coverage.get('bottom_verified') else '아니오',
-                    coverage.get('wheel_moves','?')))
+                    sum(1 for item in self.reads if str(item[0]).startswith('POP 아래로 확인'))))
                 lines.append('판독 방식: '+str(coverage.get('basis','?')))
             matching=result.get('matching') or {}
             if matching:
@@ -2785,8 +2788,17 @@ class WashApp:
                 label,mode,seconds,elements=max(self.reads,key=lambda item:item[2])
                 lines.append('화면 판독 {}회 · 합계 {:.1f}초 · 가장 오래: {} ({} · {:.1f}초 · 항목 {}개)'.format(
                     len(self.reads),sum(item[2] for item in self.reads),label,mode,seconds,elements))
-            lines.append('[진행 기록 · 최근 {}줄]'.format(len(self.trail)))
-            return '\n'.join(lines+list(self.trail))
+                lines.append('마지막 판독: '+' → '.join('{} ({} · {:.1f}초)'.format(item[0],item[1],item[2]) for item in self.reads[-3:]))
+            if os.name=='nt':
+                try:
+                    user=ctypes.windll.user32;front=user.GetForegroundWindow();title=ctypes.create_unicode_buffer(200)
+                    user.GetWindowTextW(front,title,200)
+                    lines.append('멈춘 순간 맨 앞 창: '+(title.value.strip()[:80] or '(제목 없음)'))
+                except Exception:pass
+            trail=list(self.trail)
+            if len(trail)>40:trail=trail[:8]+['   … {}줄 생략 …'.format(len(trail)-40)]+trail[-32:]
+            lines.append('[진행 기록 · 처음 8줄 + 최근 32줄]' if len(self.trail)>40 else '[진행 기록 · {}줄]'.format(len(trail)))
+            return '\n'.join(lines+trail)
         except Exception as error:return '진단 정보를 만들지 못했습니다: '+str(error)
 
     def emit(self,kind,value):
@@ -2820,7 +2832,7 @@ class WashApp:
         except Exception as e:return self.host.messagebox.showerror('조건 확인',str(e),parent=self.root)
         if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
         self.busy=True;self.stop=threading.Event();self.result=None;self.controls();self.started=time.monotonic()
-        self.trail=[];self.reads=[];self.progress={};self.last_result=None
+        self.trail=[];self.reads=[];self.progress={};self.last_result=None;self.run_sequence=expected['sequence']
         self.host.suspend_machine_alerts()
         self.capture_stage=None;self.capture_status=None
         self.status.set('창과 조건 확인 중…')
@@ -5370,7 +5382,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.3'
+SUITE_APP_VERSION = '2026.11.11.4'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

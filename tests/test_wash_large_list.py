@@ -353,5 +353,49 @@ class PopStepsTests(unittest.TestCase):
         self.assertEqual(sorted(pop.clicks), [3, 30])
 
 
+class ErrorRecordSuitabilityTests(unittest.TestCase):
+    """세척완료가 멈췄을 때 남는 오류 기록만 보고 상황을 알 수 있는지(가짜 POP으로 처음부터 끝까지)."""
+
+    def test_stopped_run_explains_where_how_far_and_what_happened(self):
+        import time
+        from test_host_stability import load_app
+        app_module = load_app()
+        wash = app_module.WashApp.__new__(app_module.WashApp)
+        wash.started = time.monotonic(); wash.trail = []; wash.reads = []; wash.progress = {}; wash.last_result = None
+        wash.run_sequence = '01'; wash.stop = Stop()
+        wash.events = type('Q', (), {'put': lambda self, item: None})()
+        records = []
+        original = app_module.SuiteErrors.capture
+        app_module.SuiteErrors.capture = lambda *args, **kwargs: records.append((args, kwargs))
+        pop = FakePop(70, page=15); pop.cover = {40: 99}
+        module = new_module(); module['CHECK_SETTLE_SECONDS'] = 0.05; module['SEQUENCE'] = '01'
+        module['ensure_sequence'] = lambda *a, **k: pop.report('mes_rows')[0]
+        module['validate_query'] = lambda report, binding: None
+        module['match_rows'] = lambda source, rows: {'matched': matches_for(pop, [5, 20, 40, 66]), 'already_selected': []}
+        def capture(target, label, stop):
+            wash.emit('reading', (label, time.monotonic()))
+            report = pop.capture(target, label, stop)
+            wash.reads.append((label, target['mode'], 0.3, len(report['records'])))
+            return report
+        try:
+            try:
+                module['pop_steps']({'handle': TOP, 'pid': 1}, {}, {'sequence': '01'}, {'sequence': '01', 'candidates': []},
+                                    pop, capture, Stop(), wash.emit)
+            except RuntimeError as error:
+                wash.emit('error', str(error))
+        finally:
+            app_module.SuiteErrors.capture = original
+        (args, kwargs), = records
+        self.assertIn('계속 가려져', str(args[0]))
+        self.assertEqual(kwargs['stage'], 'POP 미반영 항목 재확인')        # 어디서
+        context = kwargs['context']
+        for expected in ('세척순번 01', 'POP 표: 한 줄 8칸 · 화면에 보이는 줄 15', 'POP 목록 70줄',   # 얼마나 큰 목록
+                         '매칭 대상 4개', '체크 클릭 2회 · 체크 확인 2개',                              # 어디까지
+                         '가장 오래:', 'POP 70행 판독', '40번째 줄 체크 칸이 가려짐',                    # 무슨 일이
+                         '체크 칸이 잠시 가려져 있어 기다렸다 다시 확인합니다(3/3)', '중단: 체크 칸이 다른 창에 계속 가려져'):
+            self.assertIn(expected, context)
+        self.assertEqual(sorted(pop.clicks), [5, 20])
+
+
 if __name__ == '__main__':
     unittest.main()
