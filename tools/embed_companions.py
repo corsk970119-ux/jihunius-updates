@@ -43,6 +43,15 @@ def companion_source(root, key):
                     "_visual_module = _visual_types.ModuleType('visual_theme')\n"
                     "_visual_sys.modules['visual_theme'] = _visual_module\n"
                     "exec(compile("+repr(visual)+", '<visual_theme>', 'exec'), _visual_module.__dict__)\n")
+    if key in ('wash-log', 'material'):
+        # 얇은 스크롤바 한 함수만 공용으로 싣습니다(visual_theme 전체를 싣지 않아 용량 그대로).
+        visual=(root/'src/visual_theme.py').read_text(encoding='utf-8')
+        scroll=next(ast.get_source_segment(visual, node) for node in ast.parse(visual).body
+                    if isinstance(node, ast.FunctionDef) and node.name == 'install_thin_scrollbars')
+        visual_support=("\nimport types as _scroll_types, sys as _scroll_sys\n"
+                    "_scroll_module = _scroll_types.ModuleType('jihunius_scrollbars')\n"
+                    "_scroll_sys.modules['jihunius_scrollbars'] = _scroll_module\n"
+                    "exec(compile("+repr(scroll)+", '<jihunius_scrollbars>', 'exec'), _scroll_module.__dict__)\n")
     lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + visual_support + '\n\n']
     result = ''.join(lines)
     compile(result, key, 'exec')

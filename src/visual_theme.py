@@ -134,6 +134,11 @@ def install_visual_theme(window, style):
     install_thin_scrollbars(style)
     # N3: 바깥 카드는 바탕과 같은 면 + 또렷한 1px 테두리. 안쪽(borderwidth=0) 프레임은 그대로입니다.
     style.configure('Card.TFrame', bordercolor='#2e333d', lightcolor='#2e333d', darkcolor='#2e333d')
+    # 알림 설정 창의 음량 막대도 같은 톤(기본 clam 베이지색 대신).
+    style.configure('Horizontal.TScale', troughcolor='#08101f', background='#2a66f2', bordercolor='#2e333d',
+                    lightcolor='#3a75ff', darkcolor='#2257d0')
+    style.map('Horizontal.TScale', background=[('disabled', '#3a404b'), ('active', '#3a75ff')],
+              lightcolor=[('disabled', '#4a515e')], darkcolor=[('disabled', '#2e333d')])
     for name in ('Handover.TNotebook', 'Handover.Treeview', 'Treeview'):
         style.configure(name, bordercolor='#2e333d', lightcolor='#2e333d', darkcolor='#2e333d')
     # All action buttons share typography and vertical rhythm. Keep each

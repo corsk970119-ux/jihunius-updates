@@ -61,7 +61,7 @@ public sealed class MesReadOnlyAccessibility {
     bool limited;
     MesReadOnlyAccessibility(Action<object> output) { emit=output; }
     bool AtLimit() {
-        if (count>=15000 || clock.Elapsed.TotalSeconds>=35) { limited=true; return true; }
+        if (count>=40000 || clock.Elapsed.TotalSeconds>=80) { limited=true; return true; }
         return false;
     }
     static string Trim(object value, int maxLength=800) {
@@ -314,11 +314,11 @@ def inspect_window(target, label, stop):
         with stderr.open('wb') as errors:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                        stderr=errors, env=env, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-            deadline = time.monotonic()+45
+            deadline = time.monotonic()+95
             try:
                 while process.poll() is None:
                     if stop.wait(.1) or time.monotonic() >= deadline:
-                        report['interrupted'] = '사용자 중지' if stop.is_set() else '45초 제한 시간'
+                        report['interrupted'] = '사용자 중지' if stop.is_set() else '95초 제한 시간'
                         process.kill()
                         break
                 process.wait(timeout=5)

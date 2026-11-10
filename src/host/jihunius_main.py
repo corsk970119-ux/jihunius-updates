@@ -2379,7 +2379,7 @@ try {
 
     def capture(self,target,label,stop):
         import json
-        start=time.monotonic();deadline=start+45
+        start=time.monotonic();deadline=start+95
         if not self.ready:
             ready=self.record(stop,deadline)
             if ready.get('kind')!='ready':raise RuntimeError('화면 판독기 초기화 실패: '+str(ready.get('error','')))
@@ -2644,6 +2644,84 @@ def append_bounded_log(widget, text, max_lines=100, max_chars=250000):
         widget.configure(state='disabled')
 
 
+WASH_RUN_MARKER_NAME = "세척완료_실행중.json"
+WASH_RUN_MARKER_STALE_SECONDS = 30 * 60
+
+
+def run_bounded(action, seconds=3.0):
+    """공유폴더처럼 느릴 수 있는 확인을 정해진 시간만 기다립니다. 시간 초과·실패는 None."""
+    box = {}
+
+    def work():
+        try:
+            box["value"] = action()
+        except Exception:
+            box["value"] = None
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    return box.get("value")
+
+
+class WashRunMarker:
+    """여러 PC에서 세척완료를 동시에 실행하는지 알려 주는 공유폴더 표시 파일.
+
+    확인용일 뿐 작업을 막지 않습니다. 공유폴더에 닿지 않거나 파일이 오래되었으면(30분) 없는 것으로 봅니다.
+    """
+
+    def __init__(self, folder, pc=None, clock=time.time):
+        self.path = Path(folder) / WASH_RUN_MARKER_NAME
+        self.pc = pc or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "이 PC"
+        self.clock = clock
+        self.token = hashlib.sha1("{}-{}-{}".format(self.pc, os.getpid(), time.monotonic()).encode()).hexdigest()
+        self.owned = False
+
+    def other(self):
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            return None
+        if not isinstance(data, dict) or data.get("pc") == self.pc:
+            return None
+        try:
+            started = float(data.get("at", 0))
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= self.clock() - started <= WASH_RUN_MARKER_STALE_SECONDS:
+            return None
+        return data
+
+    def write(self):
+        if not self.path.parent.is_dir():
+            return False
+        temporary = self.path.with_name(self.path.name + "." + self.token[:12] + ".tmp")
+        try:
+            temporary.write_text(json.dumps({"pc": self.pc, "at": self.clock(), "token": self.token},
+                                            ensure_ascii=False), encoding="utf-8")
+            os.replace(str(temporary), str(self.path))
+            self.owned = True
+        except OSError:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+            self.owned = False
+        return self.owned
+
+    def release(self):
+        if not self.owned:
+            return False
+        self.owned = False
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("token") == self.token:
+                self.path.unlink()
+                return True
+        except (OSError, ValueError, UnicodeError):
+            pass
+        return False
+
+
 class WashApp:
     def __init__(self,host,parent):
         import tkinter as tk
@@ -2709,9 +2787,24 @@ class WashApp:
         self.status.set('창과 조건 확인 중…')
         threading.Thread(target=self.work,args=(run,expected,selected_numbers),daemon=True).start()
 
+    def confirm_other_pc_run(self,other):
+        try:at=time.strftime('%H:%M',time.localtime(float(other.get('at',0))))
+        except (TypeError,ValueError,OverflowError,OSError):at='조금 전'
+        message=('다른 PC({})에서 {}부터 세척완료를 실행 중입니다.\n'
+                 '같이 실행하면 같은 항목이 두 번 처리될 수 있습니다.\n\n그래도 진행할까요?').format(other.get('pc','알 수 없음'),at)
+        return self.host.messagebox.askyesno('세척완료 동시 실행 확인',message,parent=self.root)
+
     def work(self,run,expected,selected_numbers):
-        reader=None;finished_result=None;failure=None
+        reader=None;finished_result=None;failure=None;marker=None
         try:
+            if run is True:
+                # 여러 PC 동시 실행 확인(공유폴더). 닿지 않으면 확인 없이 그대로 진행합니다.
+                marker=WashRunMarker(Path(HANDOVER_SHARED_PARENT)/HANDOVER_FOLDER_NAME)
+                other=run_bounded(marker.other)
+                if other and not self.host.request_ui(self.confirm_other_pc_run,other):
+                    marker=None
+                    raise RuntimeError('다른 PC에서 실행 중이라 시작하지 않았습니다.')
+                run_bounded(marker.write)
             windows=self.pop.visible_windows()
             def target(title):
                 matches=[w for w in windows if w['title']==title]
@@ -2791,6 +2884,7 @@ class WashApp:
             if reader:
                 try:reader.close()
                 except Exception as e:self.emit('log','판독기 종료: '+str(e))
+            if marker is not None:run_bounded(marker.release)
             self.emit('done',{'elapsed':time.monotonic()-self.started,'result':finished_result,'error':failure})
 
     def show_completion(self,title,brief):
@@ -3040,6 +3134,10 @@ class IntegrationApp:
             row=0, column=2, sticky="w", padx=(18, 10))
         self.folder_input = ttk.Entry(date_options, width=8, font=("Consolas", 12))
         self.folder_input.grid(row=0, column=3, sticky="w")
+        # 오늘 날짜를 미리 넣어 둡니다(예: 11.10). 입력칸에 들어가면 전체 선택되어 바로 고쳐 쓸 수 있습니다.
+        today = datetime.now()
+        self.folder_input.insert(0, "{}.{:02d}".format(today.month, today.day))
+        self.folder_input.bind("<FocusIn>", lambda event: event.widget.select_range(0, "end"), add="+")
         self.program_path_button = ttk.Button(date_options, text="경로설정", style="Secondary.TButton",
                                               command=self.configure_program_path)
         self.program_path_button.grid(row=0, column=4, sticky="w", padx=(12, 0))
@@ -3065,62 +3163,7 @@ class IntegrationApp:
         body.columnconfigure(2, weight=1, minsize=250)
         body.columnconfigure(3, weight=3, minsize=350)
         body.rowconfigure(0, weight=1)
-        drive_card = ttk.Frame(body, style="Card.TFrame", padding=15)
-        drive_card.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
-        drive_card.columnconfigure(0, weight=1)
-        drive_card.rowconfigure(2, weight=1)
-        drive_header = ttk.Frame(drive_card, style="Card.TFrame", borderwidth=0)
-        drive_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        drive_header.columnconfigure(0, weight=1, uniform="drive_tools")
-        drive_header.columnconfigure(1, weight=1, uniform="drive_tools")
-        ttk.Label(drive_header, text="드라이브 정리", style="Section.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        self.drive_add_button = ttk.Button(drive_header, text="추가", width=0, style="DriveSmall.TButton",
-                                            command=self.choose_drive_files)
-        self.drive_add_button.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(10, 0))
-        self.drive_refresh_button = ttk.Button(drive_header, text="새로고침", width=0, style="DriveSmall.TButton",
-                                                command=self.refresh_drive_manual)
-        self.drive_refresh_button.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(10, 0))
-        self.drive_contents_status = tk.StringVar(value="드라이브 연결 대기")
-        self.drive_status_label = self.make_stable_status_label(
-            drive_card, self.drive_contents_status, "Caption.TLabel", width=1, anchor="w")
-        self.drive_status_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self.drive_contents = tk.Listbox(drive_card, width=20, height=8, font=("맑은 고딕", 9),
-                                         background="#050a14", foreground="#eaf0fc", relief="flat",
-                                         borderwidth=0, highlightthickness=1, highlightbackground="#2e333d",
-                                         highlightcolor="#2a66f2", selectbackground="#1d3f86",
-                                         selectforeground="#eaf0fc", exportselection=False, selectmode="extended")
-        self.drive_contents.grid(row=2, column=0, sticky="nsew")
-        drive_scrollbar = ttk.Scrollbar(drive_card, orient="vertical", command=self.drive_contents.yview)
-        drive_scrollbar.grid(row=2, column=1, sticky="ns")
-        drive_horizontal = ttk.Scrollbar(drive_card, orient="horizontal", command=self.drive_contents.xview)
-        drive_horizontal.grid(row=3, column=0, sticky="ew")
-        self.drive_contents.configure(yscrollcommand=drive_scrollbar.set, xscrollcommand=drive_horizontal.set)
-        self.drive_contents.bind("<Double-Button-1>", self.open_drive_item)
-        self.drive_contents.bind("<Return>", self.open_drive_item)
-        self.drive_contents.bind("<F2>", self.start_rename)
-        self.drive_contents.bind("<Button-3>", self.show_drive_menu)
-        self.drive_contents.bind("<Delete>", self.start_drive_delete)
-        window.bind("<F5>", self.refresh_active_tab)
-        self.drive_menu = tk.Menu(window, tearoff=False, background="#060b16", foreground="#ffffff",
-                                  activebackground="#2a66f2", activeforeground="#ffffff",
-                                  disabledforeground="#818388", font=("맑은 고딕", 10))
-        self.drive_menu.add_command(label="이름 변경", accelerator="F2", command=self.start_rename)
-        self.drive_menu.add_command(label="선택 파일 삭제", accelerator="Delete", command=self.start_drive_delete)
-        self.drive_menu.add_separator()
-        self.drive_menu.add_command(label="파일 추가…", command=self.choose_drive_files)
-        self.drive_menu.add_command(label="새로고침", accelerator="F5", command=self.refresh_drive_manual)
-        self.drive_item_paths = []
-        self.drive_contents_signature = None
-        self.drive_hint = tk.StringVar(value="파일을 끌어놓아 추가 · Delete: 삭제\n더블클릭: 열기 · F2: 이름 변경\n수정10.30 자동 추가 · 비우기 시 보존")
-        drive_actions = ttk.Frame(drive_card, style="Card.TFrame", borderwidth=0)
-        drive_actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        drive_actions.columnconfigure(0, weight=1)
-        self.empty_button = ttk.Button(drive_actions, text="드라이브 비우기", command=self.start_empty,
-                                       style="Danger.TButton")
-        self.empty_button.grid(row=0, column=0, sticky="ew")
-        self.drive_delete_button = ttk.Button(drive_actions, text="삭제", width=4, command=self.start_drive_delete,
-                                               style="Danger.TButton")
-        self.drive_delete_button.grid(row=0, column=1, padx=(6, 0), sticky="ns")
+        drive_card = self.build_drive_card(body)
 
         inputs = ttk.Frame(body, style="Card.TFrame", padding=15)
         inputs.grid(row=0, column=2, sticky="nsew", padx=(0, 14))
@@ -3147,42 +3190,7 @@ class IntegrationApp:
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
 
-        # A-3: 머신 상태 칸 아래에 같은 호기의 불량/소재교체를 붙인 한 장의 설비 보드.
-        details = ttk.Frame(frame, style="RoundedCard.TFrame", padding=(16, 12))
-        details.grid(row=3, column=0, sticky="ew")
-        for column in range(5):
-            details.columnconfigure(column, weight=1, uniform="machine-cell")
-        self.search_root_text = tk.StringVar(value=str(year_search_root(self.saved_program_year)))
-        self.year_value.trace_add("write", self.update_year_display)
-        self.destination_text = tk.StringVar(value="F:\\ / G:\\ 연결 대기")
-        board_header = ttk.Frame(details, style="Card.TFrame", borderwidth=0)
-        board_header.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 8))
-        ttk.Label(board_header, text="설비 · 소재 사용량 조사", style="Section.TLabel").pack(side="left")
-        quick_cells = self.build_machine_monitor(details)
-        # N3: 머신 알림 스위치와 알림 설정은 윗줄 7호기 옆 빈 칸에 둡니다(명령·바인딩은 그대로).
-        alert_controls = ttk.Frame(details, style="Card.TFrame", padding=(10, 6))
-        alert_controls.grid(row=1, column=4, sticky="nsew", pady=(0, 10))
-        alert_controls.columnconfigure(0, weight=1)
-        self.machine_alert_controls = alert_controls
-        self.machine_alert_toggle = tk.Canvas(alert_controls, width=174, height=48, background="#060b16",
-                                             highlightthickness=1, highlightbackground="#060b16",
-                                             highlightcolor="#8db3ff", borderwidth=0, takefocus=True, cursor="hand2")
-        self.machine_alert_toggle.grid(row=0, column=0, sticky="w")
-        self.machine_alert_switch_images = {enabled: tk.PhotoImage(master=window, data=data, format="png")
-                                            for enabled, data in MACHINE_ALERT_SWITCH_PNGS.items()}
-        def switch_alert(event=None):
-            self.machine_alert_toggle.focus_set()
-            self.toggle_machine_alerts()
-            return 'break'
-        self.machine_alert_toggle.bind('<Button-1>', switch_alert)
-        self.machine_alert_toggle.bind('<space>', switch_alert)
-        self.machine_alert_toggle.bind('<Return>', switch_alert)
-        self.machine_alert_settings_button = ttk.Button(alert_controls, text="알림 설정",
-                                                        command=self.show_machine_alert_settings, style="Secondary.TButton")
-        self.machine_alert_settings_button.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        self.update_machine_alert_toggle()
-
-        self.material_quick = SuiteMaterialQuick.QuickPanel(self, details, cells=quick_cells, header=board_header)
+        self.build_machine_board(frame)
 
         log_card = ttk.Frame(body, style="Card.TFrame", padding=15)
         self.log_card = log_card
@@ -3200,12 +3208,8 @@ class IntegrationApp:
         self.log.configure(yscrollcommand=log_scrollbar.set)
         self.handover_card = self.build_handover_panel(common_body)
         self.handover_card.grid_remove()
-        self.append_log("작업 모드를 선택하고 번호를 입력한 뒤 실행하세요. Ctrl+Enter도 가능합니다.\n"
-                        "파일을 가져오는 모드에서는 연도와 날짜 폴더를 지정합니다.\n"
-                        "날짜에 맞는 월 폴더를 자동 선택합니다. (예: 10.13 → 10월/10.13)\n"
-                        "지정한 날짜 폴더와 그 안의 하위폴더만 검색하고, 원본 파일과 폴더는 유지합니다.\n"
-                        "F 드라이브를 우선 사용하며, F가 없으면 G 드라이브에 저장합니다.\n"
-                        "저장 드라이브는 '드라이브 비우기' 버튼을 눌렀을 때만 비웁니다.\n")
+        self.append_log("번호 입력 후 실행(Ctrl+Enter) · 날짜 폴더는 월 폴더 자동 선택(예: 10.13 → 10월/10.13)\n"
+                        "F 드라이브 우선(없으면 G) · 드라이브는 '드라이브 비우기'를 눌렀을 때만 비웁니다.\n")
         self.update_mode()
         self.refresh_destination()
         self.refresh_handover()
@@ -3227,36 +3231,7 @@ class IntegrationApp:
         window.geometry("1120x{}".format(max(830, minimum_height)))
         self.stl_app = load_stl_finder().App(window, self.app_pages["stl"])
         self.wash_app = WashApp(self, self.app_pages["wash"])
-        visual = SuiteVisualTheme.install_visual_theme(window, self.style)
-        self.material_quick.set_icons(visual["images"])
-        self.reserve_empty_button_width()
-        for button in self._suite_buttons.values():
-            button.configure(image=visual["popup_icon"], compound="right")
-        self.apply_n3_marks(visual["images"])
-        # Keep the wash form compact within the same card surface as other pages.
-        wash_body = self.app_pages["wash"].winfo_children()[0]
-        wash_body.configure(style="RoundedCard.TFrame", padding=20)
-        wash_body.pack_configure(fill="x", expand=False)
-        wash_widgets = list(wash_body.winfo_children())
-        while wash_widgets:
-            widget = wash_widgets.pop()
-            wash_widgets.extend(widget.winfo_children())
-            if widget.winfo_class() == "TFrame" and not str(widget.cget("style")):
-                widget.configure(style="Card.TFrame", borderwidth=0)
-            elif widget.winfo_class() == "TLabel":
-                if not str(widget.cget("style")):
-                    widget.configure(style="Card.TLabel")
-                elif str(widget.cget("style")) == "Title.TLabel":
-                    widget.configure(style="CardTitle.TLabel")
-        # Round only outer cards; nested Card frames keep their seamless fill.
-        pending = list(self.body.winfo_children())
-        while pending:
-            widget = pending.pop()
-            pending.extend(widget.winfo_children())
-            if widget.winfo_class() == "TFrame":
-                card_style = str(widget.cget("style"))
-                if card_style in ("Card.TFrame", "STL.Card.TFrame") and str(widget.cget("borderwidth")) != "0":
-                    widget.configure(style="RoundedCard.TFrame")
+        self.apply_visual_theme()
         window.update_idletasks()
         body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), log_card.winfo_reqheight())
         body.rowconfigure(0, minsize=body_minimum)
@@ -3387,15 +3362,40 @@ class IntegrationApp:
         if self.active_tab == "cnc":
             return self.refresh_drive_manual(event)
 
+    def machine_alert_toggle_layout(self):
+        """글자 폭·높이에 맞춘 스위치 위치. 100% 배율에서는 기존 좌표(81, 8 / 14, 34)와 같습니다."""
+        layout = getattr(self, '_machine_alert_layout', None)
+        if layout is not None:
+            return layout
+        try:
+            from tkinter import font as tkfont
+            bold = tkfont.Font(root=self.window, family='맑은 고딕', size=10, weight='bold')
+            small = tkfont.Font(root=self.window, family='맑은 고딕', size=9)
+            label_w = max(bold.measure('머신 알림'), small.measure('9대 선택'))
+            line1, line2 = bold.metrics('linespace'), small.metrics('linespace')
+            switch_x = max(81, 4 + label_w + 10)
+            height = max(48, line1 + line2 + 8)
+            top = (height - line1 - line2) / 2
+            layout = dict(switch_x=switch_x, switch_y=max(8, (height - 32) // 2), width=max(174, switch_x + 93),
+                          height=height, label_y=max(14, top + line1 / 2), count_y=max(34, top + line1 + line2 / 2))
+        except Exception:
+            layout = dict(switch_x=81, switch_y=8, width=174, height=48, label_y=14, count_y=34)
+        self._machine_alert_layout = layout
+        return layout
+
     def update_machine_alert_toggle(self):
         canvas = self.machine_alert_toggle
         enabled = self.machine_alert_enabled
+        layout = self.machine_alert_toggle_layout()
+        if int(canvas.cget('width')) != layout['width'] or int(canvas.cget('height')) != layout['height']:
+            canvas.configure(width=layout['width'], height=layout['height'])
         canvas.delete('all')
-        canvas.create_text(4, 14, text='머신 알림', anchor='w', fill='#eaf0fc', font=('맑은 고딕', 10, 'bold'))
-        canvas.create_text(4, 34, text='{}대 선택'.format(len(self.machine_alert_selected)), anchor='w',
+        x, y = layout['switch_x'], layout['switch_y']
+        canvas.create_text(4, layout['label_y'], text='머신 알림', anchor='w', fill='#eaf0fc', font=('맑은 고딕', 10, 'bold'))
+        canvas.create_text(4, layout['count_y'], text='{}대 선택'.format(len(self.machine_alert_selected)), anchor='w',
                            fill='#9fb2d6', font=('맑은 고딕', 9))
-        canvas.create_image(81, 8, anchor='nw', image=self.machine_alert_switch_images[enabled])
-        canvas.create_text(112 if enabled else 137, 24, text='ON' if enabled else 'OFF',
+        canvas.create_image(x, y, anchor='nw', image=self.machine_alert_switch_images[enabled])
+        canvas.create_text(x + (31 if enabled else 56), y + 16, text='ON' if enabled else 'OFF',
                            fill='#ffffff', font=('맑은 고딕', 10, 'bold'))
 
     def commit_machine_alert_settings(self, enabled, selected, sound=None, volume=None, sound_kind=None):
@@ -3445,16 +3445,18 @@ class IntegrationApp:
         self.machine_alert_sound_var = sound
         self.tk.Checkbutton(frame, text='머신 알림 켜기', variable=enabled, background='#060b16',
                             foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
-                            activeforeground='#ffffff', font=('맑은 고딕', 10)).pack(anchor='w', pady=(0, 10))
+                            activeforeground='#ffffff', font=('맑은 고딕', 10),
+                            highlightthickness=0).pack(anchor='w', pady=(0, 10))
         self.tk.Checkbutton(frame, text='알림 소리 켜기', variable=sound, background='#060b16',
                             foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
-                            activeforeground='#ffffff', font=('맑은 고딕', 10)).pack(anchor='w', pady=(0, 10))
+                            activeforeground='#ffffff', font=('맑은 고딕', 10),
+                            highlightthickness=0).pack(anchor='w', pady=(0, 10))
         sound_kind = self.tk.StringVar(value=self.machine_alert_sound_kind)
         sound_choices = self.ttk.Frame(frame); sound_choices.pack(fill='x', pady=(0, 10))
         for label, value in (('기본 시스템 소리', 'system'), ('톡 소리', 'tap')):
             self.tk.Radiobutton(sound_choices, text=label, value=value, variable=sound_kind,
                                 background='#060b16', foreground='#eaf0fc', selectcolor='#0e1a35',
-                                activebackground='#060b16', activeforeground='#ffffff',
+                                activebackground='#060b16', activeforeground='#ffffff', highlightthickness=0,
                                 command=lambda: update_volume_state()).pack(side='left', padx=(0, 16))
         volume = self.tk.DoubleVar(value=self.machine_alert_volume)
         volume_text = self.tk.StringVar(value='음량 {}%'.format(self.machine_alert_volume))
@@ -3484,8 +3486,8 @@ class IntegrationApp:
                 var = self.tk.BooleanVar(value=number in self.machine_alert_selected); variables[number] = var
                 self.tk.Checkbutton(grid, text='{}호기'.format(number), variable=var, background='#060b16',
                                     foreground='#eaf0fc', selectcolor='#0e1a35', activebackground='#060b16',
-                                    activeforeground='#ffffff', font=('맑은 고딕', 11), padx=14, pady=9
-                                    ).grid(row=row, column=column, sticky='w')
+                                    activeforeground='#ffffff', font=('맑은 고딕', 11), padx=14, pady=9,
+                                    highlightthickness=0).grid(row=row, column=column, sticky='w')
         self.machine_alert_setting_vars = variables
         actions = self.ttk.Frame(frame); actions.pack(fill='x', pady=(14, 12))
         self.ttk.Button(actions, text='전체 선택', style='DriveSmall.TButton',
@@ -3624,24 +3626,33 @@ class IntegrationApp:
         self.current_machines = {}
         self.machine_detail_dialog = None
         cells = {}
+        # 글자 크기(화면 배율)에 맞춰 칸 높이와 글자 위치를 정합니다. 100%에서는 기존과 같은 56px입니다.
+        try:
+            from tkinter import font as tkfont
+            title_h = tkfont.Font(root=parent, family="맑은 고딕", size=10, weight="bold").metrics("linespace")
+            number_h = tkfont.Font(root=parent, family="Consolas", size=16, weight="bold").metrics("linespace")
+            title_y, number_y = 6 + title_h / 2, 6 + title_h + number_h / 2 - 1
+            tile_height = max(56, int(round(12 + title_h + number_h - 1)))
+        except Exception:
+            title_y, number_y, tile_height = 15, 38, 56
         for row, machines in enumerate(((1, 3, 5, 7), (2, 4, 6, 8, 9))):
             for column, machine in enumerate(machines):
                 cell = self.ttk.Frame(parent, style="Card.TFrame", borderwidth=0)
                 cell.grid(row=row + 1, column=column, sticky="ew", padx=(0, 10 if column < 4 else 0),
                           pady=(0, 10 if row == 0 else 0))
                 cell.columnconfigure(0, weight=1)
-                tile = self.tk.Canvas(cell, width=150, height=56, background="#060b16",
+                tile = self.tk.Canvas(cell, width=150, height=tile_height, background="#060b16",
                                       highlightthickness=0, borderwidth=0,
                                       takefocus=True, cursor="hand2")
                 tile.grid(row=0, column=0, sticky="ew", pady=(0, 6))
                 fill, ink, _ = self.MACHINE_TILE_IDLE
                 light = tile.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, splinesteps=12,
                                             fill=fill, outline=fill, tags=("machine_surface",))
-                tile.create_text(12, 15, text="머신{}".format(machine), anchor="w", tags=('machine_title',),
+                tile.create_text(12, title_y, text="머신{}".format(machine), anchor="w", tags=('machine_title',),
                                  fill=ink, font=("맑은 고딕", 10, "bold"))
-                tile.create_text(0, 15, text="", anchor="e", tags=('machine_state',),
+                tile.create_text(0, title_y, text="", anchor="e", tags=('machine_state',),
                                  fill=ink, font=("맑은 고딕", 9, "bold"))
-                number = tile.create_text(12, 38, text="—", anchor="w", fill=ink, font=("Consolas", 16, "bold"))
+                number = tile.create_text(12, number_y, text="—", anchor="w", fill=ink, font=("Consolas", 16, "bold"))
                 tile.bind("<Configure>", lambda event, c=tile, l=light: self.shape_machine_tile(c, l, event.width, event.height))
                 self.machine_tiles[machine] = (tile, light, number)
                 tile.bind("<Button-1>", lambda event, n=machine: self.show_machine_details(n))
@@ -3658,7 +3669,8 @@ class IntegrationApp:
         w, h, r = max(width, 24) - 1, max(height, 24) - 1, 4
         canvas.coords(light, 1 + r, 1, w - r, 1, w, 1, w, 1 + r, w, h - r, w, h, w - r, h,
                       1 + r, h, 1, h, 1, h - r, 1, 1 + r, 1, 1)
-        canvas.coords('machine_state', w - 11, 15)
+        title = canvas.coords('machine_title')
+        canvas.coords('machine_state', w - 11, title[1] if title else 15)
 
     def apply_machine_status(self, machines, online=True):
         """읽기 결과는 GUI 스레드에서 반영. 알 수 없는 상태는 회색으로 표시합니다."""
@@ -3679,6 +3691,141 @@ class IntegrationApp:
             tile.itemconfigure(light, fill=fill, outline=fill)
             tile.itemconfigure(number, text=value, fill=ink)
         self.refresh_machine_details()
+
+    def build_drive_card(self, body):
+        """드라이브 정리 칸(목록·추가·새로고침·비우기·삭제)을 만듭니다."""
+        tk, ttk, window = self.tk, self.ttk, self.window
+        drive_card = ttk.Frame(body, style="Card.TFrame", padding=15)
+        drive_card.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
+        drive_card.columnconfigure(0, weight=1)
+        drive_card.rowconfigure(2, weight=1)
+        drive_header = ttk.Frame(drive_card, style="Card.TFrame", borderwidth=0)
+        drive_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        drive_header.columnconfigure(0, weight=1, uniform="drive_tools")
+        drive_header.columnconfigure(1, weight=1, uniform="drive_tools")
+        ttk.Label(drive_header, text="드라이브 정리", style="Section.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.drive_add_button = ttk.Button(drive_header, text="추가", width=0, style="DriveSmall.TButton",
+                                            command=self.choose_drive_files)
+        self.drive_add_button.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(10, 0))
+        self.drive_refresh_button = ttk.Button(drive_header, text="새로고침", width=0, style="DriveSmall.TButton",
+                                                command=self.refresh_drive_manual)
+        self.drive_refresh_button.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(10, 0))
+        self.drive_contents_status = tk.StringVar(value="드라이브 연결 대기")
+        self.drive_status_label = self.make_stable_status_label(
+            drive_card, self.drive_contents_status, "Caption.TLabel", width=1, anchor="w")
+        self.drive_status_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.drive_contents = tk.Listbox(drive_card, width=20, height=8, font=("맑은 고딕", 9),
+                                         background="#050a14", foreground="#eaf0fc", relief="flat",
+                                         borderwidth=0, highlightthickness=1, highlightbackground="#2e333d",
+                                         highlightcolor="#2a66f2", selectbackground="#1d3f86",
+                                         selectforeground="#eaf0fc", exportselection=False, selectmode="extended")
+        self.drive_contents.grid(row=2, column=0, sticky="nsew")
+        drive_scrollbar = ttk.Scrollbar(drive_card, orient="vertical", command=self.drive_contents.yview)
+        drive_scrollbar.grid(row=2, column=1, sticky="ns")
+        drive_horizontal = ttk.Scrollbar(drive_card, orient="horizontal", command=self.drive_contents.xview)
+        drive_horizontal.grid(row=3, column=0, sticky="ew")
+        self.drive_contents.configure(yscrollcommand=drive_scrollbar.set, xscrollcommand=drive_horizontal.set)
+        self.drive_contents.bind("<Double-Button-1>", self.open_drive_item)
+        self.drive_contents.bind("<Return>", self.open_drive_item)
+        self.drive_contents.bind("<F2>", self.start_rename)
+        self.drive_contents.bind("<Button-3>", self.show_drive_menu)
+        self.drive_contents.bind("<Delete>", self.start_drive_delete)
+        window.bind("<F5>", self.refresh_active_tab)
+        self.drive_menu = tk.Menu(window, tearoff=False, background="#060b16", foreground="#ffffff",
+                                  activebackground="#2a66f2", activeforeground="#ffffff",
+                                  disabledforeground="#818388", font=("맑은 고딕", 10))
+        self.drive_menu.add_command(label="이름 변경", accelerator="F2", command=self.start_rename)
+        self.drive_menu.add_command(label="선택 파일 삭제", accelerator="Delete", command=self.start_drive_delete)
+        self.drive_menu.add_separator()
+        self.drive_menu.add_command(label="파일 추가…", command=self.choose_drive_files)
+        self.drive_menu.add_command(label="새로고침", accelerator="F5", command=self.refresh_drive_manual)
+        self.drive_item_paths = []
+        self.drive_contents_signature = None
+        self.drive_hint = tk.StringVar(value="파일을 끌어놓아 추가 · Delete: 삭제\n더블클릭: 열기 · F2: 이름 변경\n수정10.30 자동 추가 · 비우기 시 보존")
+        drive_actions = ttk.Frame(drive_card, style="Card.TFrame", borderwidth=0)
+        drive_actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        drive_actions.columnconfigure(0, weight=1)
+        self.empty_button = ttk.Button(drive_actions, text="드라이브 비우기", command=self.start_empty,
+                                       style="Danger.TButton")
+        self.empty_button.grid(row=0, column=0, sticky="ew")
+        self.drive_delete_button = ttk.Button(drive_actions, text="삭제", width=4, command=self.start_drive_delete,
+                                               style="Danger.TButton")
+        self.drive_delete_button.grid(row=0, column=1, padx=(6, 0), sticky="ns")
+        return drive_card
+
+    def build_machine_board(self, frame):
+        """설비 · 소재 사용량 조사 보드(머신 칸, 불량·소재교체, 머신 알림)를 만듭니다."""
+        tk, ttk, window = self.tk, self.ttk, self.window
+        # A-3: 머신 상태 칸 아래에 같은 호기의 불량/소재교체를 붙인 한 장의 설비 보드.
+        details = ttk.Frame(frame, style="RoundedCard.TFrame", padding=(16, 12))
+        details.grid(row=3, column=0, sticky="ew")
+        for column in range(5):
+            details.columnconfigure(column, weight=1, uniform="machine-cell")
+        self.search_root_text = tk.StringVar(value=str(year_search_root(self.saved_program_year)))
+        self.year_value.trace_add("write", self.update_year_display)
+        self.destination_text = tk.StringVar(value="F:\\ / G:\\ 연결 대기")
+        board_header = ttk.Frame(details, style="Card.TFrame", borderwidth=0)
+        board_header.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 8))
+        ttk.Label(board_header, text="설비 · 소재 사용량 조사", style="Section.TLabel").pack(side="left")
+        quick_cells = self.build_machine_monitor(details)
+        # N3: 머신 알림 스위치와 알림 설정은 윗줄 7호기 옆 빈 칸에 둡니다(명령·바인딩은 그대로).
+        alert_controls = ttk.Frame(details, style="Card.TFrame", padding=(10, 6))
+        alert_controls.grid(row=1, column=4, sticky="nsew", pady=(0, 10))
+        alert_controls.columnconfigure(0, weight=1)
+        self.machine_alert_controls = alert_controls
+        self.machine_alert_toggle = tk.Canvas(alert_controls, width=174, height=48, background="#060b16",
+                                             highlightthickness=1, highlightbackground="#060b16",
+                                             highlightcolor="#8db3ff", borderwidth=0, takefocus=True, cursor="hand2")
+        self.machine_alert_toggle.grid(row=0, column=0, sticky="w")
+        self.machine_alert_switch_images = {enabled: tk.PhotoImage(master=window, data=data, format="png")
+                                            for enabled, data in MACHINE_ALERT_SWITCH_PNGS.items()}
+        def switch_alert(event=None):
+            self.machine_alert_toggle.focus_set()
+            self.toggle_machine_alerts()
+            return 'break'
+        self.machine_alert_toggle.bind('<Button-1>', switch_alert)
+        self.machine_alert_toggle.bind('<space>', switch_alert)
+        self.machine_alert_toggle.bind('<Return>', switch_alert)
+        self.machine_alert_settings_button = ttk.Button(alert_controls, text="알림 설정",
+                                                        command=self.show_machine_alert_settings, style="Secondary.TButton")
+        self.machine_alert_settings_button.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.update_machine_alert_toggle()
+
+        self.material_quick = SuiteMaterialQuick.QuickPanel(self, details, cells=quick_cells, header=board_header)
+
+    def apply_visual_theme(self):
+        """모양만 입힙니다(둥근/테두리 요소, 아이콘, 제목 막대). 위젯 명령·값은 그대로입니다."""
+        window = self.window
+        visual = SuiteVisualTheme.install_visual_theme(window, self.style)
+        self.material_quick.set_icons(visual["images"])
+        self.reserve_empty_button_width()
+        for button in self._suite_buttons.values():
+            button.configure(image=visual["popup_icon"], compound="right")
+        self.apply_n3_marks(visual["images"])
+        # Keep the wash form compact within the same card surface as other pages.
+        wash_body = self.app_pages["wash"].winfo_children()[0]
+        wash_body.configure(style="RoundedCard.TFrame", padding=20)
+        wash_body.pack_configure(fill="x", expand=False)
+        wash_widgets = list(wash_body.winfo_children())
+        while wash_widgets:
+            widget = wash_widgets.pop()
+            wash_widgets.extend(widget.winfo_children())
+            if widget.winfo_class() == "TFrame" and not str(widget.cget("style")):
+                widget.configure(style="Card.TFrame", borderwidth=0)
+            elif widget.winfo_class() == "TLabel":
+                if not str(widget.cget("style")):
+                    widget.configure(style="Card.TLabel")
+                elif str(widget.cget("style")) == "Title.TLabel":
+                    widget.configure(style="CardTitle.TLabel")
+        # Round only outer cards; nested Card frames keep their seamless fill.
+        pending = list(self.body.winfo_children())
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if widget.winfo_class() == "TFrame":
+                card_style = str(widget.cget("style"))
+                if card_style in ("Card.TFrame", "STL.Card.TFrame") and str(widget.cget("borderwidth")) != "0":
+                    widget.configure(style="RoundedCard.TFrame")
 
     def apply_n3_marks(self, images):
         """N3 화면 표시만 더합니다: 작업 모드 선택 표시, 고정 제목 앞 막대. 명령·값은 그대로입니다."""
@@ -5174,7 +5321,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.10.2'
+SUITE_APP_VERSION = '2026.11.10.3'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

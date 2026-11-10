@@ -79,7 +79,7 @@ public sealed class MesReadOnlyAccessibility {
     bool limited;
     MesReadOnlyAccessibility(Action<object> output) { emit=output; }
     bool AtLimit() {
-        if (count>=15000 || clock.Elapsed.TotalSeconds>=35) { limited=true; return true; }
+        if (count>=40000 || clock.Elapsed.TotalSeconds>=80) { limited=true; return true; }
         return false;
     }
     static string Trim(object value, int maxLength=800) {
@@ -347,11 +347,11 @@ def inspect_window(target, label, stop):
         with stderr.open('wb') as errors:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                        stderr=errors, env=env, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-            deadline = time.monotonic()+45
+            deadline = time.monotonic()+95
             try:
                 while process.poll() is None:
                     if stop.wait(.1) or time.monotonic() >= deadline:
-                        report['interrupted'] = '사용자 중지' if stop.is_set() else '45초 제한 시간'
+                        report['interrupted'] = '사용자 중지' if stop.is_set() else '95초 제한 시간'
                         process.kill()
                         break
                 process.wait(timeout=5)
@@ -450,6 +450,12 @@ def check_capture(report):
     if (report.get('interrupted') or report.get('powershell_error') or report.get('partial_line')
             or report.get('exit_code') != 0 or not finishes or finishes[-1].get('limited')
             or any(r.get('kind') in ('fatal','window_error','element_error') for r in report['records'])):
+        last = finishes[-1] if finishes else {}
+        if last.get('limited'):
+            try:seconds = float(last.get('seconds') or 0)
+            except (TypeError, ValueError):seconds = 0.0
+            raise RuntimeError('화면 항목이 많아 읽기 한도에 걸려 순회를 중단했습니다(읽은 항목 {}개 · {:.0f}초). '
+                               '결과를 저장해 주세요.'.format(last.get('elements', 0), seconds))
         raise RuntimeError('화면을 충분히 읽지 못해 순회를 중단했습니다. 결과를 저장해 주세요.')
 
 

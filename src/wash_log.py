@@ -718,18 +718,15 @@ class App(tk.Tk):
         style.configure('TCombobox', fieldbackground=FIELD, background=BUTTON, foreground=TEXT, arrowcolor=TEXT, bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, insertcolor=TEXT, relief='flat')
         style.map('TCombobox', fieldbackground=[('readonly',FIELD)], foreground=[('readonly',TEXT)], selectbackground=[('!disabled',SELECT)])
         style.configure('Vertical.TScrollbar', background=LINE, troughcolor=FIELD, borderwidth=0, bordercolor=FIELD, lightcolor=LINE, darkcolor=LINE, arrowcolor=MUTED, arrowsize=12)
-        # N3: 얇은 스크롤바(화살표 없음) — 메인 창과 같은 모양. 스크롤 동작은 그대로입니다.
-        for _orient, _sticky in (('Vertical', 'ns'), ('Horizontal', 'ew')):
+        # N3: 얇은 스크롤바(화살표 없음) — 메인 창과 같은 한 가지 코드(visual_theme)를 씁니다.
+        try:
             try:
-                style.layout(_orient + '.TScrollbar', [(_orient + '.Scrollbar.trough', {'sticky': _sticky, 'children': [
-                    (_orient + '.Scrollbar.thumb', {'unit': '1', 'expand': '1', 'sticky': 'nsew'})]})])
-                style.configure(_orient + '.TScrollbar', arrowsize=9, gripcount=0, troughcolor='#08101f',
-                                background='#22355c', bordercolor='#08101f', lightcolor='#22355c',
-                                darkcolor='#22355c', borderwidth=0)
-                for _option in ('background', 'lightcolor', 'darkcolor'):
-                    style.map(_orient + '.TScrollbar', **{_option: [('pressed', '#8db3ff'), ('active', '#3a404b')]})
-            except Exception:
-                pass
+                from jihunius_scrollbars import install_thin_scrollbars
+            except ImportError:
+                from visual_theme import install_thin_scrollbars
+            install_thin_scrollbars(style)
+        except Exception:
+            pass
 
         style.configure('TNotebook', background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG)
         style.configure('TNotebook.Tab', background=PANEL, foreground=MUTED, bordercolor=BG, lightcolor=BG, darkcolor=BG, focuscolor=PANEL, padding=[10, 5])

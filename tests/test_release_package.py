@@ -37,6 +37,17 @@ def assignments(path):
    except (ValueError,TypeError):pass
  return result
 
+# Approved 2026-11-10 (사용자 "수정사항 전부 반영"): read-only screen reader limits only.
+APPROVED_READER_LIMITS=(
+ ('count>=40000 || clock.Elapsed.TotalSeconds>=80','count>=15000 || clock.Elapsed.TotalSeconds>=35'),
+ ('deadline = time.monotonic()+95','deadline = time.monotonic()+45'),
+ ("else '95초 제한 시간'","else '45초 제한 시간'"))
+
+def approved_reader_limits(text):
+ for new,old in APPROVED_READER_LIMITS:
+  text=text.replace(new,old)
+ return text
+
 class PrivatePackageTests(unittest.TestCase):
  def test_automation_and_conversion_payloads_unchanged(self):
   before=assignments(BASE/'app.pyw');after=assignments(ROOT/'apps/jihunius/app.pyw')
@@ -47,8 +58,9 @@ class PrivatePackageTests(unittest.TestCase):
   for k in keys:
    if k=='WASH_POP_SOURCE':
     # Only the completion-dialog reader/wait was intentionally changed.
-    allowed={'save_dialog_messages','save_dialog_button','save_checked_pop'}
-    old=ast.parse(before[k]);new=ast.parse(after[k])
+    # check_capture: same conditions, clearer message when the reader limit is reached.
+    allowed={'save_dialog_messages','save_dialog_button','save_checked_pop','check_capture'}
+    old=ast.parse(before[k]);new=ast.parse(approved_reader_limits(after[k]))
     for tree in (old,new):
      tree.body=[n for n in tree.body if not (isinstance(n,ast.FunctionDef) and n.name in allowed)]
     self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
@@ -69,6 +81,7 @@ class PrivatePackageTests(unittest.TestCase):
       if isinstance(node,ast.ClassDef) and node.name=='App':
        node.body=[n for n in node.body if not (isinstance(n,ast.FunctionDef) and n.name=='load_settings')]
     self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
+   elif k=='WASH_MES_SOURCE':self.assertEqual(before[k],approved_reader_limits(after[k]),k)
    else:self.assertEqual(before[k],after[k],k)
   # Error hooks are observational. All original wash-log application definitions
   # still match the last release after removing only the new diagnostic calls.
@@ -77,6 +90,10 @@ class PrivatePackageTests(unittest.TestCase):
   class StripDiagnostics(NormalizeColors):
    def visit_Expr(self,node):
     if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=='_diagnostic_error':return None
+    return self.generic_visit(node)
+   def visit_Try(self,node):
+    # Approved N3 visual: shared thin-scrollbar style call only (ttk layout/colors, no behavior).
+    if any(isinstance(n,ast.alias) and n.name=='install_thin_scrollbars' for n in ast.walk(node)):return None
     return self.generic_visit(node)
    def visit_For(self,node):
     # Approved N3 visual: thin scrollbar style loop only (ttk layout/colors, no behavior).
