@@ -186,3 +186,11 @@ python -m unittest discover -s tests -p "test_*.py"   # Linux: xvfb-run -a -s "-
 - [확인됨] 기본 경로는 예전 구현(2026.11.03.10)과 판독 순서(mode·label)·클릭 행이 동일(test_every_cell_mode_reads_and_clicks_in_the_same_order_as_previous_release). 전체 테스트 통과 수는 아래 배포 기록 참고.
 - 남는 한계 [AI 판단]: 읽는 시간은 여전히 줄 수×칸 수에 비례 → 아주 많은 날은 5분 한도도 넘을 수 있고, 읽는 동안(최대 수 분) 마우스·키보드를 쓰지 못함. 근본 해결은 요약 판독(위 플래그)이며 POP점검.pyw 결과가 필요.
 - 검토용 2026.11.11.1(요약 판독 켠 빌드)은 배포하지 않음. docs/releases/2026.11.11.1.txt 삭제.
+
+### 오류 기록을 진단하기 좋은 형식으로 — 검토용 2026.11.11.3 (배포 여부 사용자 결정 대기)
+[사용자 승인 2026-11-11] "오류기록을 … 문제 생기면 너가 알아보기 좋게 바꿔놓는 게 좋을 것 같아서".
+- src/error_history.py: `environment()`(Windows·Python·화면·모니터·배율), `compose_detail(context, trace, environment_line)` — 상세 정보를 항상 [환경]→[진단]→[추적] 순서로(16,000자 안, 추적은 끝부분 유지). `capture(..., context='')` 추가. 저장 형식(레코드 키·공유 파일)은 그대로라 예전 버전 PC와 섞여도 됨.
+- WashApp(jihunius_main.py): `note`(진행 기록 최근 40줄), `diagnostics`(경과, POP 목록 줄 수·요약값 사용 여부·위/아래 확인·스크롤, 판독 방식, 매칭 대상, 체크 클릭/확인 수, 판독 횟수·합계·가장 오래 걸린 판독), 판독마다 시간·항목 수 기록(5초 이상은 진행 기록에도). 진단 실패가 자동 작업·오류 기록을 막지 않음.
+- src/error_history_ui.py: 상세 표시를 버전/PC/기능/단계/발생/오류 이름표 순서로, 'AI 전달용 복사' 버튼(`ai_text`: 선택한 오류 전체 + 최근 20건 한 줄 목록).
+- 테스트 tests/test_error_diagnostics.py 6개. 전체 414 통과(2 skip).
+- 오류가 나면: 오류 기록 창 → 해당 줄 선택 → 'AI 전달용 복사' → 대화창에 붙여넣기.

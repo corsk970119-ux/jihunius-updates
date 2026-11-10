@@ -2728,6 +2728,7 @@ class WashApp:
         from tkinter import ttk
         from datetime import date
         self.host=host;self.root=host.window;self.busy=False;self.stop=threading.Event();self.events=queue.Queue()
+        self.trail=[];self.reads=[];self.progress={};self.last_result=None;self.started=time.monotonic()
         self.result=None;self.started=0;self.mes_binding=None;self.mes_target=None
         self.capture_stage=None;self.capture_status=None
         self.mes=load_wash_module(WASH_MES_SOURCE,'jihuni_wash_mes')
@@ -2756,13 +2757,50 @@ class WashApp:
         ttk.Label(body,textvariable=self.status,wraplength=900,foreground='#93c5fd').pack(anchor='w',pady=(0,10))
         self.root.after(80,self.poll)
 
+    def note(self,text):
+        """오류가 났을 때 함께 남길 진행 기록(최근 40줄). 자동 작업에는 영향을 주지 않습니다."""
+        try:
+            trail=self.trail
+            trail.append('{:7.1f}초  {}'.format(time.monotonic()-self.started,str(text).replace('\n',' ')[:200]))
+            del trail[:-40]
+        except Exception:pass
+
+    def diagnostics(self):
+        """세척완료가 멈춘 순간의 상황 요약. 오류 기록의 [진단] 자리에 들어갑니다."""
+        try:
+            lines=['경과 {:.1f}초'.format(time.monotonic()-self.started)]
+            result=getattr(self,'last_result',None) or {}
+            coverage=result.get('coverage') or {}
+            if coverage:
+                lines.append('POP 목록 {}줄 · 행 요약값 {} · 맨 위 확인 {} · 맨 아래 확인 {} · 스크롤 {}회'.format(
+                    coverage.get('declared_rows','?'),'사용' if coverage.get('summary_supported') else '미사용',
+                    '예' if coverage.get('top_verified') else '아니오','예' if coverage.get('bottom_verified') else '아니오',
+                    coverage.get('wheel_moves','?')))
+                lines.append('판독 방식: '+str(coverage.get('basis','?')))
+            matching=result.get('matching') or {}
+            if matching:
+                lines.append('매칭 대상 {}개 · 이미 선택 {}개'.format(len(matching.get('matched',())),len(matching.get('already_selected',()))))
+            lines.append('체크 클릭 {}회 · 체크 확인 {}개'.format(self.progress.get('attempt',0),self.progress.get('verified',0)))
+            if self.reads:
+                label,mode,seconds,elements=max(self.reads,key=lambda item:item[2])
+                lines.append('화면 판독 {}회 · 합계 {:.1f}초 · 가장 오래: {} ({} · {:.1f}초 · 항목 {}개)'.format(
+                    len(self.reads),sum(item[2] for item in self.reads),label,mode,seconds,elements))
+            lines.append('[진행 기록 · 최근 {}줄]'.format(len(self.trail)))
+            return '\n'.join(lines+list(self.trail))
+        except Exception as error:return '진단 정보를 만들지 못했습니다: '+str(error)
+
     def emit(self,kind,value):
-        if kind=='log':self._error_stage=str(value)[:300]
+        if kind=='log':self._error_stage=str(value)[:300];self.note(value)
         elif kind=='reading':self._error_stage=str(value[0])[:300]
+        elif kind=='check':
+            try:self.progress[value.get('status')]=self.progress.get(value.get('status'),0)+1
+            except Exception:pass
+        elif kind=='result':self.last_result=value
         elif kind=='error' and not self.stop.is_set():
             import traceback
+            self.note('중단: '+str(value))
             SuiteErrors.capture(value,feature='세척완료',stage=getattr(self,'_error_stage','처리'),
-                                detail=traceback.format_exc(),work=str(self.started))
+                                detail=traceback.format_exc(),work=str(self.started),context=self.diagnostics())
         if kind in ('log','error','result','reading','reading_done','done','binding'):
             self.events.put((kind,value))
 
@@ -2782,6 +2820,7 @@ class WashApp:
         except Exception as e:return self.host.messagebox.showerror('조건 확인',str(e),parent=self.root)
         if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
         self.busy=True;self.stop=threading.Event();self.result=None;self.controls();self.started=time.monotonic()
+        self.trail=[];self.reads=[];self.progress={};self.last_result=None
         self.host.suspend_machine_alerts()
         self.capture_stage=None;self.capture_status=None
         self.status.set('창과 조건 확인 중…')
@@ -2824,9 +2863,15 @@ class WashApp:
                 self.emit('reading',(label,started))
                 try:
                     report=reader.capture(t,label,stop)
+                    try:
+                        finish=[r for r in report.get('records',()) if isinstance(r,dict) and r.get('kind')=='finish']
+                        self.reads.append((label,t.get('mode','full'),time.monotonic()-started,finish[-1].get('elements','?') if finish else '?'))
+                        if time.monotonic()-started>=5:self.note('판독 {:.1f}초 · {} · {}'.format(time.monotonic()-started,label,t.get('mode','full')))
+                    except Exception:pass
                     return report
                 except Exception as error:
                     elapsed=time.monotonic()-started
+                    self.note('판독 실패 {:.1f}초 · {} · {}'.format(elapsed,label,t.get('mode','full')))
                     raise RuntimeError(f'{label} · {elapsed:.1f}초 경과 · {error}') from error
                 finally:
                     self.emit('reading_done',None)
@@ -5325,7 +5370,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.2'
+SUITE_APP_VERSION = '2026.11.11.3'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

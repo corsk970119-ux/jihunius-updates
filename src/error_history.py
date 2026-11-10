@@ -271,15 +271,50 @@ class SharedTransport:
                 except OSError:pass
 
 
+def environment():
+    """오류가 난 PC의 환경 한 줄. 알아내지 못해도 기록을 막지 않습니다."""
+    import platform
+    parts = [('Windows ' + platform.version()) if os.name == 'nt' else platform.system() + ' ' + platform.release(),
+             'Python ' + platform.python_version()]
+    if os.name == 'nt':
+        try:
+            import ctypes
+            user = ctypes.windll.user32
+            parts.append('화면 {}x{}'.format(user.GetSystemMetrics(0), user.GetSystemMetrics(1)))
+            parts.append('모니터 {}대'.format(user.GetSystemMetrics(80)))
+            parts.append('배율 {}%'.format(round(user.GetDpiForSystem() * 100 / 96)))
+        except Exception:
+            pass
+    return ' · '.join(parts)
+
+
+def compose_detail(context='', trace='', environment_line='', limit=16000):
+    """상세 정보를 항상 [환경] → [진단] → [추적] 순서로 만듭니다(사람도 AI도 같은 자리에서 찾도록).
+
+    저장 형식은 그대로(상세 정보 글 한 덩어리)라서 예전 버전 PC와 섞여도 됩니다.
+    """
+    parts = []
+    if environment_line: parts.append('[환경] ' + str(environment_line)[:300])
+    context = str(context or '').strip()
+    if context: parts.append('[진단]\n' + context[:6000])
+    trace = str(trace or '').strip()
+    if trace:
+        used = sum(len(p) + 1 for p in parts)
+        parts.append('[추적]\n' + trace[-max(2000, limit - used - 8):])
+    return '\n'.join(parts)
+
+
 class Recorder:
     def __init__(self, path, feature, version):
+        self.environment = ''
         self.path=Path(path);self.feature=feature;self.version=version
         self.events=queue.Queue(maxsize=200);self.closed=False;self.error='';self.store=None
         self.thread=threading.Thread(target=self._run,name='error-history-local',daemon=True)
         self.thread.start()
 
-    def capture(self, message, feature=None, stage='', detail='', work=''):
+    def capture(self, message, feature=None, stage='', detail='', work='', context=''):
         if self.closed:return
+        detail=compose_detail(context,detail,self.environment)
         try:self.events.put_nowait(dict(feature=feature or self.feature,message=str(message)[:8192],
             stage=str(stage)[:300],detail=str(detail)[-16384:],work=str(work)[:120],version=self.version))
         except queue.Full:self.error='오류가 연속 발생하여 일부 기록을 보관하지 못했습니다.'
@@ -304,9 +339,10 @@ class Recorder:
 _recorder=None
 
 
-def capture(message, feature=None, stage='', detail='', work=''):
+def capture(message, feature=None, stage='', detail='', work='', context=''):
+    """context: 그 기능이 아는 진단 정보(몇 줄). 상세 정보의 [진단] 자리에 들어갑니다."""
     if _recorder is not None:
-        try:_recorder.capture(message,feature,stage,detail,work)
+        try:_recorder.capture(message,feature,stage,detail,work,context)
         except Exception:pass
 
 
@@ -315,6 +351,8 @@ def install(feature, version, path=None):
     if _recorder is not None:return _recorder
     base=Path(os.environ.get('LOCALAPPDATA') or str(Path.home()))/'Jihunius'/'error-history'
     _recorder=Recorder(path or base/'history.sqlite',feature,version)
+    try:_recorder.environment=environment()
+    except Exception:pass
     import atexit
     atexit.register(_recorder.close)
     import tkinter as tk

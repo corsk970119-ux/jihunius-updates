@@ -69,6 +69,7 @@ class HistoryUI:
         detail_scroll.pack(side='right',fill='y');self.detail.pack(fill='both',expand=True)
         footer=ttk.Frame(body);footer.grid(row=5,column=0,sticky='ew',pady=(16,0))
         ttk.Button(footer,text='선택 내용 복사',style='Secondary.TButton',command=self.copy).pack(side='left')
+        ttk.Button(footer,text='AI 전달용 복사',style='Secondary.TButton',command=self.copy_for_ai).pack(side='left',padx=(8,0))
         ttk.Button(footer,text='기록 내보내기',style='Secondary.TButton',command=self.export).pack(side='left',padx=8)
         self.clear_button=ttk.Button(footer,text='전체 PC 기록 비우기',style='Danger.TButton',command=self.clear)
         self.clear_button.pack(side='right')
@@ -104,13 +105,37 @@ class HistoryUI:
         self.status.set(f"{len(shown)}건 · 최근 100건 / 30일 · {state.get('status','')}"+extra)
         self.clear_button.configure(state='disabled' if state['pending_clear'] else 'normal')
 
+    @staticmethod
+    def full_stamp(value):return time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(value))
+
+    def record_text(self,r):
+        """오류 1건을 항상 같은 순서·같은 이름표로(사람도 AI도 같은 자리에서 찾도록)."""
+        return (f"버전: {r['version'] or '-'}\nPC: {r['pc']}\n기능: {r['feature']}\n단계: {r['stage'] or '-'}\n"
+                f"발생: {self.full_stamp(r['last'])} (최초 {self.full_stamp(r['first'])} · {r['count']}회)\n"
+                f"오류: {r['message']}"+('\n--- 상세 정보 ---\n'+r['detail'] if r['detail'] else ''))
+
     def selected_text(self):
         selection=self.tree.selection()
         if not selection or selection[0] not in self.rows:return ''
-        r=self.rows[selection[0]]
-        return (f"{r['pc']} · {r['feature']} · 버전 {r['version']}\n"
-                f"단계: {r['stage'] or '-'}\n최초: {self.stamp(r['first'])} · 최근: {self.stamp(r['last'])} · {r['count']}회\n\n"
-                +r['message']+('\n\n상세 정보\n'+r['detail'] if r['detail'] else ''))
+        return self.record_text(self.rows[selection[0]])
+
+    def ai_text(self,limit=20):
+        """선택한 오류 전체 + 화면에 표시된 최근 오류 목록. 그대로 붙여넣어 전달하는 용도."""
+        rows=sorted(self.rows.values(),key=lambda r:r['last'],reverse=True)
+        if not rows:return ''
+        lines=['===== 지후니우스 오류 기록 (AI 전달용) =====','복사 시각: '+self.full_stamp(time.time()),'',
+               '[선택한 오류]',self.selected_text() or '(선택 없음)','',
+               f'[최근 오류 목록 · {min(limit,len(rows))}건 / 표시 {len(rows)}건] 발생 | PC | 버전 | 기능 | 단계 | 오류 | 횟수']
+        for r in rows[:limit]:
+            lines.append(' | '.join((self.full_stamp(r['last']),r['pc'],r['version'] or '-',r['feature'],r['stage'] or '-',
+                                     r['message'].replace('\n',' ')[:160],f"{r['count']}회")))
+        return '\n'.join(lines)
+
+    def copy_for_ai(self):
+        text=self.ai_text()
+        if text:
+            self.root.clipboard_clear();self.root.clipboard_append(text)
+            self.status.set('AI 전달용으로 복사했습니다. 대화창에 그대로 붙여넣어 주세요.')
 
     def details(self,event=None):
         self.detail.configure(state='normal');self.detail.delete('1.0','end')
