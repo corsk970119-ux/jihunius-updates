@@ -898,22 +898,56 @@ def pop_grid(report):
     return table,headers,rows,children
 
 
-def pop_view(report, map_visible=True, baseline_raw=None):
+class SummaryUnavailable(RuntimeError):
+    """화면 밖 행을 행 요약값으로 확인할 수 없는 화면. 이때는 예전의 전체 셀 판독으로 되돌아갑니다."""
+
+
+# 화면을 다시 그리는 순간에 읽으면 잠깐 나타나는 어긋남. 판독은 읽기 전용이라 다시 읽어도 안전합니다.
+TRANSIENT_VIEW_ERRORS=('셀 위치를 확실히 구분하지 못했습니다','POP 행의 일부 셀이 누락되었습니다',
+                       'POP 일부 행이 누락되었습니다','POP 행 요약값과 셀 값이 일치하지 않습니다')
+# 체크 클릭 뒤 POP가 반영할 때까지 다시 읽으며 기다리는 최대 시간(클릭을 더 하지는 않습니다).
+CHECK_SETTLE_SECONDS=4.0
+
+
+def summary_values(row):
+    """행 요약값 'a;b;c;'를 셀 값 목록으로 바꿉니다. 형식이 확실하지 않으면 None."""
+    value=row.get('value')
+    if not isinstance(value,str) or '[truncated]' in value or not value.endswith(';'):return None
+    parts=value[:-1].split(';')
+    return parts if parts and len(parts)==row.get('child_count') else None
+
+
+def read_settled(read_once,stop,tries=3,wait=.4):
+    """일시적인 화면 어긋남일 때만 잠깐 기다렸다 다시 읽습니다. 그 밖의 오류는 그대로 올립니다."""
+    for attempt in range(tries):
+        try:return read_once()
+        except (Stopped,SummaryUnavailable):raise
+        except RuntimeError as error:
+            if attempt==tries-1 or not any(mark in str(error) for mark in TRANSIENT_VIEW_ERRORS):raise
+            if stop.wait(wait):raise Stopped('사용자 중지')
+
+
+def pop_view(report, map_visible=True, baseline_raw=None, summary_rows=False):
     table,headers,rows,children=pop_grid(report)
     b=bounds(table);bottom=max((bounds(h)[1]+bounds(h)[3] for h in headers if bounds(h)[3]>0),default=b[1])
-    keys=[];raw=[];visible={};selection_cells={};fast_supported=True
+    keys=[];raw=[];visible={};selection_cells={};fast_supported=True;omitted=[]
     wanted=('선택','프로젝트No','설비명','지시일')
     for i,row in enumerate(rows,1):
         match=re.fullmatch(r'(?:행|Row)\s*(\d+)',row.get('name','').strip(),re.I)
         if not match or int(match.group(1))!=i:raise RuntimeError('POP 행 번호가 연속되지 않아 전체 범위를 확인할 수 없습니다.')
         key=str(i);keys.append(key)
         cells=[c for c in children[row['id']] if c.get('role')==29]
-        if row.get('cells_omitted'):
+        if row.get('cells_omitted') and summary_rows and baseline_raw is None:
+            # 화면 밖 행: 칸을 하나씩 읽지 않고 행 요약값으로 값을 얻습니다(건수와 무관하게 빠름).
+            values=summary_values(row)
+            if values is None or cells:raise SummaryUnavailable('POP 화면 밖 행의 요약값 형식을 확인하지 못했습니다.')
+            omitted.append(key)
+        elif row.get('cells_omitted'):
             if (baseline_raw is None or i>len(baseline_raw) or cells
                     or row.get('child_count')!=len(baseline_raw[i-1])
                     or row.get('value')!=';'.join(baseline_raw[i-1])+';'):
                 raise RuntimeError('POP 화면 밖 행의 값이 바뀌었거나 요약값을 확인하지 못했습니다.')
-            values=list(baseline_raw[i-1])
+            values=list(baseline_raw[i-1]);omitted.append(key)
         else:
             if len(cells)!=row.get('child_count'):raise RuntimeError('POP 행의 일부 셀이 누락되었습니다.')
             values=[c.get('value','') for c in cells]
@@ -942,7 +976,10 @@ def pop_view(report, map_visible=True, baseline_raw=None):
                 selection_cells[key]={'index':cells.index(cell),'bounds':bounds(cell),
                                       'enabled':bool(cell.get('enabled') and cell.get('state_known'))}
         visible[key]=mapped
-    return {'handle':table['handle'],'grid_bounds':b,'keys':keys,'raw':raw,'visible':visible,'selection_cells':selection_cells,'fast_supported':fast_supported}
+    # 요약값에 의존하려면 화면에 보이는 모든 행에서 '요약값 = 셀 값'이 확인되어야 합니다.
+    if summary_rows and omitted and not fast_supported:raise SummaryUnavailable('POP 행 요약값이 셀 값과 달라 요약 판독을 쓸 수 없습니다.')
+    return {'handle':table['handle'],'grid_bounds':b,'keys':keys,'raw':raw,'visible':visible,'selection_cells':selection_cells,
+            'fast_supported':fast_supported,'omitted':omitted}
 
 
 def field_node(report,label,role):
@@ -1162,10 +1199,11 @@ def match_requested(rows):
     return result
 
 
-def collect_pop(target,initial,expected,api,capture,stop,emit):
+def collect_pop(target,initial,expected,api,capture,stop,emit,summary_rows=False):
     """Read all declared rows once, using visible cells to resolve column order."""
     validate_conditions(initial,expected)
-    view=pop_view(initial);table,headers,rows,children=pop_grid(initial)
+    view=pop_view(initial,summary_rows=summary_rows);table,headers,rows,children=pop_grid(initial)
+    omitted=set(view.get('omitted',()))
     wanted=('선택','프로젝트No','설비명','지시일');columns={};enabled={};inset=None
     for key in view['visible']:
         row=rows[int(key)-1];cells=[c for c in children[row['id']] if c.get('role')==29]
@@ -1186,6 +1224,11 @@ def collect_pop(target,initial,expected,api,capture,stop,emit):
     for key,row,values in zip(view['keys'],rows,view['raw']):
         cells=[c for c in children[row['id']] if c.get('role')==29]
         if len(values)!=width or any(i>=len(values) for i in columns.values()):raise RuntimeError('POP 일부 행의 열 개수가 다릅니다.')
+        if key in omitted:
+            # 값은 요약값으로 확인했습니다. 체크 칸의 열·사용 가능 여부는 이 행이 화면에 보일 때
+            # 셀 단위로 확인한 뒤에만 클릭합니다(check_matched의 confirm_cells).
+            mapped[key]={name:values[index].strip() for name,index in columns.items()};enabled[key]=None
+            continue
         for name,index in columns.items():
             cn=cells[index].get('name','').strip()
             if cn and not (cn==name or re.fullmatch(re.escape(name)+r'\s+(?:row|행)\s*\d+',cn,re.I)):
@@ -1198,7 +1241,8 @@ def collect_pop(target,initial,expected,api,capture,stop,emit):
             'raw':view['raw'],'keys':view['keys'],'handle':view['handle'],'columns':columns,
             'enabled':enabled,'selection_inset':inset,'headers':[h.get('name','') for h in headers],
             'row_names':[r.get('name','') for r in rows], 'summary_supported':view['fast_supported'],
-            'current_view':view,'wheel_moves':0,'basis':'MSAA 전체 행과 셀 직접 판독'}
+            'current_view':view,'wheel_moves':0,'omitted':sorted(omitted,key=int),
+            'basis':'MSAA 보이는 행 셀 판독 + 화면 밖 행 요약값' if omitted else 'MSAA 전체 행과 셀 직접 판독'}
 
 
 def pop_batch_view(report,coverage,expected_raw,allowed_changes=()):
@@ -1244,18 +1288,53 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
     current=coverage['current_view'];pending=set(targets);done=[];moves=0;stalled=0
     grid_target={'handle':coverage['handle'],'pid':target.get('pid',0),'title':'POP 결과표',
                  'mode':'mes_rows' if coverage['summary_supported'] else 'pop_full'}
+    select=coverage['columns']['선택']
     def read(label,allowed=()):
         if stop.is_set():raise Stopped('사용자 중지 — 이미 체크된 행은 그대로 유지됩니다.')
         r=capture(grid_target,label,stop);emit('capture',r)
         return pop_batch_view(r,coverage,expected_raw,allowed)
-    def click(keys,view):
+    def click(keys,view,clicks):
+        """실제로 누른 행은 clicks에 세고, 체크 칸이 잠깐 가려져 누르지 못한 행을 돌려줍니다."""
+        covered=[]
         for key in keys:
             if stop.is_set():raise Stopped('사용자 중지')
             row=view['visible'].get(key)
             if not row or row['프로젝트No']!=targets[key] or row['선택']!='선택안됨':raise RuntimeError('체크할 프로젝트 또는 상태가 달라졌습니다.')
-            api.checkbox_click(view,key,targets[key])
+            try:api.checkbox_click(view,key,targets[key])
+            except Stopped:raise
+            except RuntimeError as error:
+                # 가림 검사는 입력을 보내기 전에 하므로 이 행은 아직 눌리지 않았습니다.
+                if '가려져' not in str(error):raise
+                covered.append(key);continue
+            clicks[key]+=1
             emit('check',{'row':key,'project':targets[key],'status':'attempt'})
             if stop.wait(.04):raise Stopped('사용자 중지 — 마지막 클릭 상태를 확인해 주세요.')
+        return covered
+    def settle(batch,label):
+        """POP가 체크를 반영할 때까지 다시 읽으며 기다립니다. 클릭을 더 하지는 않습니다."""
+        nonlocal current
+        deadline=time.monotonic()+CHECK_SETTLE_SECONDS
+        while True:
+            current=read(label,batch)
+            unchanged=[k for k in batch if current['raw'][int(k)-1][select]=='선택안됨']
+            if not unchanged or time.monotonic()>=deadline:return unchanged
+            if stop.wait(.25):raise Stopped('사용자 중지')
+    def confirm_cells(keys):
+        """요약값으로만 읽은 행은, 화면에 보일 때 셀 단위로 열·값·체크 칸 상태를 확인한 뒤에만 누릅니다."""
+        def once():
+            if stop.is_set():raise Stopped('사용자 중지')
+            r=capture({**grid_target,'mode':'pop_fast'},'POP 대상 행 셀 확인',stop);emit('capture',r)
+            return pop_view(r,baseline_raw=expected_raw)
+        view=read_settled(once,stop)
+        if view['handle']!=coverage['handle'] or view['keys']!=coverage['keys']:
+            raise RuntimeError('POP 체크 중 표 구조 또는 행 순서가 바뀌었습니다.')
+        for key in keys:
+            cell=view['selection_cells'].get(key);planned=current['selection_cells'].get(key)
+            wanted={name:expected_raw[int(key)-1][index].strip() for name,index in coverage['columns'].items()}
+            if (not cell or not planned or view['visible'].get(key)!=wanted or cell['index']!=select
+                    or any(abs(a-b)>3 for a,b in zip(cell['bounds'],planned['bounds']))):
+                raise RuntimeError('체크할 행의 셀을 화면에서 확실히 확인하지 못했습니다. 추가 클릭을 중단합니다.')
+            coverage['enabled'][key]=bool(cell['enabled'])
     def signature(view):
         return tuple((k,tuple(view['selection_cells'][k]['bounds'])) for k in view['visible'])
     def move(direction,label):
@@ -1286,19 +1365,27 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
         seen.update(current['visible'])
         batch=sorted(pending & set(current['visible']),key=int)
         if batch:
+            unknown=[k for k in batch if coverage['enabled'].get(k) is None]
+            if unknown:
+                confirm_cells(unknown)
+                current=read('POP 대상 행 확인 후 화면')
             emit('log',f'화면 안 대상 {len(batch)}개 연속 체크')
-            click(batch,current)
-            if stop.wait(.12):raise Stopped('사용자 중지')
-            current=read('POP 화면 단위 체크 확인',batch)
-            unchanged=[k for k in batch if current['raw'][int(k)-1][coverage['columns']['선택']]=='선택안됨']
-            if unchanged:
-                if stop.wait(.2):raise Stopped('사용자 중지')
-                current=read('POP 미반영 항목 재확인',batch)
-                unchanged=[k for k in unchanged if current['raw'][int(k)-1][coverage['columns']['선택']]=='선택안됨']
-                if unchanged:
-                    click(unchanged,current)
-                    if stop.wait(.12):raise Stopped('사용자 중지')
-                    current=read('POP 추가 클릭 결과 확인',batch)
+            clicks={k:0 for k in batch};remaining=list(batch);covers=0;rounds=0
+            while remaining:
+                covered=click(remaining,current,clicks);rounds+=1
+                if stop.wait(.12):raise Stopped('사용자 중지')
+                unchanged=settle(batch,'POP 화면 단위 체크 확인' if rounds==1 else 'POP 미반영 항목 재확인')
+                if covered and unchanged:
+                    covers+=1
+                    if covers>3:raise RuntimeError('체크 칸이 다른 창에 계속 가려져 있어 중단했습니다. POP 화면을 확인해 주세요.')
+                    emit('log',f'체크 칸이 잠시 가려져 있어 기다렸다 다시 확인합니다({covers}/3).')
+                    if stop.wait(1.0):raise Stopped('사용자 중지')
+                    # 기다리는 동안 늦게 반영됐을 수 있으므로, 다시 누르기 직전의 화면으로 판단합니다.
+                    current=read('POP 미반영 항목 재확인',batch)
+                    unchanged=[k for k in batch if current['raw'][int(k)-1][select]=='선택안됨']
+                # 같은 행은 두 번까지만 누릅니다(기존 기준 유지).
+                remaining=[k for k in unchanged if clicks[k]<2]
+                if remaining and not covered:emit('log',f'체크 미반영 {len(remaining)}개 · 한 번 더 클릭')
             for key in batch:
                 if current['raw'][int(key)-1][coverage['columns']['선택']]!='선택':raise RuntimeError('두 번 이내의 클릭으로 체크되지 않았습니다. 추가 클릭하지 않습니다.')
                 expected_raw[int(key)-1][coverage['columns']['선택']]='선택'
@@ -1322,8 +1409,16 @@ def check_matched(target,expected,coverage,matches,api,capture,stop,emit):
         stalled=0 if changed else stalled+1
         if stalled>=3:raise RuntimeError('POP 맨 아래에 도달하기 전에 스크롤이 멈췄습니다. 완료 처리하지 않습니다.')
     if stop.is_set():raise Stopped('사용자 중지')
-    final=capture({**target,'mode':'pop_final'},'체크 검사 최종 상태 확인',stop);emit('capture',final);validate_conditions(final,expected)
-    final_view=pop_view(final)
+    if coverage.get('omitted'):
+        # 화면 밖 행은 요약값이 예상과 한 글자도 다르지 않은지, 보이는 행은 셀 단위로 다시 확인합니다.
+        def final_once():
+            report=capture({**target,'mode':'pop_fast'},'체크 검사 최종 상태 확인',stop);emit('capture',report);validate_conditions(report,expected)
+            return report,pop_view(report,baseline_raw=expected_raw)
+        final,final_view=read_settled(final_once,stop)
+        coverage['final_baseline']=[list(r) for r in expected_raw]
+    else:
+        final=capture({**target,'mode':'pop_final'},'체크 검사 최종 상태 확인',stop);emit('capture',final);validate_conditions(final,expected)
+        final_view=pop_view(final)
     if final_view['handle']!=coverage['handle'] or final_view['keys']!=coverage['keys'] or final_view['raw']!=expected_raw:
         raise RuntimeError('최종 체크 결과가 예상과 다릅니다. POP 화면을 확인해 주세요.')
     coverage['final_report']=final
@@ -1507,7 +1602,9 @@ def save_checked_pop(target,expected,result,api,capture,stop,emit):
         raise RuntimeError('전체 행 체크 검증이 끝나지 않아 저장하지 않았습니다.')
     report=coverage.pop('final_report',None)
     if report is None:raise RuntimeError('저장 전 최종 검증 화면이 없습니다.')
-    validate_conditions(report,expected);view=pop_view(report)
+    validate_conditions(report,expected);baseline=coverage.pop('final_baseline',None)
+    # 요약 판독으로 최종 확인한 경우에만, 그때의 예상값으로 화면 밖 행을 다시 대조합니다.
+    view=pop_view(report) if baseline is None else pop_view(report,baseline_raw=baseline)
     selected={k for k,row in zip(view['keys'],view['raw']) if row[coverage['columns']['선택']].strip()=='선택'}
     if selected!=allowed:raise RuntimeError('POP에 매칭 대상 외 체크 또는 누락이 있어 저장하지 않았습니다. 체크 상태를 확인해 주세요.')
     button=pop_save_button(report);previous=api.popup_inventory()
@@ -1582,8 +1679,27 @@ def pop_steps(target,binding,expected,source,api,capture,stop,emit,initial_repor
     api.query_click(binding);emit('log','POP 조회 완료 · 2초 대기 후 목록을 한 번 읽습니다.')
     emit('query',{'click_count':1,'wait_seconds':2.0,'server_refresh_confirmed':False})
     if stop.wait(2.0):raise Stopped('사용자 중지')
-    last=read('POP 조회 후 전체 목록 1회 판독')
-    coverage=collect_pop(target,last,expected,api,capture,stop,emit)
+    def read_list():
+        # 보이는 행은 셀까지, 화면 밖 행은 요약값으로 읽어 건수가 많아도 읽기 시간이 한도에 걸리지 않게 합니다.
+        if stop.is_set():raise Stopped('사용자 중지')
+        report=capture({**target,'mode':'pop_fast'},'POP 조회 후 전체 목록 1회 판독',stop);emit('capture',report);validate_conditions(report,expected)
+        return report,collect_pop(target,report,expected,api,capture,stop,emit,summary_rows=True)
+    for attempt in range(3):
+        try:last,coverage=read_settled(read_list,stop)
+        except SummaryUnavailable:
+            emit('log','행 요약값을 쓸 수 없는 화면이라 전체 셀 판독으로 진행합니다.')
+            last=read('POP 조회 후 전체 목록 1회 판독');coverage=collect_pop(target,last,expected,api,capture,stop,emit)
+        if not coverage['keys'] or not coverage['summary_supported']:break
+        # 조회 결과가 아직 채워지는 중(또는 다른 PC가 같은 목록을 바꾸는 중)인지 클릭 전에 한 번 더 확인합니다.
+        if stop.wait(.6):raise Stopped('사용자 중지')
+        probe=capture({'handle':coverage['handle'],'pid':target.get('pid',0),'title':'POP 결과표','mode':'mes_rows'},'POP 목록 안정 확인',stop)
+        try:pop_batch_view(probe,coverage,[list(r) for r in coverage['raw']]);break
+        except Stopped:raise
+        except RuntimeError as error:
+            if '바뀌었습니다' not in str(error):raise
+            if attempt==2:raise RuntimeError('POP 목록이 계속 바뀌어 시작하지 않았습니다. 다른 PC에서 같은 목록을 작업 중인지 확인해 주세요.')
+            emit('log','POP 목록이 아직 바뀌는 중이라 다시 읽습니다.')
+            if stop.wait(1.5):raise Stopped('사용자 중지')
     result={'conditions':expected,'query_click_count':1,'post_query_reads':1,'query_wait_seconds':2.0,
             'server_refresh_confirmed':False,'coverage':coverage,'mes_source':source,
             'matching':match_rows(source,coverage['rows']),

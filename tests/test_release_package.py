@@ -43,6 +43,10 @@ APPROVED_READER_LIMITS=(
  ('deadline = time.monotonic()+95','deadline = time.monotonic()+45'),
  ("else '95초 제한 시간'","else '45초 제한 시간'"))
 
+# Approved 2026-11-11: large-list reading/check-settling (see the comment at the comparison below).
+LARGE_LIST_FUNCTIONS={'pop_view','collect_pop','check_matched','pop_steps','summary_values','read_settled'}
+LARGE_LIST_ADDITIONS={'SummaryUnavailable','TRANSIENT_VIEW_ERRORS','CHECK_SETTLE_SECONDS'}
+
 def approved_reader_limits(text):
  for new,old in APPROVED_READER_LIMITS:
   text=text.replace(new,old)
@@ -60,9 +64,17 @@ class PrivatePackageTests(unittest.TestCase):
     # Only the completion-dialog reader/wait was intentionally changed.
     # check_capture: same conditions, clearer message when the reader limit is reached.
     allowed={'save_dialog_messages','save_dialog_button','save_checked_pop','check_capture'}
+    # Approved 2026-11-11 (사용자 "세척완료 … 앞으로 같은 문제가 발생하지 않게 보완해줘", 현장 오류 기록:
+    # 80초 읽기 한도·체크 미반영·체크 칸 가려짐): 화면 밖 행은 요약값으로 읽고, 체크 반영을 기다리며,
+    # 일시적 판독 어긋남은 다시 읽는다. 클릭 대상·횟수 기준과 저장 전 검증은 그대로이며
+    # tests/test_wash_large_list.py가 예전 구현과의 동등성(짧은 목록)과 새 동작을 검증한다.
+    allowed|=LARGE_LIST_FUNCTIONS
     old=ast.parse(before[k]);new=ast.parse(approved_reader_limits(after[k]))
     for tree in (old,new):
      tree.body=[n for n in tree.body if not (isinstance(n,ast.FunctionDef) and n.name in allowed)]
+     tree.body=[n for n in tree.body if not (isinstance(n,ast.ClassDef) and n.name in LARGE_LIST_ADDITIONS)]
+     tree.body=[n for n in tree.body if not (isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)
+                and n.targets[0].id in LARGE_LIST_ADDITIONS)]
     self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False),k)
    elif k=='STL_FINDER_SOURCE':
     # Defaults and legacy-default loading changed intentionally. Path behavior
