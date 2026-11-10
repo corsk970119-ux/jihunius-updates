@@ -144,8 +144,9 @@ class QuickPanel:
         if cells is not None:
             # 설비 보드형: 호기별 머신 칸 아래 자리에 같은 명령의 버튼만 배치합니다.
             self.frame=parent;self.message=tk.StringVar(value='')
-            self.caption=ttk.Label(header,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9))
-            self.caption.pack(side='left',padx=(14,0))
+            # 저장 결과·오류 문구는 머신 칸 아래 한 줄 전체를 씁니다(width=1: 긴 문구가 배치를 밀지 않음).
+            self.caption=ttk.Label(parent,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9),width=1,anchor='w')
+            self.caption.grid(row=3,column=0,columnspan=5,sticky='ew',pady=(8,0))
             for name in ('Danger','Secondary'):
                 app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,6),font=('맑은 고딕',10,'bold'))
             for n in range(1,10):
