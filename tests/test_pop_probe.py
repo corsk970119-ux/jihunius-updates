@@ -28,7 +28,7 @@ class PopProbeTests(unittest.TestCase):
         ast.parse(text, feature_version=(3, 8))
         self.assertEqual(scope['WASH_POP_SOURCE'], (ROOT / 'src/host/wash_pop.py').read_text(encoding='utf-8'))
         self.assertIn('class WashReader', scope['WASH_READER_SOURCE'])
-        self.assertIn("getattr(self,'wait_seconds',95)", scope['WASH_READER_SOURCE'])
+        self.assertIn("getattr(self,'wait_seconds',330)", scope['WASH_READER_SOURCE'])
         self.assertIn(scope['NORMAL_LIMIT'], scope['WASH_POP_SOURCE'])
 
     def test_probe_never_sends_input(self):

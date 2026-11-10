@@ -37,15 +37,17 @@ def assignments(path):
    except (ValueError,TypeError):pass
  return result
 
-# Approved 2026-11-10 (사용자 "수정사항 전부 반영"): read-only screen reader limits only.
+# Approved 2026-11-10 (사용자 "수정사항 전부 반영"): read-only screen reader limits only (35→80초).
+# Approved 2026-11-11 (사용자 "기존 방식으로 안전한 방식으로 사용하자"): 읽는 방법은 그대로 두고
+# 기다리는 시간만 늘림 — 판독기 80→300초·4만→12만 항목, 파이썬 대기 95→330초.
 APPROVED_READER_LIMITS=(
- ('count>=40000 || clock.Elapsed.TotalSeconds>=80','count>=15000 || clock.Elapsed.TotalSeconds>=35'),
- ('deadline = time.monotonic()+95','deadline = time.monotonic()+45'),
- ("else '95초 제한 시간'","else '45초 제한 시간'"))
+ ('count>=120000 || clock.Elapsed.TotalSeconds>=300','count>=15000 || clock.Elapsed.TotalSeconds>=35'),
+ ('deadline = time.monotonic()+330','deadline = time.monotonic()+45'),
+ ("else '330초 제한 시간'","else '45초 제한 시간'"))
 
 # Approved 2026-11-11: large-list reading/check-settling (see the comment at the comparison below).
 LARGE_LIST_FUNCTIONS={'pop_view','collect_pop','check_matched','pop_steps','summary_values','read_settled'}
-LARGE_LIST_ADDITIONS={'SummaryUnavailable','TRANSIENT_VIEW_ERRORS','CHECK_SETTLE_SECONDS'}
+LARGE_LIST_ADDITIONS={'SummaryUnavailable','TRANSIENT_VIEW_ERRORS','CHECK_SETTLE_SECONDS','LARGE_LIST_SUMMARY_READING'}
 
 def approved_reader_limits(text):
  for new,old in APPROVED_READER_LIMITS:

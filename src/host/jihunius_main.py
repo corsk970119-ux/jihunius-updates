@@ -2379,7 +2379,7 @@ try {
 
     def capture(self,target,label,stop):
         import json
-        start=time.monotonic();deadline=start+95
+        start=time.monotonic();deadline=start+330
         if not self.ready:
             ready=self.record(stop,deadline)
             if ready.get('kind')!='ready':raise RuntimeError('화면 판독기 초기화 실패: '+str(ready.get('error','')))
@@ -5325,7 +5325,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.1'
+SUITE_APP_VERSION = '2026.11.11.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

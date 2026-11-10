@@ -177,6 +177,17 @@ class LegacyEquivalenceTests(unittest.TestCase):
         self.assertEqual(second.pop('omitted'), [])
         second['current_view'].pop('omitted'); self.assertEqual(first, second)
 
+    def test_every_cell_mode_reads_and_clicks_in_the_same_order_as_previous_release(self):
+        """배포 기본 경로(전체 칸 판독): 화면이 바로 반영되면 예전 구현과 판독 순서·클릭이 한 글자도 다르지 않습니다."""
+        traces = []
+        for module in (old_module(), new_module()):
+            pop = FakePop(70, page=15)
+            coverage, done, _ = run_checks(module, pop, [1, 16, 17, 40, 70], fast=False)
+            traces.append(([(mode, label) for mode, label, _ in pop.captures], pop.clicks,
+                           [r['선택'] for r in pop.rows], [e['row'] for e in done]))
+        self.assertEqual(traces[0], traces[1])
+        self.assertEqual(traces[1][1], [1, 16, 17, 40, 70])
+
     def test_short_list_clicks_same_rows_as_previous_release(self):
         results = []
         for module in (old_module(), new_module()):
@@ -285,8 +296,11 @@ class LargeListTests(unittest.TestCase):
 class PopStepsTests(unittest.TestCase):
     """조회 직후 목록 읽기: 요약 판독 → 안정 확인 → (필요하면) 예전 전체 판독."""
 
-    def steps(self, pop, numbers):
+    def steps(self, pop, numbers, summary_reading=True):
         module = new_module()
+        self.assertIs(module['LARGE_LIST_SUMMARY_READING'], False)   # 배포 기본값: 예전 방식(전체 칸)
+        module['LARGE_LIST_SUMMARY_READING'] = summary_reading
+        module['CHECK_SETTLE_SECONDS'] = 0.05
         module['SEQUENCE'] = '01'
         module['ensure_sequence'] = lambda target, expected, api, capture, stop, emit, initial_report=None: pop.report('mes_rows')[0]
         module['validate_query'] = lambda report, binding: None
@@ -295,6 +309,23 @@ class PopStepsTests(unittest.TestCase):
         result = module['pop_steps']({'handle': TOP, 'pid': 1}, {}, {'sequence': '01'}, {'sequence': '01', 'candidates': []},
                                      pop, pop.capture, Stop(), lambda kind, value: logs.append(value) if kind == 'log' else None)
         return result, logs
+
+    def test_default_reads_every_cell_exactly_like_before(self):
+        pop = FakePop(60, page=15)
+        result, _ = self.steps(pop, [3, 30, 58], summary_reading=False)
+        self.assertEqual(result['check_status'], 'verified')
+        self.assertEqual(sorted(pop.clicks), [3, 30, 58])
+        modes = [mode for mode, _, _ in pop.captures]
+        self.assertEqual((modes[0], modes[-1]), ('pop_full', 'pop_final'))
+        self.assertNotIn('pop_fast', modes)
+        self.assertNotIn('POP 목록 안정 확인', [label for _, label, _ in pop.captures])
+        self.assertEqual(pop.captures[0][2], 60 * len(COLUMNS))    # 모든 줄 × 모든 칸
+
+    def test_default_rereads_once_after_a_transient_misread(self):
+        pop = FakePop(12, page=15); pop.glitch_labels = {'POP 조회 후 전체 목록 1회 판독': 1}
+        result, _ = self.steps(pop, [2, 9], summary_reading=False)
+        self.assertEqual(sorted(pop.clicks), [2, 9])
+        self.assertEqual([label for _, label, _ in pop.captures][:2], ['POP 조회 후 전체 목록 1회 판독'] * 2)
 
     def test_large_list_uses_summary_reading_and_finishes(self):
         pop = FakePop(100, page=15)

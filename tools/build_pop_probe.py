@@ -18,11 +18,11 @@ def reader_source():
     text = (ROOT / 'src/host/jihunius_main.py').read_text(encoding='utf-8')
     node = next(n for n in ast.parse(text).body if isinstance(n, ast.ClassDef) and n.name == 'WashReader')
     source = ''.join(text.splitlines(True)[node.lineno - 1:node.end_lineno])
-    # 점검의 '전체 칸 읽기'만 더 오래 기다릴 수 있게: 기본값은 제품과 같은 95초.
-    wait = 'deadline=start+95'
+    # 점검의 '전체 칸 읽기'만 더 오래 기다릴 수 있게: 기본값은 제품과 같은 330초.
+    wait = 'deadline=start+330'
     if source.count(wait) != 1:
         raise SystemExit('WashReader의 대기 시간 위치가 바뀌었습니다.')
-    return source.replace(wait, "deadline=start+getattr(self,'wait_seconds',95)")
+    return source.replace(wait, "deadline=start+getattr(self,'wait_seconds',330)")
 
 
 def app_version():

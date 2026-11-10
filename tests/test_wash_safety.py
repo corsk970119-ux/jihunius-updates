@@ -28,10 +28,10 @@ class ReaderLimitTests(unittest.TestCase):
     def test_limits_are_relaxed_in_both_readers_and_python_waits_longer(self):
         for name in ('WASH_POP_SOURCE', 'WASH_MES_SOURCE'):
             source = wash_source(name)
-            self.assertIn('count>=40000 || clock.Elapsed.TotalSeconds>=80', source, name)
-            self.assertIn('deadline = time.monotonic()+95', source, name)
+            self.assertIn('count>=120000 || clock.Elapsed.TotalSeconds>=300', source, name)
+            self.assertIn('deadline = time.monotonic()+330', source, name)
         app = (ROOT / 'src/host/jihunius_main.py').read_text(encoding='utf-8')
-        self.assertIn('deadline=start+95', app)
+        self.assertIn('deadline=start+330', app)
 
     def test_limited_capture_names_the_reader_limit(self):
         check = check_capture()

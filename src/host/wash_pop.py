@@ -79,7 +79,7 @@ public sealed class MesReadOnlyAccessibility {
     bool limited;
     MesReadOnlyAccessibility(Action<object> output) { emit=output; }
     bool AtLimit() {
-        if (count>=40000 || clock.Elapsed.TotalSeconds>=80) { limited=true; return true; }
+        if (count>=120000 || clock.Elapsed.TotalSeconds>=300) { limited=true; return true; }
         return false;
     }
     static string Trim(object value, int maxLength=800) {
@@ -347,11 +347,11 @@ def inspect_window(target, label, stop):
         with stderr.open('wb') as errors:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                        stderr=errors, env=env, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-            deadline = time.monotonic()+95
+            deadline = time.monotonic()+330
             try:
                 while process.poll() is None:
                     if stop.wait(.1) or time.monotonic() >= deadline:
-                        report['interrupted'] = '사용자 중지' if stop.is_set() else '95초 제한 시간'
+                        report['interrupted'] = '사용자 중지' if stop.is_set() else '330초 제한 시간'
                         process.kill()
                         break
                 process.wait(timeout=5)
@@ -907,6 +907,10 @@ TRANSIENT_VIEW_ERRORS=('셀 위치를 확실히 구분하지 못했습니다','P
                        'POP 일부 행이 누락되었습니다','POP 행 요약값과 셀 값이 일치하지 않습니다')
 # 체크 클릭 뒤 POP가 반영할 때까지 다시 읽으며 기다리는 최대 시간(클릭을 더 하지는 않습니다).
 CHECK_SETTLE_SECONDS=4.0
+# False: 목록을 예전과 똑같이 모든 줄·모든 칸을 하나씩 읽습니다(현장에서 써 온 방식).
+# True : 화면 밖 줄은 행 요약값으로 읽습니다. 현장 POP에서 POP점검.pyw로 '요약값 사용 가능·값 일치'가
+#        확인된 뒤에만 켭니다(2026-11-11 사용자 결정: 안전한 쪽으로).
+LARGE_LIST_SUMMARY_READING=False
 
 
 def summary_values(row):
@@ -1684,11 +1688,17 @@ def pop_steps(target,binding,expected,source,api,capture,stop,emit,initial_repor
         if stop.is_set():raise Stopped('사용자 중지')
         report=capture({**target,'mode':'pop_fast'},'POP 조회 후 전체 목록 1회 판독',stop);emit('capture',report);validate_conditions(report,expected)
         return report,collect_pop(target,report,expected,api,capture,stop,emit,summary_rows=True)
+    def read_all_cells():
+        report=read('POP 조회 후 전체 목록 1회 판독')
+        return report,collect_pop(target,report,expected,api,capture,stop,emit)
     for attempt in range(3):
+        if not LARGE_LIST_SUMMARY_READING:
+            # 예전 방식 그대로. 화면을 다시 그리는 순간의 판독 어긋남일 때만 한 번 더 읽습니다.
+            last,coverage=read_settled(read_all_cells,stop,tries=2);break
         try:last,coverage=read_settled(read_list,stop)
         except SummaryUnavailable:
             emit('log','행 요약값을 쓸 수 없는 화면이라 전체 셀 판독으로 진행합니다.')
-            last=read('POP 조회 후 전체 목록 1회 판독');coverage=collect_pop(target,last,expected,api,capture,stop,emit)
+            last,coverage=read_all_cells()
         if not coverage['keys'] or not coverage['summary_supported']:break
         # 조회 결과가 아직 채워지는 중(또는 다른 PC가 같은 목록을 바꾸는 중)인지 클릭 전에 한 번 더 확인합니다.
         if stop.wait(.6):raise Stopped('사용자 중지')

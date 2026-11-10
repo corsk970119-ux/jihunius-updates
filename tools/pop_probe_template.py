@@ -21,9 +21,9 @@ APP_VERSION = ...  # build: 지후니우스 버전
 WASH_POP_SOURCE = ...  # build: src/host/wash_pop.py
 WASH_READER_SOURCE = ...  # build: src/host/jihunius_main.py 의 WashReader
 
-NORMAL_LIMIT = 'count>=40000 || clock.Elapsed.TotalSeconds>=80'
-EXTENDED_LIMIT = 'count>=400000 || clock.Elapsed.TotalSeconds>=420'
-EXTENDED_WAIT = 450
+NORMAL_LIMIT = 'count>=120000 || clock.Elapsed.TotalSeconds>=300'
+EXTENDED_LIMIT = 'count>=400000 || clock.Elapsed.TotalSeconds>=600'
+EXTENDED_WAIT = 640
 
 
 def load_pop():
@@ -160,7 +160,7 @@ def analyze(P, read, target, full=True, log=lambda text: None):
                 seconds, stats.get('elements', '?'), ' · 판독기 한도에 걸림' if stats.get('limited') else '',
                 ' · 오류: ' + error if error else ''))
             if seconds > 80:
-                lines.append('→ 지금 배포본(2026.11.10.3)의 80초 한도를 넘는 목록입니다.')
+                lines.append('→ 2026.11.10.3까지의 80초 한도를 넘는 목록입니다(2026.11.11.2부터 한도 300초).')
             if whole is not None and not stats.get('limited'):
                 try:
                     full_view = P['pop_view'](whole)
@@ -231,7 +231,7 @@ def make_reader(P, extended):
         powershell = powershell.replace(NORMAL_LIMIT, EXTENDED_LIMIT)
     module = SimpleNamespace(POWERSHELL=powershell, base64=P['base64'], check_capture=lambda report: None)
     reader = scope['WashReader'](module)
-    reader.wait_seconds = EXTENDED_WAIT if extended else 95
+    reader.wait_seconds = EXTENDED_WAIT if extended else 330
     return reader
 
 
