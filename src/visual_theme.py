@@ -63,6 +63,8 @@ def install_visual_theme(window, style):
         ('Open.Popup.TButton', 'popup_open'),
         ('HandoverToggle.TButton', 'handover'),
         ('HandoverNotice.TButton', 'handover_notice'),
+        ('Large.HandoverToggle.TButton', 'handover'),
+        ('Large.HandoverNotice.TButton', 'handover_notice'),
         ('STL.Accent.TButton', 'accent'),
         ('STL.Secondary.TButton', 'secondary'),
         ('STL.Danger.TButton', 'danger'),
@@ -143,8 +145,8 @@ def install_visual_theme(window, style):
                  'Mode.TRadiobutton'):
         style.configure(name, font=('맑은 고딕', 10, 'normal'), padding=(10, 7))
     style.configure('DriveSmall.TButton', padding=(6, 7))
-    # 인수인계는 탭 줄 가운데에 조금 더 크게 둡니다.
-    for name in ('HandoverToggle.TButton', 'HandoverNotice.TButton'):
+    # 인수인계 전용 큰 스타일. 같은 노란 불 스타일을 쓰는 오류 기록·업데이트 버튼 크기는 그대로입니다.
+    for name in ('Large.HandoverToggle.TButton', 'Large.HandoverNotice.TButton'):
         style.configure(name, padding=(24, 9))
     style.configure('Title.TLabel', font=('맑은 고딕', 18, 'bold'))
     style.configure('TEntry', padding=(10, 6))
@@ -154,7 +156,7 @@ def install_visual_theme(window, style):
 
     for name in ('Accent.TButton', 'Selected.AppTab.TButton', 'HandoverNotice.TButton'):
         style.configure(name, font=('맑은 고딕', 10, 'bold'))
-    for name in ('HandoverToggle.TButton', 'HandoverNotice.TButton'):
+    for name in ('Large.HandoverToggle.TButton', 'Large.HandoverNotice.TButton'):
         style.configure(name, font=('맑은 고딕', 11, 'bold'))
     result = {'popup_icon': images['popup_icon'], 'images': images}
     window._jihunius_visual_theme = result

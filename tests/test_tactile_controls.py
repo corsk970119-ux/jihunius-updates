@@ -54,3 +54,39 @@ class TactileControlsTests(unittest.TestCase):
 
 
 if __name__ == '__main__':unittest.main()
+
+
+class HeaderAndBoardRegressionTests(unittest.TestCase):
+    """Design A-3a must not hide notices or mislabel machine states."""
+    setUp = placement.MainWindowPlacementTests.setUp
+    cleanup = placement.MainWindowPlacementTests.cleanup
+    close_app = placement.MainWindowPlacementTests.close_app
+    launch = placement.MainWindowPlacementTests.launch
+
+    def test_error_and_update_notices_stay_fully_visible(self):
+        app = self.launch()
+        notices = [app.ttk.Button(app.header_actions, text=text, style='HandoverNotice.TButton')
+                   for text in ('오류 기록 4', '원본 교체 확인')]
+        for button in notices:
+            button.pack(side='right', padx=(6, 0))
+        for size in ('1120x900', '1000x760'):
+            app.window.geometry(size); app.window.update()
+            for button in notices:
+                self.assertGreaterEqual(button.winfo_width(), button.winfo_reqwidth(), (size, button.cget('text')))
+        # The large handover style must not enlarge the shared notice style.
+        self.assertNotEqual(str(app.handover_toggle.cget('style')).split('.')[0], 'HandoverNotice')
+
+    def test_material_caption_has_full_board_width(self):
+        app = self.launch()
+        app.material_quick.notice('3호기: ' + '저장하지 못했습니다 ' * 6, True)
+        app.window.geometry('1000x760'); app.window.update()
+        caption = app.material_quick.caption
+        self.assertGreater(caption.winfo_width(), 800)
+
+    def test_machine_state_word_follows_state_not_color(self):
+        app = self.launch()
+        app.machine_alert_enabled = False
+        app.apply_machine_status({1: {'light': 'yellow', 'state': 'HOLD', 'prm_no': '1'},
+                                  2: {'light': 'yellow', 'state': 'WAIT', 'prm_no': '2'}})
+        words = {n: app.machine_tiles[n][0].itemcget('machine_state', 'text') for n in (1, 2, 3)}
+        self.assertEqual(words, {1: '일시정지', 2: '대기', 3: ''})

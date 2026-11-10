@@ -2972,13 +2972,13 @@ class IntegrationApp:
             self.tab_buttons[key] = button
         self.status = tk.StringVar(value="대기 중")
         self.handover_toggle = ttk.Button(navigation_row, text="인수인계 ▸", command=self.toggle_handover,
-                                          style="HandoverToggle.TButton")
+                                          style="Large.HandoverToggle.TButton")
         self.handover_toggle.place(relx=0.7, rely=0.5, anchor="center")
-        # A-3a: 오류 기록·업데이트·상태는 제목 줄 오른쪽, 인수인계는 탭 줄 오른쪽.
-        self.header_actions = ttk.Frame(title_row)
-        self.header_actions.pack(side="right")
+        # 오류 기록·업데이트 알림 버튼이 들어가도 잘리지 않도록 탭 줄 오른쪽(원래 위치)에 둡니다.
+        self.header_actions = ttk.Frame(navigation_row)
+        self.header_actions.grid(row=0, column=2, sticky="e")
         self.header_status_label = self.make_stable_status_label(
-            self.header_actions, self.status, "Status.TLabel", width=24, anchor="center")
+            self.header_actions, self.status, "Status.TLabel", width=30, anchor="center")
         self.header_status_label.pack(side="right", padx=(12, 0))
         for widget in (navigation_row, tabs, self.header_actions, self.header_status_label, self.handover_toggle):
             widget.bind("<Configure>", lambda event: self.window.after_idle(self.position_handover_button), add="+")
@@ -3608,6 +3608,7 @@ class IntegrationApp:
 
     MACHINE_TILE_COLORS = {"green": ("#2fb36b", "#03150a", "가동"), "red": ("#e5484d", "#ffffff", "알람"),
                            "yellow": ("#f0c440", "#2a2100", "대기")}
+    MACHINE_STATE_WORDS = {"RUN": "가동", "ALARM": "알람", "WAIT": "대기", "HOLD": "일시정지", "STOP": "정지", "OFF": "꺼짐"}
     MACHINE_TILE_IDLE = ("#25334b", "#b6bdc8", "")
 
     def build_machine_monitor(self, parent):
@@ -3662,7 +3663,9 @@ class IntegrationApp:
             self.queue_machine_alert(event)
         for machine, (tile, light, number) in self.machine_tiles.items():
             record = machines.get(machine, {}) if online else {}
-            fill, ink, word = self.MACHINE_TILE_COLORS.get(record.get("light"), self.MACHINE_TILE_IDLE)
+            fill, ink, _ = self.MACHINE_TILE_COLORS.get(record.get("light"), self.MACHINE_TILE_IDLE)
+            # 글자는 색이 아니라 실제 상태에서: 같은 노란색이라도 WAIT=대기, HOLD=일시정지.
+            word = self.MACHINE_STATE_WORDS.get(record.get("state"), "") if record else ""
             uncertain = not record or record.get('_stale', False)
             tile.itemconfigure('machine_title', text='머신{}{}'.format(machine, ' ?' if uncertain else ''), fill=ink)
             tile.itemconfigure('machine_state', text=word, fill=ink)
@@ -3680,7 +3683,7 @@ class IntegrationApp:
         header = self.handover_toggle.master
         last_tab = self.tab_buttons['wash']
         left = last_tab.winfo_rootx() + last_tab.winfo_width() - header.winfo_rootx()
-        right = header.winfo_width()
+        right = self.header_actions.winfo_rootx() - header.winfo_rootx()
         self.handover_toggle.place(relx=0, x=round((left + right) / 2), rely=0.5, anchor="center")
 
     def show_machine_details(self, machine):
@@ -3803,8 +3806,9 @@ class IntegrationApp:
             text = "● 인수인계 {}건 {}".format(count, arrow)
         else:
             text = "인수인계 " + arrow
-        self.handover_toggle.configure(text=text, style="HandoverNotice.TButton"
-                                        if count or self.handover_read_error else "HandoverToggle.TButton")
+        # 인수인계만 크게: 오류 기록·업데이트 알림이 쓰는 HandoverNotice 크기는 그대로 둡니다.
+        self.handover_toggle.configure(text=text, style="Large.HandoverNotice.TButton"
+                                        if count or self.handover_read_error else "Large.HandoverToggle.TButton")
 
     def toggle_handover(self):
         self.window.update_idletasks()
@@ -5145,7 +5149,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.09.12'
+SUITE_APP_VERSION = '2026.11.09.13'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
