@@ -67,6 +67,14 @@ class PopProbeTests(unittest.TestCase):
         self.assertIn('칸 수 불일치', text)
         self.assertIn('행 요약값 사용 가능: 아니오', text)
 
+    def test_empty_list_is_reported_as_not_checked_rather_than_no(self):
+        _, scope = probe()
+        text = '\n'.join(scope['analyze'](scope['load_pop'](), reader_for(FakePop(0, page=15)), {'handle': TOP, 'pid': 1}))
+        self.assertIn('POP 목록이 0줄입니다', text)
+        self.assertIn('행 요약값 사용 가능: 확인 못함', text)
+        self.assertIn('새 방식 값과 예전 방식 값: 비교 못함', text)
+        self.assertNotIn('사용 가능: 아니오', text)
+
     def test_list_changing_during_probe_is_reported(self):
         _, scope = probe()
         pop = FakePop(40, page=15)

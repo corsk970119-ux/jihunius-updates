@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-PROBE_VERSION = '1'
+PROBE_VERSION = '2'
 APP_VERSION = ...  # build: 지후니우스 버전
 WASH_POP_SOURCE = ...  # build: src/host/wash_pop.py
 WASH_READER_SOURCE = ...  # build: src/host/jihunius_main.py 의 WashReader
@@ -79,6 +79,7 @@ def analyze(P, read, target, full=True, log=lambda text: None):
     original_validate = P['validate_conditions']
     P['validate_conditions'] = lambda *args, **kwargs: {}
     verdict = {'summary': None, 'fast_view': None, 'equal': None, 'stable': None}
+    row_count = None
     try:
         # 1) 행 요약만 읽기 ----------------------------------------------------
         step(lines, '1. 행 요약만 읽기(mes_rows)'); log('1/4 행 요약 읽는 중…')
@@ -96,6 +97,7 @@ def analyze(P, read, target, full=True, log=lambda text: None):
                     reason = summary_problem(P, row)
                     if reason: problems[reason] = problems.get(reason, 0) + 1
                 base_summaries = [r.get('value') for r in rows]
+                row_count = len(rows)
                 widths = sorted({r.get('child_count') for r in rows})
                 lines.append('목록 {}줄 · 화면에 보이는 줄 {} · 한 줄의 칸 수 {}'.format(len(rows), len(shown), widths))
                 lines.append('보이는 열 제목({}개): {}'.format(len(names), ', '.join(names)))
@@ -104,7 +106,8 @@ def analyze(P, read, target, full=True, log=lambda text: None):
                     lines.append('  - {}: {}줄'.format(reason, count))
                 if rows:
                     lines.append('첫 줄 요약값 모양(값은 가림): ' + mask(rows[0].get('value') or ''))
-                verdict['summary'] = bool(rows) and not problems
+                # 줄이 없으면 요약값을 주는지 알 수 없습니다(아니오가 아니라 '확인 못함').
+                verdict['summary'] = (not problems) if rows else None
             except Exception as failure:
                 lines.append('표 확인 실패 — ' + explain(failure))
 
@@ -169,8 +172,9 @@ def analyze(P, read, target, full=True, log=lambda text: None):
                                 len(fast_view['keys']), len(full_view['keys'])))
                         else:
                             different = [i for i, (a, b) in enumerate(zip(fast_view['raw'], full_view['raw']), 1) if a != b]
-                            verdict['equal'] = not different
-                            lines.append('새 방식 값 = 예전 방식 값: ' + ('전부 일치({}줄 × 모든 칸)'.format(len(full_view['keys']))
+                            verdict['equal'] = (not different) if full_view['keys'] else None
+                            lines.append('새 방식 값 = 예전 방식 값: ' + ('비교할 줄 없음(0줄)' if not full_view['keys'] else
+                                         '전부 일치({}줄 × 모든 칸)'.format(len(full_view['keys']))
                                          if not different else '{}줄 불일치'.format(len(different))))
                             for number in different[:10]:
                                 a, b = fast_view['raw'][number - 1], full_view['raw'][number - 1]
@@ -184,7 +188,7 @@ def analyze(P, read, target, full=True, log=lambda text: None):
                     if fast_coverage is not None:
                         same = (old_coverage['rows'] == fast_coverage['rows'] and old_coverage['columns'] == fast_coverage['columns'])
                         lines.append('체크에 쓰는 열(선택·프로젝트No·설비명·지시일) 값: ' + ('두 방식 일치' if same else '두 방식 불일치'))
-                        if not same: verdict['equal'] = False
+                        if not same and full_view['keys']: verdict['equal'] = False
                 except Exception as failure:
                     lines.append('예전 방식 판독 실패 — ' + explain(failure))
 
@@ -205,7 +209,11 @@ def analyze(P, read, target, full=True, log=lambda text: None):
 
     head = ['POP 점검 결과 (읽기 전용 · 실제 값 없음)',
             '점검 프로그램 {} · 지후니우스 {} · {}'.format(PROBE_VERSION, APP_VERSION, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-            '', '[요약]',
+            '', '[요약]']
+    if row_count == 0:
+        head += ['※ POP 목록이 0줄입니다. 프로그램은 정상 실행됐지만 줄이 없어 아래 항목은 확인할 수 없습니다.',
+                 '   목록에 줄이 떠 있을 때(세척완료를 누르기 전) 다시 실행해 주세요.']
+    head += [
             '행 요약값 사용 가능: ' + {True: '예', False: '아니오', None: '확인 못함'}[verdict['summary']],
             '새 방식(보이는 줄 칸 + 화면 밖 줄 요약값) 판독: ' + {True: '성공', False: '실패', None: '확인 못함'}[verdict['fast_view']],
             '새 방식 값과 예전 방식 값: ' + {True: '일치', False: '불일치', None: '비교 못함'}[verdict['equal']],
