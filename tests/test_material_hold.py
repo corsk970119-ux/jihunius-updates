@@ -49,7 +49,9 @@ class MaterialHoldTests(unittest.TestCase):
   report=self.s.period_report(self.at-200,self.at+1)
   ten=next(x for x in report['by_type'] if x['type_id']=='10Z')
   fourteen=next(x for x in report['by_type'] if x['type_id']=='14')
-  self.assertEqual((ten['eligible_rods'],ten['avg_good_per_rod'],ten['avg_defects_per_rod']),(1,149,1))
+  # 2026-11-11 사용자 결정: 처음부터 끼워져 있던 봉(양품 0)도 평균에 넣는다 → (0+149)/2, (0+1)/2.
+  self.assertEqual((ten['consumed_rods'],ten['eligible_rods'],ten['excluded_rods']),(2,2,0))
+  self.assertEqual((ten['avg_good_per_rod'],ten['avg_defects_per_rod']),(74.5,0.5))
   self.assertEqual((fourteen['consumed_rods'],fourteen['completed_good'],fourteen['completed_defects']),(1,9,1))
 
  def test_repeated_switches_preserve_next_material_and_restart(self):

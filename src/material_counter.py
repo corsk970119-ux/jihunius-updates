@@ -780,8 +780,9 @@ class Store:
 
         The primary yield cohort contains each ended rod's entire observed lifetime.
         Event-date production/defect entries are separate activity statistics; they
-        must not be divided by a different set of rods. Unknown/partial/gap totals
-        remain visible, but partial/gap/excess-defect rods are excluded from averages.
+        must not be divided by a different set of rods. Averages cover every rod
+        ended in range as observed (2026-11-11 user decision: partial/gap/excess-defect
+        rods are no longer excluded; the per-rod flags stay in the database).
         """
         start_ts, end_ts = self._at(start_ts), self._at(end_ts)
         if end_ts <= start_ts:
@@ -845,7 +846,9 @@ class Store:
         for r in self.db.execute(query,params):
             good = max(0,r['production']-r['defects'])
             excess = max(0,r['defects']-r['production'])
-            eligible = not r['partial'] and not r['gap'] and not excess
+            # 2026-11-11 사용자 결정: 수집이 끊긴 적이 있는 봉(중간 시작·수집 공백)과 불량초과 봉도
+            # 빼지 않고, 교체로 사용을 끝낸 모든 봉을 관측 수량 그대로 평균에 넣는다.
+            eligible = True
             values = dict(consumed_rods=1,early_rods=int(bool(r['early_end'])),normal_rods=int(not r['early_end']),
                           completed_production=r['production'],completed_good=good,completed_defects=r['defects'],
                           completed_defect_excess=excess,eligible_rods=int(eligible),excluded_rods=int(not eligible))
@@ -867,7 +870,7 @@ class Store:
                     by_type=list(by_type.values()),by_machine=list(by_machine.values()),
                     daily=[daily[key] for key in sorted(daily)],
                     basis='소모 봉: 기간 내 사용을 끝낸 봉(정상 소진+중도파기). 양품·불량 합계는 해당 봉의 전체 관측 기록입니다. '
-                          '봉당 평균: 중도파기를 포함하고 중간 시작·수집 공백·불량초과 봉은 제외합니다. '
+                          '봉당 평균: 기간 내 사용을 끝낸 모든 봉(중도파기 포함)의 관측 수량 기준입니다. '
                           '사용 중·보관 중인 봉은 종료 후 반영됩니다. 기간 관측 가공·불량 입력은 발생일/입력일 기준 별도 수치입니다.')
 
     def validate_export_path(self, path):
@@ -1745,8 +1748,8 @@ class Application:
         cards.grid(row=2,column=0,sticky='ew')
         self.period_cards={}
         for i,(key,title,color,detail) in enumerate((
-                ('good','봉당 양품',PALETTE['green'],'양품 합계 ÷ 평균 대상 봉'),
-                ('defects','봉당 불량',PALETTE['red'],'불량 합계 ÷ 평균 대상 봉'),
+                ('good','봉당 양품',PALETTE['green'],'양품 합계 ÷ 소모 봉'),
+                ('defects','봉당 불량',PALETTE['red'],'불량 합계 ÷ 소모 봉'),
                 ('consumed','소모 소재',PALETTE['text'],'소재교체로 사용을 끝낸 봉'),
                 ('diameter10','Ø10 사용 소재',PALETTE['text'],'Z급 · B급 합산'),
                 ('diameter12','Ø12 사용 소재',PALETTE['text'],'기간 내 사용을 끝낸 봉'),
@@ -1775,17 +1778,17 @@ class Application:
         self.period_table_caption=self.label(modebar,'소모 봉의 양품·불량 관측 합계',size=9,color=PALETTE['muted'])
         self.period_table_caption.pack(side='right')
         self.report_tree=self._period_table(panel,5,
-            ('name','consumed','good','defects','avg_good','avg_defects','eligible','excluded'),
-            ('소재 / 호기','소모 봉','양품 합계','불량 합계','봉당 양품','봉당 불량','평균 대상','평균 제외'),
-            (125,80,100,95,100,100,85,85))
+            ('name','consumed','good','defects','avg_good','avg_defects'),
+            ('소재 / 호기','소모 봉','양품 합계','불량 합계','봉당 양품','봉당 불량'),
+            (150,100,135,125,130,130))
         self.daily_tree=self._period_table(panel,5,
-            ('day','consumed','good','defects','avg_good','avg_defects','eligible'),
-            ('종료일','소모 봉','양품 합계','불량 합계','봉당 양품','봉당 불량','평균 대상'),
-            (140,85,110,105,110,110,100))
+            ('day','consumed','good','defects','avg_good','avg_defects'),
+            ('종료일','소모 봉','양품 합계','불량 합계','봉당 양품','봉당 불량'),
+            (160,100,130,120,125,125))
         self.period_observed=self.label(panel,'기간 중 수집 · 조회 대기',size=9,color=PALETTE['muted'],anchor='w')
         self.period_observed.grid(row=6,column=0,sticky='ew',pady=(7,4))
         self.period_hint=self.label(panel,
-            '봉당 평균: 이 기간에 사용을 끝낸 봉의 처음부터 끝까지 수량으로 계산합니다. 사용 중·보관 중인 봉은 종료 후 반영됩니다.\n가공량이 적어도 교체한 봉은 1봉으로 포함하며, 중간 시작·수집 공백·불량초과 봉은 평균에서 제외합니다.',
+            '봉당 평균: 이 기간에 사용을 끝낸 봉의 처음부터 끝까지 수량으로 계산합니다. 사용 중·보관 중인 봉은 종료 후 반영됩니다.\n가공량이 적어도 교체한 봉은 1봉으로 포함합니다. 수량은 지후니우스가 설비를 조회하는 동안 센 값입니다.',
             color=PALETTE['muted'],size=9,anchor='w',justify='left',wraplength=900)
         self.period_hint.grid(row=7,column=0,sticky='ew')
         panel.bind('<Configure>',lambda e:self.period_hint.configure(wraplength=max(400,e.width-10)))
@@ -1837,9 +1840,8 @@ class Application:
             self.report_tree.insert('','end',values=(name,
                 '{:,}'.format(row['consumed_rods']),
                 '{:,}'.format(row['completed_good']),'{:,}'.format(row['completed_defects']),
-                average_text(row['avg_good_per_rod']),average_text(row['avg_defects_per_rod']),
-                '{:,}'.format(row['eligible_rods']),'{:,}'.format(row['excluded_rods'])),
-                tags=('total',) if row.get('_total') else (('warning',) if row['excluded_rods'] else ()))
+                average_text(row['avg_good_per_rod']),average_text(row['avg_defects_per_rod'])),
+                tags=('total',) if row.get('_total') else ())
 
     def _render_period(self,report):
         self._period_report=report
@@ -1857,11 +1859,10 @@ class Application:
             value,note=self.period_cards['diameter'+diameter]
             value.configure(text='{:,} 봉'.format(sum(by_type.get(kind,0) for kind in kinds)))
             note.configure(text='Z급 {:,}봉 · B급 {:,}봉'.format(by_type.get('10Z',0),by_type.get('10B',0)) if diameter=='10' else '기간 내 사용을 끝낸 봉')
-        self.period_cards['good'][1].configure(text='양품 {:,}개 ÷ {:,}봉'.format(total['eligible_good'],total['eligible_rods']) if total['eligible_rods'] else '평균을 계산할 측정 봉 없음')
-        self.period_cards['defects'][1].configure(text='불량 {:,}개 ÷ {:,}봉'.format(total['eligible_defects'],total['eligible_rods']) if total['eligible_rods'] else '평균을 계산할 측정 봉 없음')
-        self.period_summary.configure(text='소모 {:,}봉 중 평균 대상 {:,}봉  ·  평균 제외 {:,}봉 (중간 시작 / 수집 공백 / 불량초과)'.format(
-            total['consumed_rods'],total['eligible_rods'],total['excluded_rods']),
-            fg=PALETTE['yellow'] if total['excluded_rods'] else PALETTE['muted'])
+        self.period_cards['good'][1].configure(text='양품 {:,}개 ÷ {:,}봉'.format(total['eligible_good'],total['eligible_rods']) if total['eligible_rods'] else '사용을 끝낸 봉 없음')
+        self.period_cards['defects'][1].configure(text='불량 {:,}개 ÷ {:,}봉'.format(total['eligible_defects'],total['eligible_rods']) if total['eligible_rods'] else '사용을 끝낸 봉 없음')
+        self.period_summary.configure(text='소모 {:,}봉  ·  봉당 평균은 교체로 사용을 끝낸 모든 봉 기준'.format(total['consumed_rods']),
+            fg=PALETTE['muted'])
         self._render_period_rows(report)
         old=self.daily_tree.get_children()
         if old:self.daily_tree.delete(*old)
@@ -1869,14 +1870,11 @@ class Application:
             if not row['consumed_rods']:continue
             self.daily_tree.insert('','end',values=(row['day'],'{:,}'.format(row['consumed_rods']),
                 '{:,}'.format(row['completed_good']),'{:,}'.format(row['completed_defects']),
-                average_text(row['avg_good_per_rod']),average_text(row['avg_defects_per_rod']),'{:,}'.format(row['eligible_rods'])),
-                tags=('warning',) if row['excluded_rods'] else ())
+                average_text(row['avg_good_per_rod']),average_text(row['avg_defects_per_rod'])))
         self.period_observed.configure(text='기간 중 수집: 관측 가공 {:,}회 · 불량 입력 {:,}개 · 새 봉 투입 {:,}봉  |  사용 중인 봉도 포함'.format(
             total['production'],total['defects'],total['loaded_rods']))
         if not total['consumed_rods']:
             self.period_summary.configure(text='이 기간에 사용을 끝낸 소재가 없습니다. 소재교체 후 봉당 수량이 표시됩니다.',fg=PALETTE['muted'])
-        elif not total['eligible_rods']:
-            self.period_summary.configure(text='소모 {:,}봉 모두 측정이 불완전하여 봉당 평균을 계산하지 않았습니다. 양품·불량 관측 합계는 표에 보존됩니다.'.format(total['consumed_rods']),fg=PALETTE['yellow'])
 
     def _period_month_anchor(self):
         for variable in (self.date_from,self.date_to):
@@ -2160,14 +2158,12 @@ class Application:
             widgets['defects'].configure(text=str(row['defects']),fg=PALETTE['yellow'] if row['defects'] else PALETTE['muted'])
             flags=[]
             if row['defect_excess']:flags.append('불량초과 {}'.format(row['defect_excess']))
-            if row['partial']:flags.append('중간 시작')
-            if row['gap']:flags.append('누락 가능')
             caption=material_label(row['material_type']) if row['material_type'] else '소재 지정'
             if row['next_type'] and row['next_type']!=row['material_type']:
                 caption+='\n다음 '+material_label(row['next_type'])
             else:
                 caption+='\n'+(' · '.join(flags) if flags else (datetime.fromtimestamp(row['started']).strftime('%m/%d %H:%M') if row['started'] else '첫 데이터 대기'))
-            widgets['material'].configure(text=caption,fg=PALETTE['yellow'] if row['gap'] else ('#60a5fa' if not row['material_type'] else PALETTE['text']))
+            widgets['material'].configure(text=caption,fg='#60a5fa' if not row['material_type'] else PALETTE['text'])
             if self.dashboard_actions:
                 actions=self.action_availability(n,row,now)
                 widgets['rotate'].configure(text='확인 중…' if n in self.pending else '소재교체',state='normal' if actions['rotate'] else 'disabled')
@@ -2265,8 +2261,6 @@ class Application:
         for r in self.store.history(n):
             flags=[]
             if r['early_end']:flags.append('중도교체')
-            if r['partial']:flags.append('중간 시작')
-            if r['gap']:flags.append('누락 가능')
             if r['defect_excess']:flags.append('불량초과 {}'.format(r['defect_excess']))
             self.history_tree.insert('', 'end',values=(r['id'],'{}호기'.format(r['machine']),material_label(r['material_type']),date_text(r['started'],True),date_text(r['ended'],True),r['total'],r['good'],r['defects'],' · '.join(flags) or '전체 구간'))
         self.event_details={}
@@ -2331,15 +2325,15 @@ class Application:
           '   중도교체도 가공·불량은 보존하며 새 봉 1봉을 차감합니다. 사용하던 봉은 미사용 재고로 돌리지 않습니다.\n'
           '6. 호기 우클릭: 마지막 불량/소재교체 취소. 소재교체 취소 시 재고도 복원됩니다.\n'
           '7. 기간 통계: 종료일 기준 소모 봉 수, 봉당 양품·불량을 소재별·호기별·일별로 조회합니다.\n'
-          '   평균은 기간 내 종료된 완전측정 봉의 전체 양품·불량 기준. 중도파기 포함, 중간 시작·공백·불량초과 제외.\n'
+          '   평균은 기간 내 사용을 끝낸 모든 봉의 전체 양품·불량 기준(중도파기 포함).\n'
           '8. 기록 삭제: 현재 재고 유지 또는 재고까지 초기화를 선택합니다. 삭제 전 자동 백업됩니다.\n'
-          '   초기화 후 현재 장착 봉은 중간 시작입니다. 새 봉을 넣은 뒤부터 봉당 평균에 반영됩니다.\n'
+          '   초기화 후 현재 장착 봉은 그 시점부터 센 수량으로 집계됩니다.\n'
           '9. CSV 내보내기와 전체 데이터 백업으로 기록을 따로 보관할 수 있습니다.\n\n'
-          '첫 관측 번호는 기준값입니다. 첫 소재에는 중간 시작이 표시됩니다.\n'
+          '첫 관측 번호는 기준값입니다.\n'
           '같은 번호의 반복 조회는 세지 않습니다. 번호의 숫자 차이는 사용하지 않습니다.\n'
           '사이트 카운터는 읽거나 기록하지 않습니다. 수량은 프로그램 번호 변화만으로 판단합니다.\n'
           '실제 조회는 3초 간격입니다. 화면은 응답 지연 시 갱신 대기, 30초 초과 시 연결 끊김을 표시합니다.\n'
-          '재실행하면 기존 집계를 유지합니다. 종료·연결 끊김 구간은 누락 가능으로 표시하고 새 기준을 잡습니다.\n'
+          '재실행하면 기존 집계를 유지합니다. 종료·연결 끊김 구간의 가공은 세지 못하며, 다시 연결되면 새 기준을 잡습니다.\n'
           '실제 완료·양품을 판정하는 기능은 아닙니다. 현장 번호 변화를 확인해주세요.\n\n'
           '기존 기록은 유지되며, 과거 소재 종류를 모르면 미지정으로 남습니다.\n'
           '기존 불량이 가공 수보다 많은 기록은 보존하고 불량초과를 표시합니다. 양품은 0 미만으로 표시하지 않습니다.\n'
