@@ -1,4 +1,5 @@
-"""기간 통계: 수집이 끊긴 적이 있는 봉도 빼지 않고, 사용을 끝낸 모든 봉으로 봉당 평균을 냅니다(2026-11-11 사용자 결정)."""
+"""기간 통계(2026-11-11 사용자 결정): 수집이 끊긴 적이 있는 봉은 빼지 않고 평균에 넣고,
+집계를 시작했을 때 이미 끼워져 있던 첫 봉만 평균에서 뺍니다("소재교체가 1회 된 후에만 측정")."""
 import gc, tempfile, time, unittest
 from pathlib import Path
 import test_material_ui as ui_tests
@@ -21,7 +22,7 @@ def scenario(store, start):
 
 
 class AllRodsAverageTests(unittest.TestCase):
-    def test_interrupted_and_manually_replaced_rods_are_all_averaged(self):
+    def test_interrupted_rods_are_averaged_and_only_the_first_rod_is_left_out(self):
         for factory in (core.Store, sync.CommandStore):
             with self.subTest(store=factory.__name__), tempfile.TemporaryDirectory() as tmp:
                 store = factory(Path(tmp) / 'db.sqlite3'); start = time.time() - 1000
@@ -29,15 +30,16 @@ class AllRodsAverageTests(unittest.TestCase):
                     scenario(store, start)
                     report = store.period_report(start - 1, start + 300)
                     total = report['totals']
-                    self.assertEqual((total['consumed_rods'], total['eligible_rods'], total['excluded_rods']), (3, 3, 0))
+                    # 소모 3봉 중 첫 봉 1개만 평균에서 빠지고, 끊김·수동 교체가 있었던 2봉은 들어간다.
+                    self.assertEqual((total['consumed_rods'], total['eligible_rods'], total['excluded_rods']), (3, 2, 1))
                     self.assertEqual((total['completed_good'], total['completed_defects']), (5, 1))   # 양품 2+2+1, 불량 0+1+0
-                    self.assertAlmostEqual(total['avg_good_per_rod'], 5 / 3)
-                    self.assertAlmostEqual(total['avg_defects_per_rod'], 1 / 3)
-                    self.assertEqual((total['eligible_good'], total['eligible_defects']), (5, 1))
+                    self.assertEqual((total['eligible_good'], total['eligible_defects']), (3, 1))     # 첫 봉 양품 2 제외
+                    self.assertAlmostEqual(total['avg_good_per_rod'], 3 / 2)
+                    self.assertAlmostEqual(total['avg_defects_per_rod'], 1 / 2)
                     ten = next(row for row in report['by_type'] if row['type_id'] == '10B')
-                    self.assertEqual((ten['consumed_rods'], ten['eligible_rods']), (3, 3))
+                    self.assertEqual((ten['consumed_rods'], ten['eligible_rods']), (3, 2))
                     self.assertEqual(sum(row['consumed_rods'] for row in report['daily']), 3)
-                    self.assertNotIn('제외', report['basis'])
+                    self.assertIn('첫 봉은 제외', report['basis'])
                     # 끊김 표시는 지우지 않고 기록에 그대로 남는다(통계에서 빼지 않을 뿐).
                     ended = sorted((row for row in store.history() if row['ended']), key=lambda row: row['started'])
                     self.assertEqual([(bool(row['partial']), bool(row['gap'])) for row in ended],
@@ -45,6 +47,20 @@ class AllRodsAverageTests(unittest.TestCase):
                     self.assertEqual([(row['total'], row['good'], row['defects']) for row in ended], [(2, 2, 0), (3, 2, 1), (1, 1, 0)])
                 finally:
                     store.close()
+
+    def test_only_first_rods_ended_gives_no_average_yet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = core.Store(Path(tmp) / 'db.sqlite3'); start = time.time() - 1000
+            try:
+                store.register_stock('10B', 10, start); store.assign_material(1, '10B', start)
+                for index, program in enumerate(('1001', '1002', '1003')):
+                    store.observe(dict(machine=1, program=program, state='RUN', part_count=''), start + index)
+                store.rotate(1, start + 3)
+                total = store.period_report(start - 1, start + 300)['totals']
+                self.assertEqual((total['consumed_rods'], total['eligible_rods'], total['excluded_rods']), (1, 0, 1))
+                self.assertIsNone(total['avg_good_per_rod']); self.assertIsNone(total['avg_defects_per_rod'])
+            finally:
+                store.close()
 
     def test_counting_itself_is_unchanged_by_the_gap(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,17 +91,19 @@ class PeriodTabWithoutIncompleteTests(unittest.TestCase):
             finally:
                 store.close()
         self.app._render_period(report); self.root.update()
-        self.assertEqual(self.app.report_tree.cget('columns'), ('name', 'consumed', 'good', 'defects', 'avg_good', 'avg_defects'))
-        self.assertEqual(self.app.daily_tree.cget('columns'), ('day', 'consumed', 'good', 'defects', 'avg_good', 'avg_defects'))
+        self.assertEqual(self.app.report_tree.cget('columns'), ('name', 'consumed', 'good', 'defects', 'avg_good', 'avg_defects', 'eligible'))
+        self.assertEqual(self.app.daily_tree.cget('columns'), ('day', 'consumed', 'good', 'defects', 'avg_good', 'avg_defects', 'eligible'))
         total_row = self.app.report_tree.item(self.app.report_tree.get_children()[0], 'values')
         self.assertEqual(tuple(total_row[:4]), ('전체', '3', '5', '1'))
-        self.assertNotIn('—', total_row[4:])                                  # 봉당 양품·불량이 계산되어 보임
-        self.assertEqual(self.app.period_cards['good'][1].cget('text'), '양품 5개 ÷ 3봉')
-        self.assertEqual(self.app.period_cards['defects'][1].cget('text'), '불량 1개 ÷ 3봉')
+        self.assertNotIn('—', total_row[4:6])                                 # 봉당 양품·불량이 계산되어 보임
+        self.assertEqual(str(total_row[6]), '2')                              # 평균 계산 봉: 첫 봉 제외
+        self.assertEqual(self.app.period_cards['good'][1].cget('text'), '양품 3개 ÷ 2봉')
+        self.assertEqual(self.app.period_cards['defects'][1].cget('text'), '불량 1개 ÷ 2봉')
         summary = self.app.period_summary.cget('text')
-        self.assertIn('소모 3봉', summary); self.assertIn('모든 봉', summary)
+        for expected in ('소모 3봉', '새로 끼운 2봉 기준', '첫 봉 1봉은 평균에서 제외'):
+            self.assertIn(expected, summary)
         for text in (summary, self.app.period_hint.cget('text'), ' '.join(str(self.app.report_tree.heading(c, 'text')) for c in self.app.report_tree.cget('columns'))):
-            for word in ('불완전', '평균 제외', '평균 대상', '수집 공백', '중간 시작'):
+            for word in ('불완전', '수집 공백', '중간 시작', '누락 가능'):
                 self.assertNotIn(word, text)
 
 
