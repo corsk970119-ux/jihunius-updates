@@ -81,6 +81,21 @@ class HeaderAndBoardRegressionTests(unittest.TestCase):
         caption = app.material_quick.caption
         self.assertGreater(caption.winfo_width(), 800)
 
+    def test_machine_tile_shows_current_tool_number(self):
+        app = self.launch()
+        app.machine_alert_enabled = False
+        app.apply_machine_status({1: {'light': 'green', 'state': 'RUN', 'prm_no': '6001', 'details': {'tool_number': '12'}},
+                                  2: {'light': 'yellow', 'state': 'WAIT', 'prm_no': '6002', 'details': {'tool_number': 'T0303'}},
+                                  3: {'light': 'green', 'state': 'RUN', 'prm_no': '6003', 'details': {'tool_number': ''}},
+                                  4: {'light': 'green', 'state': 'RUN', 'prm_no': '6004'}})
+        tool = lambda n: app.machine_tiles[n][0].itemcget('machine_tool', 'text')
+        self.assertEqual([tool(n) for n in (1, 2, 3, 4, 5)], ['T12', 'T0303', '', '', ''])
+        # 프로그램 번호·상태 표시는 그대로.
+        self.assertEqual(app.machine_tiles[1][0].itemcget(app.machine_tiles[1][2], 'text'), '6001')
+        self.assertEqual(app.machine_tiles[2][0].itemcget('machine_state', 'text'), '대기')
+        app.apply_machine_status({}, online=False)
+        self.assertEqual([tool(n) for n in (1, 2)], ['', ''])
+
     def test_machine_state_word_follows_state_not_color(self):
         app = self.launch()
         app.machine_alert_enabled = False

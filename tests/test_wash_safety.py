@@ -98,12 +98,20 @@ class ScaledLayoutTests(unittest.TestCase):
     def test_machine_text_and_alert_switch_do_not_overlap_when_scaled(self):
         for scale in (96 / 72, 2.2):
             app = self.launch(scale)
-            app.apply_machine_status({1: {'light': 'green', 'prm_no': '6001'}})
+            app.apply_machine_status({1: {'light': 'green', 'state': 'RUN', 'prm_no': '6001', 'details': {'tool_number': '0101'}}})
+            app.window.update()
             tile, light, number = app.machine_tiles[1]
             title = tile.bbox('machine_title'); digits = tile.bbox(number)
+            tool = tile.bbox('machine_tool'); state = tile.bbox('machine_state')
             with self.subTest(scale=scale):
                 self.assertLessEqual(title[3], digits[1] + 3)
                 self.assertLessEqual(digits[3], int(tile.cget('height')) + 1)
+                # 공구 번호: 프로그램 번호 오른쪽에 겹치지 않고, 칸 안에, 상태 글자 아래에.
+                self.assertEqual(tile.itemcget('machine_tool', 'text'), 'T0101')
+                self.assertGreater(tool[0], digits[2])
+                self.assertLessEqual(tool[2], tile.winfo_width())
+                self.assertLessEqual(tool[3], int(tile.cget('height')) + 1)
+                self.assertLessEqual(state[3], tool[1] + 3)
                 canvas = app.machine_alert_toggle
                 labels = [canvas.bbox(i) for i in canvas.find_all() if canvas.type(i) == 'text'][:2]
                 switch = [canvas.bbox(i) for i in canvas.find_all() if canvas.type(i) == 'image'][0]

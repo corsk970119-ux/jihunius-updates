@@ -3711,7 +3711,11 @@ class IntegrationApp:
                                  fill=ink, font=("맑은 고딕", 10, "bold"))
                 tile.create_text(0, title_y, text="", anchor="e", tags=('machine_state',),
                                  fill=ink, font=("맑은 고딕", 9, "bold"))
-                number = tile.create_text(12, number_y, text="—", anchor="w", fill=ink, font=("Consolas", 16, "bold"))
+                number = tile.create_text(12, number_y, text="—", anchor="w", fill=ink, font=("Consolas", 16, "bold"),
+                                          tags=('machine_number',))
+                # 현재 공구 번호(설비가 알려 주는 값). 프로그램 번호와 같은 줄의 오른쪽 끝.
+                tile.create_text(0, number_y, text="", anchor="e", tags=('machine_tool',),
+                                 fill=ink, font=("Consolas", 11, "bold"))
                 tile.bind("<Configure>", lambda event, c=tile, l=light: self.shape_machine_tile(c, l, event.width, event.height))
                 self.machine_tiles[machine] = (tile, light, number)
                 tile.bind("<Button-1>", lambda event, n=machine: self.show_machine_details(n))
@@ -3730,6 +3734,8 @@ class IntegrationApp:
                       1 + r, h, 1, h, 1, h - r, 1, 1 + r, 1, 1)
         title = canvas.coords('machine_title')
         canvas.coords('machine_state', w - 11, title[1] if title else 15)
+        number = canvas.coords('machine_number')
+        canvas.coords('machine_tool', w - 11, number[1] if number else 38)
 
     def apply_machine_status(self, machines, online=True):
         """읽기 결과는 GUI 스레드에서 반영. 알 수 없는 상태는 회색으로 표시합니다."""
@@ -3751,7 +3757,16 @@ class IntegrationApp:
                 value = "—"
             tile.itemconfigure(light, fill=fill, outline=fill)
             tile.itemconfigure(number, text=value, fill=ink)
+            tile.itemconfigure('machine_tool', text=self.machine_tool_text(record), fill=ink)
         self.refresh_machine_details()
+
+    @staticmethod
+    def machine_tool_text(record):
+        """설비가 알려 준 현재 공구 번호를 칸에 넣을 글로(숫자면 'T12'). 값이 없으면 빈 글."""
+        value = str((record.get('details') or {}).get('tool_number', '')).strip()
+        if not value:
+            return ''
+        return 'T' + value if re.fullmatch(r'[0-9]+', value) else value[:8]
 
     def build_drive_card(self, body):
         """드라이브 정리 칸(목록·추가·새로고침·비우기·삭제)을 만듭니다."""
@@ -5382,7 +5397,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.6'
+SUITE_APP_VERSION = '2026.11.11.7'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
