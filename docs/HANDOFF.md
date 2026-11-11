@@ -214,3 +214,9 @@ python -m unittest discover -s tests -p "test_*.py"   # Linux: xvfb-run -a -s "-
 - 기준(src/material_counter.py `period_report`): `eligible = not partial`. partial = 그 호기의 집계를 시작(또는 초기화)했을 때 이미 끼워져 있던 봉(observe의 baseline에서만 1). gap·불량초과 봉은 평균에 포함. 소모 봉 수(consumed_rods)는 첫 봉도 포함(재고·사용량 기준).
 - 화면: 표에 '평균 계산 봉'(eligible_rods) 칸, 요약 "소모 N봉 · 봉당 평균은 소재교체로 새로 끼운 M봉 기준 · 처음부터 끼워져 있던 첫 봉 K봉은 평균에서 제외", 소모 봉이 모두 첫 봉이면 평균 미표시 안내, 현재 집계 '첫 봉 · 평균 제외'·소재 기록 '첫 봉(평균 제외)' 표시. '누락 가능'(끊김) 표시는 없앤 그대로.
 - 테스트: test_material_all_rods_average 4개(끊김·수동 교체 봉은 포함·첫 봉만 제외, 첫 봉만 끝난 경우 평균 없음, 세는 규칙 불변, 화면), test_material_reporting·test_material_hold 기대값을 이 기준으로. 전체 421 통과(2 skip).
+
+### 드라이브: 최신 실행 파일과 작업기록 (2026-11-11)
+[사용자 승인] "드라이브에 작업기록 남겨주고 앞으로 지후니우스 최신버전은 내 드라이브 일 cnc스크립트 폴더에 하나 넣어놔줘".
+- 최신 실행 파일: Google Drive 일 → CNC 스크립트 → 지후니우스.pyw (지금 2026.11.11.6, 파일 ID 1uiqJWXSeW5zDEblCd82_FYm3NJ9iC_Ni, 설명 칸에 버전·SHA256). 배포할 때마다 교체하는 절차는 CLAUDE.md 참고.
+- 작업기록(Drive 지훈 → 작업기록 → 프로그램): 00_최신요약.txt를 11-11 기준으로 갱신(위에 "A. 2026-11-11 기준", 아래에 이전 요약 전문 보존), 일별기록/2026-11-11.txt 추가, 이전 최신요약은 보관/00_최신요약_이전_20261111-1831.txt. 작업기록은 사용자가 요청할 때만 갱신한다.
+- 로컬 파일을 드라이브에 올릴 때는 create_file의 base64Content에 `sha256:<해시>:<절대 경로>` 파일 참조를 쓰면 내용을 직접 입력하지 않아도 된다.

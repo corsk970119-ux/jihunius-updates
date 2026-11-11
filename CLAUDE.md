@@ -6,6 +6,7 @@
 - 기존 기능은 **온전히** 유지한다. 속도 개선·디자인 변경도 기능 동작을 바꾸면 안 된다.
 - 배포 = `main`의 `channels/stable.json` 변경이다. 사용자가 "배포해줘"라고 할 때만 `tools/prepare_release.py`로 새 버전을 만들어 main에 올린다. 그 외 작업은 작업 브랜치에서 한다.
 - 이미 올린 `releases/jihunius/<버전>/`은 절대 덮어쓰지 않는다.
+- 배포를 마치면 Google Drive `일 → CNC 스크립트` 폴더(ID `1KP9uERp5XFxvIoSTfcSrsOmURweAGPL7`)의 `지후니우스.pyw`를 방금 배포한 `dist/지후니우스.pyw`로 바꾼다(사용자 요청 2026-11-11). 커넥터가 본문을 덮어쓰지 못하므로 새 파일을 올리고 설명에 버전을 적은 뒤 이전 파일을 휴지통으로 옮겨, 폴더에는 최신 하나만 둔다. 드라이브에 연결할 수 없으면 그 사실을 사용자에게 알린다.
 - 커밋 전: `python tools/build_app.py --check` 와 `python -m unittest discover -s tests -p 'test_*.py'` (Linux는 `xvfb-run -a -s "-screen 0 3840x1200x24"`로 실행).
 - 회사 PC는 Windows + Python 3.8 이상이다. 3.9 이상 전용 문법·외부 패키지를 쓰지 않는다.
 - 소재 사용량 조사는 대표 보고 자료다. 집계·동기화 코드는 정확도 우선, 변경 시 관련 회귀 테스트를 넓힌다.
