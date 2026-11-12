@@ -170,6 +170,163 @@ def install_visual_theme(window, style):
 
 
 
+def commit_text_into(widget, text):
+    """확정된 글자를 입력칸 커서 자리에 넣습니다(선택 영역이 있으면 그 자리를 대신함). 입력할 수 없는 칸이면 넣지 않습니다."""
+    if widget is None or not text:
+        return False
+    try:
+        if str(widget.cget('state')) != 'normal':
+            return False
+        try:
+            widget.delete('sel.first', 'sel.last')
+        except Exception:
+            pass
+        widget.insert('insert', text)
+        return True
+    except Exception:
+        return False
+
+
+def take_pending_ime(widget=None):
+    """Windows 한글 조합 중인 글자(아직 확정 전)를 가져와 조합을 끝내고, widget이 있으면 그 입력칸에 넣습니다.
+
+    Enter나 칸 이동이 조합 확정보다 먼저 처리되어 마지막 글자가 빠지거나 다른 칸·다음 줄에 남는 것을 막습니다.
+    조합 중인 글자가 없거나, 넣을 수 없는 칸이거나, Windows가 아니면 아무 일도 하지 않고 빈 글을 돌려줍니다.
+    """
+    import os
+    if os.name != 'nt':
+        return ""
+    if widget is not None:
+        try:
+            if str(widget.cget('state')) != 'normal':   # 넣을 수 없는 칸이면 조합을 건드리지 않습니다(Windows 처리 그대로).
+                return ""
+        except Exception:
+            return ""
+    try:
+        import ctypes
+        from ctypes import wintypes as W
+        user = ctypes.WinDLL('user32'); imm = ctypes.WinDLL('imm32')
+        user.GetFocus.argtypes = []; user.GetFocus.restype = W.HWND
+        imm.ImmGetContext.argtypes = [W.HWND]; imm.ImmGetContext.restype = W.HANDLE
+        imm.ImmReleaseContext.argtypes = [W.HWND, W.HANDLE]; imm.ImmReleaseContext.restype = W.BOOL
+        imm.ImmGetCompositionStringW.argtypes = [W.HANDLE, W.DWORD, W.LPVOID, W.DWORD]
+        imm.ImmGetCompositionStringW.restype = ctypes.c_long
+        imm.ImmNotifyIME.argtypes = [W.HANDLE, W.DWORD, W.DWORD, W.DWORD]; imm.ImmNotifyIME.restype = W.BOOL
+        hwnd = user.GetFocus()   # 이 프로그램(현재 스레드)의 입력 창만 봅니다.
+        if not hwnd:
+            return ""
+        context = imm.ImmGetContext(hwnd)
+        if not context:
+            return ""
+        try:
+            size = imm.ImmGetCompositionStringW(context, 8, None, 0)        # GCS_COMPSTR, 바이트 수
+            if size <= 0:
+                return ""
+            buffer = ctypes.create_unicode_buffer(size // 2 + 1)
+            got = imm.ImmGetCompositionStringW(context, 8, buffer, size)
+            text = buffer.value[:max(0, got // 2)] if got > 0 else ""
+            if not text:
+                return ""
+            if not imm.ImmNotifyIME(context, 0x15, 4, 0):                    # NI_COMPOSITIONSTR / CPS_CANCEL
+                return ""                                                    # 끝내지 못하면 Windows 처리에 맡깁니다.
+        finally:
+            imm.ImmReleaseContext(hwnd, context)
+    except Exception:
+        return ""
+    commit_text_into(widget, text)
+    return text
+
+
+def composition_font_pixels(size, scaling):
+    """Tk 글꼴 크기(양수=포인트, 음수=픽셀)를 조합 창 글꼴 높이(픽셀)로."""
+    size = int(size or 0)
+    return -size if size < 0 else int(round(size * float(scaling)))
+
+
+def install_korean_input(root):
+    """한글 입력 보조(Windows 전용, 실패해도 입력은 평소대로 됩니다). 프로그램(인터프리터)마다 한 번만 겁니다.
+
+    1) 입력칸에서 Enter·Tab을 누르거나 다른 칸으로 옮길 때, 조합 중이던 마지막 글자를 먼저 그 칸에 확정해 넣습니다.
+       (Windows 한글 입력기는 Enter를 먼저 보내고 글자를 나중에 확정하는 경우가 있어, 글자가 다음 줄·다른 칸·
+       이미 보낸 뒤의 빈 칸에 남습니다.) 입력칸이 포커스를 받을 때 전용 바인드 태그를 맨 앞에 붙여, 그 칸의
+       Enter 처리보다 먼저 실행되게 합니다. 조합 중인 글자가 없으면 아무 일도 하지 않습니다.
+    2) 조합 중인 글자를 보여 주는 Windows 조합 창의 글꼴을 입력칸 글꼴과 같게 맞춥니다.
+       Tk는 조합 창 위치만 커서에 맞추고 글꼴은 정하지 않아, 확대된 글자가 네모 칸에 뜨는 것처럼 보입니다.
+    """
+    import os
+    tag = 'JihuniusKoreanInput'
+    if os.name != 'nt':
+        return False
+    try:
+        if root.bind_class(tag, '<Return>'):       # 이미 걸려 있음
+            return False
+        import ctypes
+        from ctypes import wintypes as W
+        imm = ctypes.WinDLL('imm32')
+
+        class LOGFONTW(ctypes.Structure):
+            _fields_ = [('lfHeight', W.LONG), ('lfWidth', W.LONG), ('lfEscapement', W.LONG), ('lfOrientation', W.LONG),
+                        ('lfWeight', W.LONG), ('lfItalic', W.BYTE), ('lfUnderline', W.BYTE), ('lfStrikeOut', W.BYTE),
+                        ('lfCharSet', W.BYTE), ('lfOutPrecision', W.BYTE), ('lfClipPrecision', W.BYTE),
+                        ('lfQuality', W.BYTE), ('lfPitchAndFamily', W.BYTE), ('lfFaceName', W.WCHAR * 32)]
+        imm.ImmGetContext.argtypes = [W.HWND]; imm.ImmGetContext.restype = W.HANDLE
+        imm.ImmReleaseContext.argtypes = [W.HWND, W.HANDLE]; imm.ImmReleaseContext.restype = W.BOOL
+        imm.ImmSetCompositionFontW.argtypes = [W.HANDLE, ctypes.POINTER(LOGFONTW)]
+        imm.ImmSetCompositionFontW.restype = W.BOOL
+    except Exception:
+        return False
+
+    def match_font(widget):
+        name = str(widget.cget('font')) or 'TkTextFont'
+        values = widget.tk.splitlist(widget.tk.call('font', 'actual', name))
+        actual = dict(zip([str(key) for key in values[0::2]], values[1::2]))
+        pixels = composition_font_pixels(actual.get('-size'), widget.tk.call('tk', 'scaling'))
+        if pixels <= 0:
+            return
+        logfont = LOGFONTW()
+        logfont.lfHeight = -pixels
+        logfont.lfWeight = 700 if str(actual.get('-weight')) == 'bold' else 400
+        logfont.lfItalic = 1 if str(actual.get('-slant')) == 'italic' else 0
+        logfont.lfCharSet = 1                                             # DEFAULT_CHARSET
+        logfont.lfFaceName = str(actual.get('-family') or "")[:31]
+        hwnd = int(widget.winfo_toplevel().winfo_id())                    # Tk가 조합 창 위치를 정하는 그 창
+        context = imm.ImmGetContext(hwnd)
+        if context:
+            try:
+                imm.ImmSetCompositionFontW(context, ctypes.byref(logfont))
+            finally:
+                imm.ImmReleaseContext(hwnd, context)
+
+    def focus_in(event):
+        widget = event.widget
+        try:
+            tags = widget.bindtags()
+            if tag not in tags:
+                widget.bindtags((tag,) + tuple(tags))                     # 그 칸의 Enter 처리보다 먼저
+        except Exception:
+            pass
+        try:
+            match_font(widget)
+        except Exception:
+            pass
+
+    def keep_last_letter(event):
+        try:
+            take_pending_ime(event.widget)
+        except Exception:
+            pass
+
+    try:
+        for sequence in ('<Return>', '<KP_Enter>', '<Tab>'):
+            root.bind_class(tag, sequence, keep_last_letter)
+        for name in ('Entry', 'TEntry', 'Text', 'TCombobox', 'Spinbox', 'TSpinbox'):
+            root.bind_class(name, '<FocusIn>', focus_in, add='+')
+            root.bind_class(name, '<FocusOut>', keep_last_letter, add='+')
+    except Exception:
+        return False
+    return True
+
+
 def install_thin_scrollbars(style):
     """N3: 얇은 스크롤바(화살표 없음). 스크롤 명령·연결은 그대로이고 실패해도 기존 모양을 유지합니다."""
     for orient, sticky in (('Vertical', 'ns'), ('Horizontal', 'ew')):

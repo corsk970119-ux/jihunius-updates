@@ -835,6 +835,11 @@ class DefectApp:
             ('App.TButton', 'secondary', Theme.TEXT),
             ('Reset.App.TButton', 'danger', Theme.RESET_TEXT),
         ))
+        try:
+            from visual_theme import install_korean_input
+            install_korean_input(self.root)   # Enter·칸 이동 때 한글 마지막 글자 유지, 조합 창 글꼴 맞춤
+        except Exception:
+            pass
 
     def _dark_titlebar(self):
         if os.name != "nt":

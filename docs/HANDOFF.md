@@ -227,3 +227,14 @@ python -m unittest discover -s tests -p "test_*.py"   # Linux: xvfb-run -a -s "-
 - src/host/jihunius_main.py: 칸에 `machine_tool` 글자 추가(Consolas 11 굵게, 오른쪽 정렬), `machine_tool_text()`, `shape_machine_tile`에서 위치 갱신. 조회 주기·알림·집계는 그대로.
 - [미확인] 실제 설비가 주는 공구 번호 형식(예: 0101, 12, T0101 중 무엇인지)은 현장 화면으로 확인 필요.
 - 테스트: test_machine_tile_shows_current_tool_number, 배율별 겹침 테스트에 공구 번호 포함. 전체 422 통과(2 skip).
+
+### 한글 입력: 마지막 글자 남는 문제·조합 글자 칸 — 2026.11.11.8 검토용 (2026-11-12, 미배포)
+[사용자 요청 2026-11-12] "인수인계나 판에 수동으로 적을 때 그냥 원하는 거 타라락 쳐졌으면 좋겠는데 뭐가 남는 느낌", 증상 선택 "마지막 글자가 남음", "네모칸에 글자 확대된 거 뜨거나 이런 것도 없었으면", 세척일보 판 Enter는 "지금처럼 그 칸만".
+- 원인 [AI 판단, Windows 미확인]: Windows 한글 입력기가 Enter·Tab을 먼저 보내고 조합 중인 글자를 나중에 확정하는 경우가 있고, Tk는 칸을 옮겨도 조합을 끝내지 않는다 → 글자가 다음 줄(인수인계 내용)·옮겨 간 칸·전송 뒤 빈 칸(세척일보 채팅)에 남는다.
+- 공통 보조(src/visual_theme.py, Windows에서만 동작): `take_pending_ime(widget)` = 조합 중인 글자를 읽고(ImmGetCompositionStringW GCS_COMPSTR) 조합을 끝낸 뒤(ImmNotifyIME CPS_CANCEL) 그 글자를 **치던 칸**에 직접 넣는다(`commit_text_into`). 조합 중인 글자가 없거나 잠긴 칸이면 아무것도 안 함. Qt의 QWindowsInputContext::reset()과 같은 순서(직접 확정 → CPS_CANCEL).
+- `install_korean_input(root)`: 입력칸(Entry/TEntry/Text/TCombobox/Spinbox/TSpinbox)이 포커스를 받으면 바인드 태그 `JihuniusKoreanInput`을 **맨 앞**에 붙여 그 칸의 Enter·KP_Enter·Tab 처리보다 먼저 `take_pending_ime` 실행, FocusOut 때도 실행. 같은 때 조합 창 글꼴을 입력칸 글꼴로 맞춤(ImmSetCompositionFontW). 메인(`apply_visual_theme`)·세척일보·소재·돌출량·특수 돌출량에 설치. 인터프리터당 한 번만 걸린다.
+- 세척일보(src/wash_log.py): `App.after_ime(action, widget)` — 채팅 Enter(post_note), 판 칸 확정(save), 공구대 Enter가 글자를 먼저 넣고 Windows에서는 40ms 뒤 실행(확정 글자가 오는 중인 경우 대비). 판 Enter 뒤 이동은 종전 그대로.
+- 기존 `complete_windows_ime`/`defer_ime_commit`(메인·특수 돌출량, CPS_COMPLETE 후 20ms)은 그대로 둠. 새 태그가 먼저 글자를 넣으므로 그쪽은 "조합 없음"으로 바로 진행한다.
+- 한계: Tk(8.6 소스 tkWinX.c 확인)는 확정 글자(GCS_RESULTSTR)만 받고 조합 중 글자를 입력칸 안에 직접 그리지 않는다. 조합 글자 칸을 **아예 없애려면** 창 메시지 처리(WndProc)를 가로채야 하는데, tkinter에서 그 콜백 안에서 Tk를 부르면 프로그램이 죽을 수 있어(PyEval_RestoreThread NULL tstate) 현장 PC 시험 없이 넣지 않았다. 지금은 글꼴·크기만 입력칸과 같게 맞춤 → 칸은 남을 수 있고(특히 어두운 입력칸 위 흰 바탕), 새 Microsoft 입력기가 글꼴 지정을 무시할 수도 있다.
+- [미확인] Windows 실제 동작 전부(Linux에서는 가짜 입력기로만 검증). 확인할 것: 인수인계 제목→내용 이동, 내용에서 Enter, 세척일보 채팅 Enter 전송, 판 칸 Enter, 글자가 두 번 들어가지 않는지.
+- 테스트: tests/test_korean_input.py 12개(가짜 Windows 입력기: Enter 전 글자 넣기, Text 줄바꿈 앞, 칸 이동·Tab, 잠긴 칸 미처리, 글꼴 크기, 한 번만 설치, 세척일보 after_ime). test_release_package에 승인 항목(after_ime 메서드·호출 3곳). 전체 434 통과(2 skip).

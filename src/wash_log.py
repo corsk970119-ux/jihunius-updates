@@ -722,9 +722,12 @@ class App(tk.Tk):
         try:
             try:
                 from jihunius_scrollbars import install_thin_scrollbars
+                from jihunius_scrollbars import install_korean_input
             except ImportError:
                 from visual_theme import install_thin_scrollbars
+                from visual_theme import install_korean_input
             install_thin_scrollbars(style)
+            install_korean_input(self)
         except Exception:
             pass
 
@@ -772,7 +775,7 @@ class App(tk.Tk):
             ent.bind('<KeyRelease>',lambda e,j=i:self.after_idle(lambda:self.capture_tool(j)))
             ent.bind('<FocusIn>',lambda e,j=i:self.tool_start(j))
             ent.bind('<FocusOut>',lambda e,j=i:self.tool_end(j))
-            ent.bind('<Return>',lambda e:self.daily.focus_set())
+            ent.bind('<Return>',lambda e:self.after_ime(self.daily.focus_set,e.widget))
             self.toolvars.append(var); self.tool_entries.append(ent)
         self.tool_old={}
         panes=tk.Frame(self.daily,bg=BG); panes.pack(fill='both',expand=True)
@@ -1608,7 +1611,7 @@ class App(tk.Tk):
                 edit['saving']=True;entry.configure(state='readonly')
                 if not self.send({'kind':'cells','plate':pid,'changes':changes,'edit_id':edit['id']}):
                     edit['saving']=False;entry.configure(state='normal')
-            self.after_idle(save)
+            self.after_ime(save,entry)
             return 'break'
         def cancel(e=None):
             if edit['saving']:return 'break'
@@ -1696,9 +1699,19 @@ class App(tk.Tk):
         if messagebox.askyesno('부서 메모 비우기','등록된 전체 부서 메모를 비울까요?\n다른 PC에서도 함께 지워집니다.\n\n작성 중인 메모는 유지됩니다.\n실수로 비웠다면 Ctrl+Z로 복구할 수 있습니다.',default='no'):
             self.daily.focus_set()
             self.send({'kind':'clear_notes','old':old})
+    def after_ime(self,action,widget=None):
+        """Enter·칸 이동 전에, 조합 중이던 한글 마지막 글자를 그 입력칸에 확정해 넣은 뒤 실행합니다."""
+        try:
+            try:from jihunius_scrollbars import take_pending_ime
+            except ImportError:from visual_theme import take_pending_ime
+            take_pending_ime(widget)
+        except Exception:pass
+        # Windows가 이미 확정해 보낸 글자가 입력칸에 들어올 시간을 조금 둡니다.
+        if os.name=='nt':self.after(40,action)
+        else:self.after_idle(action)
     def note_enter(self,event):
         if event.state & 0x0001:return None  # Shift+Enter: native Text newline.
-        self.after_idle(self.post_note)
+        self.after_ime(self.post_note,self.note_input)
         return 'break'
     def post_note(self):
         if self.note_pending:

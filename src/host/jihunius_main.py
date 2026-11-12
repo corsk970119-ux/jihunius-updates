@@ -3873,6 +3873,10 @@ class IntegrationApp:
         """모양만 입힙니다(둥근/테두리 요소, 아이콘, 제목 막대). 위젯 명령·값은 그대로입니다."""
         window = self.window
         visual = SuiteVisualTheme.install_visual_theme(window, self.style)
+        try:
+            SuiteVisualTheme.install_korean_input(window)   # Enter·칸 이동 때 한글 마지막 글자 유지, 조합 창 글꼴 맞춤
+        except Exception:
+            pass
         self.material_quick.set_icons(visual["images"])
         self.reserve_empty_button_width()
         for button in self._suite_buttons.values():
@@ -5397,7 +5401,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.7'
+SUITE_APP_VERSION = '2026.11.11.8'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

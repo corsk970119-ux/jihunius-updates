@@ -44,10 +44,13 @@ def companion_source(root, key):
                     "_visual_sys.modules['visual_theme'] = _visual_module\n"
                     "exec(compile("+repr(visual)+", '<visual_theme>', 'exec'), _visual_module.__dict__)\n")
     if key in ('wash-log', 'material'):
-        # 얇은 스크롤바 한 함수만 공용으로 싣습니다(visual_theme 전체를 싣지 않아 용량 그대로).
+        # 얇은 스크롤바와 한글 입력 보조 함수만 공용으로 싣습니다(visual_theme 전체를 싣지 않아 용량 그대로).
         visual=(root/'src/visual_theme.py').read_text(encoding='utf-8')
-        scroll=next(ast.get_source_segment(visual, node) for node in ast.parse(visual).body
-                    if isinstance(node, ast.FunctionDef) and node.name == 'install_thin_scrollbars')
+        shared=('install_thin_scrollbars','commit_text_into','take_pending_ime','composition_font_pixels','install_korean_input')
+        found={node.name:ast.get_source_segment(visual, node) for node in ast.parse(visual).body
+               if isinstance(node, ast.FunctionDef) and node.name in shared}
+        if set(found)!=set(shared):raise SystemExit('visual_theme.py에서 공용 함수를 찾지 못했습니다: '+', '.join(sorted(set(shared)-set(found))))
+        scroll='\n\n\n'.join(found[name] for name in shared)
         visual_support=("\nimport types as _scroll_types, sys as _scroll_sys\n"
                     "_scroll_module = _scroll_types.ModuleType('jihunius_scrollbars')\n"
                     "_scroll_sys.modules['jihunius_scrollbars'] = _scroll_module\n"

@@ -108,13 +108,25 @@ class PrivatePackageTests(unittest.TestCase):
     return self.generic_visit(node)
    def visit_Try(self,node):
     # Approved N3 visual: shared thin-scrollbar style call only (ttk layout/colors, no behavior).
+    # Approved 2026-11-12: the same block also installs the shared Korean-input helper (install_korean_input).
     if any(isinstance(n,ast.alias) and n.name=='install_thin_scrollbars' for n in ast.walk(node)):return None
     return self.generic_visit(node)
    def visit_For(self,node):
     # Approved N3 visual: thin scrollbar style loop only (ttk layout/colors, no behavior).
     if isinstance(node.target,ast.Tuple) and [getattr(e,'id','') for e in node.target.elts]==['_orient','_sticky']:return None
     return self.generic_visit(node)
+   def visit_Call(self,node):
+    node=self.generic_visit(node)
+    # Approved 2026-11-12 (사용자: "Enter를 치면 마지막 글자가 남음"): 입력을 가져가기 전에 조합 중인 한글을
+    # 그 입력칸에 확정해 넣는다 — self.after_idle(동작) → self.after_ime(동작, 입력칸). 동작 자체는 그대로.
+    if isinstance(node.func,ast.Attribute) and node.func.attr=='after_ime' and len(node.args)==2:
+     target=node.args[0]
+     if isinstance(target,ast.Attribute) and target.attr=='focus_set':return ast.Call(func=target,args=[],keywords=[])
+     node.func.attr='after_idle';node.args=node.args[:1]
+    return node
    def visit_ClassDef(self,node):
+    # Approved 2026-11-12: the helper method itself (IME 확정 후 실행) is new; everything else stays pinned.
+    node.body=[item for item in node.body if not (isinstance(item,ast.FunctionDef) and item.name=='after_ime')]
     if node.name=='RoundedButton':
      for method in node.body:
       if isinstance(method,ast.FunctionDef) and method.name=='draw':

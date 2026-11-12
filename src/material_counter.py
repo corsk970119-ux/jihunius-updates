@@ -1301,9 +1301,12 @@ class Application:
         try:
             try:
                 from jihunius_scrollbars import install_thin_scrollbars
+                from jihunius_scrollbars import install_korean_input
             except ImportError:
                 from visual_theme import install_thin_scrollbars
+                from visual_theme import install_korean_input
             install_thin_scrollbars(style)
+            install_korean_input(self.root)
         except Exception:
             pass
         style.configure('.', font=(self.font, 10), background=PALETTE['bg'], foreground=PALETTE['text'])
