@@ -238,3 +238,11 @@ python -m unittest discover -s tests -p "test_*.py"   # Linux: xvfb-run -a -s "-
 - 한계: Tk(8.6 소스 tkWinX.c 확인)는 확정 글자(GCS_RESULTSTR)만 받고 조합 중 글자를 입력칸 안에 직접 그리지 않는다. 조합 글자 칸을 **아예 없애려면** 창 메시지 처리(WndProc)를 가로채야 하는데, tkinter에서 그 콜백 안에서 Tk를 부르면 프로그램이 죽을 수 있어(PyEval_RestoreThread NULL tstate) 현장 PC 시험 없이 넣지 않았다. 지금은 글꼴·크기만 입력칸과 같게 맞춤 → 칸은 남을 수 있고(특히 어두운 입력칸 위 흰 바탕), 새 Microsoft 입력기가 글꼴 지정을 무시할 수도 있다.
 - [미확인] Windows 실제 동작 전부(Linux에서는 가짜 입력기로만 검증). 확인할 것: 인수인계 제목→내용 이동, 내용에서 Enter, 세척일보 채팅 Enter 전송, 판 칸 Enter, 글자가 두 번 들어가지 않는지.
 - 테스트: tests/test_korean_input.py 12개(가짜 Windows 입력기: Enter 전 글자 넣기, Text 줄바꿈 앞, 칸 이동·Tab, 잠긴 칸 미처리, 글꼴 크기, 한 번만 설치, 세척일보 after_ime). test_release_package에 승인 항목(after_ime 메서드·호출 3곳). 전체 434 통과(2 skip).
+
+### 메인 입력칸 커서가 안 보이던 문제 — 2026.11.12.1 검토용 (2026-11-12, 미배포)
+[사용자 요청 2026-11-12] "날짜폴더 창이랑 세척완료 이름 치는 탭은 하얀색으로 반짝이는 그게 없어서 내가 지금 어디에 입력하는지 몰라서".
+- 원인 [확인됨: 코드·화면]: 메인의 기본 `TEntry` 스타일(src/host/jihunius_main.py `configure_app_style`)에 `insertcolor`가 없어 커서가 기본 검은색 → 어두운 입력칸(#050a14)에서 안 보임. 첫 버전부터 같았음(이번 한글 입력 변경과 무관).
+- 변경: `TEntry`에 `insertcolor="#ffffff"`, `insertwidth=2`. 해당 칸: 날짜 폴더·연도, 세척완료 POP 검사일·작업자, 인수인계 제목, 경로 설정 입력칸 등 기본 TEntry 전부. 다른 창(세척일보·소재·돌출량·특수 돌출량·STL)은 이미 커서 색이 지정돼 있어 그대로.
+- 확인: Linux 화면 캡처로 날짜 폴더 칸에 흰 커서가 그려지는 것 확인. [미확인] Windows 화면.
+- 테스트: test_tactile_controls.HeaderAndBoardRegressionTests.test_typing_cursor_is_visible_in_every_main_input(메인 창의 모든 입력칸 커서색이 칸 바탕과 대비되는지). 전체 435 통과(2 skip).
+

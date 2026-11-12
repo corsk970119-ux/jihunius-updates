@@ -74,6 +74,27 @@ class HeaderAndBoardRegressionTests(unittest.TestCase):
             for button in notices:
                 self.assertGreaterEqual(button.winfo_width(), button.winfo_reqwidth(), (size, button.cget('text')))
 
+    def test_typing_cursor_is_visible_in_every_main_input(self):
+        """날짜 폴더·세척완료 작업자 등 입력칸의 깜박이는 커서가 칸 바탕색에 묻히지 않는다."""
+        app = self.launch()
+        def brightness(color):
+            red, green, blue = app.window.winfo_rgb(color)
+            return (red * 299 + green * 587 + blue * 114) / 1000 / 65535.0
+        def inputs(widget):
+            for child in widget.winfo_children():
+                if child.winfo_class() in ('TEntry', 'TCombobox', 'TSpinbox') and str(child.cget('state')) == 'normal':
+                    yield child
+                for found in inputs(child):
+                    yield found
+        found = list(inputs(app.window))
+        self.assertIn(app.folder_input, found); self.assertIn(app.year_input, found)
+        for entry in found:
+            style = str(entry.cget('style')) or entry.winfo_class()
+            caret = app.style.lookup(style, 'insertcolor'); field = app.style.lookup(style, 'fieldbackground')
+            self.assertTrue(caret, style)
+            self.assertGreater(abs(brightness(caret) - brightness(field)), 0.6, (style, caret, field))
+            self.assertGreaterEqual(int(str(app.style.lookup(style, 'insertwidth') or 1)), 2, style)
+
     def test_material_caption_has_full_board_width(self):
         app = self.launch()
         app.material_quick.notice('3호기: ' + '저장하지 못했습니다 ' * 6, True)

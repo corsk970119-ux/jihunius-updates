@@ -2171,7 +2171,9 @@ def configure_app_style(window):
     style.configure("Status.TLabel", background="#10234a", foreground="#a7c9ff", padding=(14, 8),
                     font=("맑은 고딕", 10, "bold"))
     style.configure("TSeparator", background="#22355c")
-    style.configure("TEntry", fieldbackground="#050a14", bordercolor="#2e333d", padding=(12, 10))
+    # 입력 커서(깜박이는 세로줄): 지정하지 않으면 검은색이라 어두운 입력칸에서 보이지 않습니다.
+    style.configure("TEntry", fieldbackground="#050a14", bordercolor="#2e333d", padding=(12, 10),
+                    insertcolor="#ffffff", insertwidth=2)
     style.map("TEntry", fieldbackground=[("disabled", "#0f1a30")],
               foreground=[("disabled", "#818388")], bordercolor=[("focus", "#2a66f2")])
     style.configure("Accent.TButton", background="#2a66f2", foreground="#ffffff", borderwidth=0,
@@ -5401,7 +5403,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.11.8'
+SUITE_APP_VERSION = '2026.11.12.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
