@@ -24,7 +24,6 @@ COLUMN_PASSES = 3            # 칸 너비 맞춤 반복 한도(매번 화면을 
 EDGE_OFFSETS = (-2, -1, -3, 0, -4, 1, 2)   # 칸 경계에서 포인터를 올려 볼 위치(경계 기준 픽셀)
 HOVER_SECONDS = 0.15         # 포인터 모양이 바뀌기를 기다리는 시간
 MENU_COLLAPSED = 40          # 왼쪽 메뉴 칸(파란 바)이 이 너비 이하면 이미 줄여 둔 것으로 봅니다.
-MENU_WORDS = ('생산관리', '설비관리', '작업지시관리', '설비별공구관리', '생산일보관리', '작업지시조회', '메뉴', '즐겨찾기')
 PRESET_VERSION = 1
 
 
@@ -89,6 +88,76 @@ def grids(report, required=REQUIRED_HEADERS):
                       # 판독에 나온 모든 칸 제목(표 밖 것 포함, 판독 순서 그대로): (이름, x, y, w, h)
                       'headers': [(str(header.get('name', '')),) + _box(header) for header in headers]})
     return found
+
+
+def front(found, pointer):
+    """실제로 화면 앞에 보이는 표만 남깁니다.
+
+    MES는 여러 문서를 겹쳐 두는데, 뒤에 가려진 문서의 표도 화면 판독에는 그대로 나옵니다(현장 점검으로 확인).
+    또 같은 표가 바깥 창 이름으로 겹쳐 읽히기도 합니다. 첫 칸 제목 자리의 맨 위 창이 그 표 자신일 때만 씁니다.
+    """
+    shown = []
+    for grid in found:
+        if not grid['columns']:
+            continue
+        column = grid['columns'][0]
+        # 칸 제목 줄의 왼쪽 안쪽 한 점(표가 가로로 밀려 있어도 표 안에 있는 자리)
+        point = (grid['x'] + min(20, grid['w'] // 2), column['y'] + column['h'] // 2)
+        if pointer.window_at(point) == grid['handle']:
+            shown.append(grid)
+    return shown
+
+
+def common_window(native, handles):
+    """handles를 모두 품는 가장 안쪽 창(그 아래만 다시 읽으면 빠릅니다). 없으면 None."""
+    chains = [lineage(native, handle) for handle in handles]
+    if not chains or not all(chains):
+        return None
+    for handle in chains[0][1:]:
+        if all(handle in chain for chain in chains[1:]):
+            return handle
+    return None
+
+
+def nav_tree(report):
+    """왼쪽 메뉴(navBarControl)의 묶음과 항목(위→아래).
+
+    묶음(종류 33)의 위치는 펼쳐지면 항목들까지 포함하므로, 묶음 이름 줄은 맨 위 23픽셀(head)입니다.
+    항목(종류 30)은 펼쳐진 묶음에서만 위치가 있습니다. 같은 내용이 바깥 창마다 겹쳐 읽히므로 가장 안쪽 창의 것을 씁니다.
+    반환: [{'name', 'handle', 'x', 'y', 'w', 'h', 'head': (x, y), 'items': [{'name', 'x', 'y', 'w', 'h', 'shown'}]}]
+    """
+    items = elements(report)
+    native = native_parents(report)
+    children = {}
+    for item in items:
+        children.setdefault(item.get('parent'), []).append(item)
+    best = None
+    for bar in items:
+        if bar.get('role') != 16:
+            continue
+        groups = [group for group in children.get(bar.get('id'), ()) if group.get('role') == 33
+                  and any(link.get('role') == 30 for link in children.get(group.get('id'), ()))]
+        if not groups:
+            continue
+        rank = (len(groups), len(lineage(native, bar.get('handle'))))
+        if best is None or rank > best[0]:
+            best = (rank, bar, groups)
+    if best is None:
+        return []
+    tree = []
+    for group in best[2]:
+        x, y, w, h = _box(group)
+        entries = []
+        for link in children.get(group.get('id'), ()):
+            if link.get('role') != 30:
+                continue
+            lx, ly, lw, lh = _box(link)
+            entries.append({'name': str(link.get('name', '')).strip(), 'x': lx, 'y': ly, 'w': lw, 'h': lh,
+                            'shown': lw > 4 and lh > 4})
+        tree.append({'name': str(group.get('name', '')).strip(), 'handle': best[1].get('handle'), 'x': x, 'y': y, 'w': w, 'h': h,
+                     'head': (x + w // 2, y + min(11, max(1, h // 2))), 'items': entries})
+    tree.sort(key=lambda group: group['y'])
+    return tree
 
 
 def arrange(found):
@@ -341,6 +410,43 @@ def menu_divider(rows, native, pointer):
     return None
 
 
+def menu_divider_beside(native, pointer, menu_window):
+    """왼쪽 메뉴 칸과 본문 사이의 경계선을 메뉴 창 쪽에서 찾습니다(표가 하나도 떠 있지 않을 때 씀).
+
+    메뉴 창의 조상 창들 가운데(바깥쪽부터), MES 창 왼쪽 끝에 닿아 있고 바로 오른쪽에 틈을 두고 형제 창이 있는 것.
+    """
+    chain = lineage(native, menu_window)
+    children = {}
+    for handle, parent in native.items():
+        children.setdefault(parent, []).append(handle)
+    try:
+        window_left = pointer.rect(pointer.root)[0]
+    except Exception:
+        return None
+    for index in range(len(chain) - 1, 0, -1):
+        container, first = chain[index], chain[index - 1]
+        try:
+            left, top, right, bottom = pointer.rect(first)
+        except Exception:
+            continue
+        if left - window_left > 12:
+            continue
+        best = None
+        for sibling in children.get(container, ()):
+            if sibling == first:
+                continue
+            try:
+                l, t, r, b = pointer.rect(sibling)
+            except Exception:
+                continue
+            overlap = min(b, bottom) - max(t, top)      # 세로로 가장 길게 맞닿은 형제(본문 영역)를 고릅니다.
+            if 1 <= l - right <= MAX_GAP and overlap >= 100 and (best is None or overlap > best[1]):
+                best = (sibling, overlap)
+        if best is not None:
+            return {'container': container, 'first': first, 'second': best[0], 'vertical': True, 'depth': len(chain) - index}
+    return None
+
+
 def collapse_menu(rows, native, pointer, emit):
     """왼쪽 메뉴 칸을 갈 수 있는 데까지 왼쪽으로 줄입니다. 반환: found/moved/failed와 줄이기 전후 너비."""
     item = menu_divider(rows, native, pointer)
@@ -481,13 +587,29 @@ def align(target, pointer, capture, stop, emit, report, widths=None):
         if stop.is_set():
             raise Stopped('사용자 중지')
 
-    def read(text):
-        return capture(dict(target, mode='mes_rows'), text, stop)
+    scope = {'handle': target.get('handle')}
 
-    rows = arrange(grids(report))
+    def read(text):
+        # 확인용 판독은 판들이 든 창 아래만 읽습니다(MES 전체를 읽으면 몇 초씩 걸림).
+        return capture(dict(target, handle=scope['handle'], mode='mes_rows'), text, stop)
+
+    def reread(rows, text):
+        return same_rows(rows, arrange(front(grids(read(text)), pointer)))
+
+    found = grids(report)
+    shown = front(found, pointer)
+    rows = arrange(shown)
     count = sum(len(row) for row in rows)
-    if not count:
+    if not found:
         raise RuntimeError('MES 생산일보관리 화면에서 생산일보 표를 찾지 못했습니다.')
+    if not count:
+        raise RuntimeError('생산일보관리 화면이 다른 화면 뒤에 가려져 있습니다. MES에서 작업지시관리 → 생산일보관리 탭을 '
+                           '앞에 띄운 뒤 다시 눌러 주세요.')
+    places = {(grid['x'], grid['y'], grid['w'], grid['h']) for grid in found}
+    covered = len(places - {(grid['x'], grid['y'], grid['w'], grid['h']) for grid in shown})
+    if covered:   # 일부만 보이면 판 크기를 잘못 나누게 되므로 아무것도 하지 않습니다.
+        raise RuntimeError('생산일보 표 {}개 중 {}개가 다른 창에 가려져 있습니다. 가린 창을 치운 뒤 다시 눌러 주세요.'.format(
+            len(places), covered))
     if not rows[0][0]['columns']:
         raise RuntimeError('왼쪽 위 표의 칸 제목 위치를 읽지 못했습니다.')
     result = {'tables': count, 'layout': [len(row) for row in rows], 'used_reference': widths is None,
@@ -497,6 +619,7 @@ def align(target, pointer, capture, stop, emit, report, widths=None):
 
     native = native_parents(report)
     classes = native_classes(report)
+    scope['handle'] = common_window(native, [grid['handle'] for row in rows for grid in row]) or target.get('handle')
     for item in dividers(rows, native):
         try:
             emit('note', '경계 {} · 창 {} [{}] · 양쪽 {} {} · 틈 {}'.format(
@@ -535,7 +658,7 @@ def align(target, pointer, capture, stop, emit, report, widths=None):
     if widths is None:
         # 저장한 기준이 없으면, 판 크기를 맞춘 뒤의 왼쪽 위 판을 기준으로 삼습니다(다시 읽어 정확한 너비를 씀).
         if verify:
-            rows = same_rows(rows, arrange(grids(read('MES 판 크기 확인'))))
+            rows = reread(rows, 'MES 판 크기 확인')
             verify = False
         if clipped(rows[0][0]):
             raise RuntimeError('판 크기는 맞췄지만, 왼쪽 위 표의 칸이 표 밖으로 잘려 있어 기준으로 삼을 수 없습니다. '
@@ -565,7 +688,7 @@ def align(target, pointer, capture, stop, emit, report, widths=None):
         moved += changed
         if not changed and not verify:
             break
-        rows = same_rows(rows, arrange(grids(read('MES 칸 너비 확인'))))
+        rows = reread(rows, 'MES 칸 너비 확인')
         verify = False
     result['columns_moved'] = moved
     result['missed'] = missed
@@ -608,88 +731,67 @@ def brief(result, elapsed):
 
 # ── 화면 구조 요약(읽기 전용 점검) ───────────────────────────────────────────────
 
-def describe(report, rect=None, limit=450):
-    """MES 화면 구조 요약. 칸 제목·탭·메뉴의 이름과 위치, 창 구조만 담고 행·칸의 값은 담지 않습니다.
+def describe(report, rect=None, at=None, limit=260):
+    """MES 화면 구조 요약. 칸 제목·탭·메뉴의 이름과 위치만 담고 행·칸의 값은 담지 않습니다.
 
-    rect: 창 손잡이 → (왼쪽, 위, 오른쪽, 아래). 주면 창 위치도 적습니다.
+    rect: 창 손잡이 → (왼쪽, 위, 오른쪽, 아래). at: (x, y) → 그 자리 맨 위 창. 주면 창 위치와 '앞에 보임/가려짐'을 적습니다.
     """
     items = elements(report)
     native = native_parents(report)
-    classes = native_classes(report)
-    by_id = {item.get('id'): item for item in items}
     children = {}
     for item in items:
         children.setdefault(item.get('parent'), []).append(item)
-
-    def where(handle):
-        if rect is None:
-            return ''
-        try:
-            return '({},{},{},{})'.format(*rect(handle))
-        except Exception:
-            return '(위치 못 읽음)'
 
     def spot(item):
         bounds = item.get('bounds') or ()
         return '@{},{} {}x{}'.format(*bounds) if len(bounds) == 4 else '@?'
 
-    def window(handle):
-        return '창{}[{}]{}'.format(handle, classes.get(handle, '?')[:26], where(handle))
-
-    roles = {}
-    for item in items:
-        roles[item.get('role')] = roles.get(item.get('role'), 0) + 1
-    lines = ['창 {}개 · 항목 {}개 · 종류별 개수 {}'.format(
-        len(native), len(items), ' '.join('{}:{}'.format(role, roles[role]) for role in sorted(roles, key=str)))]
-    target = report.get('target') or {}
-    if target.get('handle'):
-        lines.append('MES ' + window(target.get('handle')))
-
-    lines.append('[탭]')
+    lines = ['창 {}개 · 항목 {}개'.format(len(native), len(items))]
+    lines.append('[탭] 이름@위치')
     for item in items:
         if item.get('role') == 37:
-            lines.append('  {}{} {} {}'.format(item.get('name', ''), ' (선택)' if item.get('selected') else '', spot(item),
-                                           window(item.get('handle'))))
+            lines.append('  {}{} {} · 창{}'.format(item.get('name', ''), ' (선택)' if item.get('selected') else '', spot(item), item.get('handle')))
 
-    lines.append('[표]')
-    for table in items:
-        if table.get('role') != 24:
-            continue
-        groups = children.get(table.get('id'), ())
-        headers = [header for group in groups for header in children.get(group.get('id'), ()) if header.get('role') == 25]
-        count = sum(1 for group in groups for row in children.get(group.get('id'), ()) if row.get('role') == 28)
-        lines.append('  표 {} · 칸 {}개 · 행 {}개'.format(spot(table), len(headers), count))
-        lines.append('    창 구조: ' + ' ← '.join(window(handle) for handle in lineage(native, table.get('handle'))[:9]))
-        text = ['{}{}{}'.format(header.get('name', ''), spot(header), '!' if header.get('offscreen') else '') for header in headers]
-        for start in range(0, len(text), 6):
-            lines.append('    ' + ' | '.join(text[start:start + 6]))
+    lines.append('[표] 칸 이름과 너비(▷ 표 오른쪽 밖, ◁ 왼쪽 밖). 겹쳐 읽힌 표는 한 번만 적음')
+    kept = {}
+    for grid in grids(report, required=()):
+        key = (grid['x'], grid['y'], grid['w'], grid['h'], tuple(header[0] for header in grid['headers']))
+        depth = len(lineage(native, grid['handle']))
+        if key not in kept or depth > kept[key][0]:
+            kept[key] = (depth, grid)
+    for key in sorted(kept, key=lambda item: (item[1], item[0])):
+        grid = kept[key][1]
+        rows = sum(1 for table in items if table.get('role') == 24 and table.get('handle') == grid['handle']
+                   for group in children.get(table.get('id'), ()) for row in children.get(group.get('id'), ()) if row.get('role') == 28)
+        seen = ''
+        if at is not None and grid['columns']:
+            first = grid['columns'][0]
+            seen = ' · 앞에 보임' if at((grid['x'] + min(20, grid['w'] // 2), first['y'] + first['h'] // 2)) == grid['handle'] else ' · 가려짐'
+        lines.append('  표 @{},{} {}x{} · 칸 {}개 · 행 {}개{} · 창{}'.format(
+            grid['x'], grid['y'], grid['w'], grid['h'], len(grid['headers']), rows, seen, grid['handle']))
+        right = grid['x'] + grid['w']
+        text = ['{}{} {}'.format('▷' if header[1] >= right else ('◁' if header[1] < grid['x'] - 1 else ''), header[0], header[3])
+                for header in grid['headers']]
+        for start in range(0, len(text), 10):
+            lines.append('    ' + ' | '.join(text[start:start + 10]))
+        if rect is not None:
+            chain = []
+            for handle in lineage(native, grid['handle'])[:8]:
+                try:
+                    chain.append('{}({},{},{},{})'.format(handle, *rect(handle)))
+                except Exception:
+                    chain.append('{}(위치 못 읽음)'.format(handle))
+            lines.append('    창 구조: ' + ' ← '.join(chain))
 
-    lines.append('[메뉴·탭 이름이 들어간 항목]')
-    menu_windows = []
-    for item in items:
-        name = str(item.get('name', '')).strip()
-        if not name or len(name) > 30 or item.get('role') in (25, 28, 29) or not any(word in name for word in MENU_WORDS):
-            continue
-        parent = by_id.get(item.get('parent'), {})
-        lines.append('  {} · 종류 {}({}) {}{}{} · {} · 위 {}({})'.format(
-            name, item.get('role'), item.get('type', ''), spot(item), ' 선택' if item.get('selected') else '',
-            ' 숨김' if item.get('offscreen') else '', window(item.get('handle')), parent.get('name', ''), parent.get('role', '')))
-        if item.get('role') != 37 and item.get('handle') not in menu_windows:
-            menu_windows.append(item.get('handle'))
-
-    for handle in menu_windows[:3]:
-        lines.append('[메뉴가 든 창의 구성] ' + window(handle))
-        lines.append('    창 구조: ' + ' ← '.join(window(h) for h in lineage(native, handle)[:9]))
-        shown = 0
-        for item in items:
-            if item.get('handle') != handle or item.get('role') in (28, 29):
-                continue
-            lines.append('  {}{} 종류 {}({}) {}'.format('  ' * min(6, int(item.get('depth') or 0)), str(item.get('name', ''))[:30],
-                                                   item.get('role'), item.get('type', ''), spot(item)))
-            shown += 1
-            if shown >= 70:
-                lines.append('  … (줄임)')
-                break
+    tree = nav_tree(report)
+    lines.append('[메뉴] 묶음 {}개{}'.format(len(tree), ' · 창{}'.format(tree[0]['handle']) if tree else ''))
+    if tree:
+        lines.append('  묶음: ' + ' | '.join('{}@{},{} {}x{}'.format(group['name'], group['x'], group['y'], group['w'], group['h']) for group in tree))
+        for group in tree:
+            shown = [entry for entry in group['items'] if entry['shown']]
+            if shown:
+                lines.append('  펼쳐진 묶음 "{}"의 항목: '.format(group['name'])
+                             + ' | '.join('{}@{},{} {}x{}'.format(entry['name'], entry['x'], entry['y'], entry['w'], entry['h']) for entry in shown))
     if len(lines) > limit:
         lines = lines[:limit] + ['… (줄임: 전체 {}줄)'.format(len(lines))]
     return '\n'.join(lines)

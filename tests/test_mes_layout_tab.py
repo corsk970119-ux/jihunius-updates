@@ -178,8 +178,9 @@ class MesLayoutTabTests(unittest.TestCase):
         self.assertEqual(reader.captures, [('mes_rows', 'MES 화면 구조')])
         text = app.window.clipboard_get()
         self.assertTrue(text.startswith('지후니우스 {} · MES 화면 구조 (읽기만 함)'.format(self.m.SUITE_APP_VERSION)), text[:80])
-        self.assertIn('거래처명@', text)
-        self.assertIn('[메뉴가 든 창의 구성]', text)
+        self.assertIn('거래처명 120', text)
+        self.assertIn('앞에 보임', text)
+        self.assertIn('[메뉴] 묶음 2개', text)
         self.assertNotIn('비밀환자', text)
         self.assertEqual((Path(self.tmp.name) / 'Jihunius' / 'mes_structure.txt').read_text(encoding='utf-8'), text)
         title, shown = wash.show_completion.call_args.args

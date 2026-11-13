@@ -3033,7 +3033,10 @@ class WashApp:
                 report=capture({**mes_target,'mode':'mes_rows'},'MES 화면 구조',self.stop)
                 def rect(handle):
                     r=ma.rect(handle);return r.left,r.top,r.right,r.bottom
-                text=self.layout.describe(report,rect=rect)
+                def at(point):
+                    from ctypes import wintypes
+                    return int(ma.u.WindowFromPoint(wintypes.POINT(int(point[0]),int(point[1]))) or 0)
+                text=self.layout.describe(report,rect=rect,at=at)
                 outcome['text']='지후니우스 {} · MES 화면 구조 (읽기만 함)\n'.format(SUITE_APP_VERSION)+text
                 outcome['title']='화면 구조를 복사했습니다 · {}줄 · 채팅에 붙여넣어 주세요'.format(text.count('\n')+1)
                 return
@@ -5561,7 +5564,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.13.2'
+SUITE_APP_VERSION = '2026.11.13.3'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

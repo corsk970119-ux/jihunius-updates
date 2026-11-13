@@ -4,9 +4,9 @@
 가짜 MES는 실제와 같은 규칙을 가집니다: 경계선 위에서만 포인터가 크기 조절 모양이 되고, 칸 제목 가운데를
 누르면 정렬(=잘못된 누름)로 기록되며, 같은 자리를 빠르게 두 번 누르면 더블클릭(자동 맞춤)이 됩니다.
 """
-import ctypes
 import importlib.util
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -19,481 +19,9 @@ spec = importlib.util.spec_from_file_location('mes_layout_under_test', ROOT / 's
 layout = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(layout)
 
-ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001
-COLUMNS = (('No.', 37), ('선택', 38), ('P/No.', 47), ('거래처명', 120), ('Fixture', 58), ('Size', 54),
-           ('환자명', 46), ('치식', 37), ('세척', 40), ('비고', 55), ('영점', 50))
-HEADER = 22
-
-
-class Leaf:
-    """판 하나: 사용자 컨트롤 창(panel) 안에 표 창(grid)이 있습니다."""
-    def __init__(self, handle, columns=COLUMNS, minimum=20, fixed=()):
-        self.panel = handle
-        self.grid = handle + 1000
-        self.columns = [[name, width] for name, width in columns]
-        self.minimum = minimum
-        self.fixed = set(fixed)      # 너비를 바꿀 수 없는 칸
-        self.scroll = 0              # 가로로 밀린 픽셀
-
-
-class Split:
-    """나뉜 컨테이너: 첫째 판 창(handle+1), 경계선, 둘째 판 창(handle+2)."""
-    def __init__(self, handle, vertical, first, second, position, fixed=None, thickness=7):
-        self.handle = handle
-        self.vertical = vertical
-        self.first = first
-        self.second = second
-        self.position = position
-        self.fixed = fixed           # 컨테이너 크기가 바뀔 때: None=비율 유지, 'first'/'second'=그쪽 크기 유지
-        self.thickness = thickness
-        self.size = None
-        self.bar = None
-
-
-def six(nesting='right', fixed=None, widths=None, positions=((640, 560), (700, 500), 380), menu=25):
-    """위 3개·아래 3개 판. nesting: 'right'=[A|[B|C]], 'left'=[[A|B]|C]."""
-    leaves = [Leaf(100 + 10 * i, widths[i] if widths else COLUMNS) for i in range(6)]
-
-    def row(base, a, b, c, p1, p2):
-        if nesting == 'right':
-            return Split(base, True, a, Split(base + 10, True, b, c, p2, fixed), p1, fixed)
-        return Split(base, True, Split(base + 10, True, a, b, p1, fixed), c, p1 + 7 + p2, fixed)
-
-    # 눈대중으로 나눈 상태: 판 크기가 제각각이지만 왼쪽 위 판은 칸이 모두 보입니다.
-    tree = Split(10, False, row(20, leaves[0], leaves[1], leaves[2], *positions[0]),
-                 row(50, leaves[3], leaves[4], leaves[5], *positions[1]), positions[2], fixed)
-    return FakeMes(tree, menu)
-
-
-class FakeMes:
-    """창 구성: MES(1) → 나뉜 창(3) → [왼쪽 메뉴 칸(4) | 경계선 | 본문(5) → 탭 쪽(2) → 판들]"""
-    def __init__(self, tree, menu=25, menu_minimum=25):
-        self.tree = tree
-        self.menu = menu                     # 왼쪽 메뉴 칸(파란 바) 너비
-        self.menu_minimum = menu_minimum
-        self.bad = []            # 잘못된 누름(칸 제목 가운데 등)과 더블클릭
-        self.presses = 0
-        self.grab = None
-        self.last_down = None
-        self.on_press = None
-        # 아래는 '조작 점검' 시험용 동작(기본은 꺼 둠: 정렬 기능은 칸 제목을 누르면 안 됨)
-        self.allow_moves = False     # 칸 제목을 끌어 순서 바꾸기·없애기
-        self.allow_clicks = False    # 왼쪽 메뉴·문서 탭 누르기
-        self.escape_cancels = True
-        self.hwheel_works = True
-        self.shift_wheel_works = True
-        self.hidden = []             # 없앤 칸 이름
-        self.near_edge_since = None
-        self.nav = ['설비관리', '생산관리', '작업지시관리']
-        self.documents = ['작업지시관리']
-        self.active = '작업지시관리'
-        self.layout()
-
-    def nav_rect(self, index):
-        return (2, 240 + 23 * index, 2 + min(196, max(8, self.menu - 4)), 261 + 23 * index)
-
-    def document_rect(self, index):
-        body = self.menu + 12
-        return (body + 4 + 110 * index, 130, body + 104 + 110 * index, 150)
-
-    def layout(self):
-        body = self.menu + 12
-        self.menu_bar = (self.menu, 23, body, 1030)
-        self.rects = {1: (0, 0, 1920, 1080), 3: (0, 23, 1920, 1030), 4: (0, 23, self.menu, 1030),
-                      5: (body, 23, 1920, 1030), 2: (body + 3, 180, 1917, 1030)}
-        self.parent = {1: 0, 3: 1, 4: 3, 5: 3, 2: 5}
-        self.leaves = []
-        self.splits = []
-        self.place(self.tree, self.rects[2], 2)
-        self.all_leaves = list(self.leaves)
-        if self.active != '작업지시관리':        # 다른 문서가 앞에 있으면 판·표 창은 보이지 않음
-            for handle in [h for h in self.rects if h not in (1, 3, 4, 5)]:
-                del self.rects[handle]
-                del self.parent[handle]
-            self.rects[6] = (body + 3, 180, 1917, 1030)
-            self.parent[6] = 5
-            self.leaves = []
-            self.splits = []
-
-    def on_menu_bar(self, hit, x, y):
-        l, t, r, b = self.menu_bar
-        return hit == 3 and l <= x < r and t <= y < b
-
-    def place(self, node, rect, parent):
-        left, top, right, bottom = rect
-        if isinstance(node, Leaf):
-            self.rects[node.panel] = (left + 2, top + 2, right - 2, bottom - 2)
-            self.parent[node.panel] = parent
-            self.rects[node.grid] = (left + 3, top + 87, right - 3, bottom - 3)
-            self.parent[node.grid] = node.panel
-            self.leaves.append(node)
-            return
-        self.rects[node.handle] = rect
-        self.parent[node.handle] = parent
-        self.splits.append(node)
-        size = (right - left) if node.vertical else (bottom - top)
-        if node.size is not None and node.size != size:
-            if node.fixed == 'second':
-                node.position += size - node.size
-            elif node.fixed is None:
-                node.position = int(round(node.position * size / float(node.size)))
-        node.size = size
-        node.position = max(40, min(size - node.thickness - 40, node.position))
-        if node.vertical:
-            first = (left, top, left + node.position, bottom)
-            second = (left + node.position + node.thickness, top, right, bottom)
-            node.bar = (first[2], top, second[0], bottom)
-        else:
-            first = (left, top, right, top + node.position)
-            second = (left, top + node.position + node.thickness, right, bottom)
-            node.bar = (left, first[3], right, second[1])
-        for panel, child, area in ((node.handle + 1, node.first, first), (node.handle + 2, node.second, second)):
-            self.rects[panel] = area
-            self.parent[panel] = node.handle
-            self.place(child, area, panel)
-
-    def depth(self, handle):
-        count = 0
-        while handle:
-            count += 1
-            handle = self.parent.get(handle, 0)
-        return count
-
-    def window_at(self, x, y):
-        inside = [h for h, (l, t, r, b) in self.rects.items() if l <= x < r and t <= y < b]
-        return max(inside, key=self.depth) if inside else 0
-
-    def leaf(self, handle):
-        return next((leaf for leaf in self.leaves if leaf.grid == handle), None)
-
-    def edge_at(self, leaf, x, y):
-        left, top, right, _ = self.rects[leaf.grid]
-        if not (top <= y < top + HEADER and left <= x < right):
-            return None
-        position = left - leaf.scroll
-        best = None
-        for index, (name, width) in enumerate(leaf.columns):
-            position += width
-            if name not in leaf.fixed and position - 4 <= x <= position + 3:
-                if best is None or abs(x - position) < best[0]:
-                    best = (abs(x - position), index)
-        return None if best is None else best[1]
-
-    def header_at(self, leaf, x, y):
-        """(칸 번호, 왼쪽 절반인지) 또는 None"""
-        left, top, right, _ = self.rects[leaf.grid]
-        if not (top <= y < top + HEADER and left <= x < right):
-            return None
-        position = left - leaf.scroll
-        for index, (name, width) in enumerate(leaf.columns):
-            if position <= x < position + width:
-                return index, x < position + width / 2.0
-            position += width
-        return None
-
-    def near_right_edge(self, leaf, x):
-        return self.rects[leaf.grid][2] - 14 <= x < self.rects[leaf.grid][2]
-
-    def scroll_by(self, leaf, amount):
-        left, _, right, _ = self.rects[leaf.grid]
-        limit = max(0, sum(width for _, width in leaf.columns) - (right - left))
-        leaf.scroll = max(0, min(limit, leaf.scroll + amount))
-
-    def moved_to(self, x, y, now):
-        if self.grab and self.grab[0] == 'move' and self.near_right_edge(self.grab[1], x):
-            if self.near_edge_since is None:
-                self.near_edge_since = now
-        else:
-            self.near_edge_since = None
-
-    def settle_autoscroll(self, now):
-        if self.grab and self.grab[0] == 'move' and self.near_edge_since is not None and now - self.near_edge_since >= 1.0:
-            self.scroll_by(self.grab[1], 90)
-        self.near_edge_since = None
-
-    def escape(self, now):
-        if self.grab and self.grab[0] == 'move':
-            self.settle_autoscroll(now)
-            if self.escape_cancels:
-                self.grab = None
-
-    def wheel(self, x, y, notches, horizontal, shift):
-        leaf = self.leaf(self.window_at(x, y))
-        if leaf is None:
-            return
-        if horizontal and self.hwheel_works:
-            self.scroll_by(leaf, notches * 40)
-        elif not horizontal and shift and self.shift_wheel_works:
-            self.scroll_by(leaf, -notches * 40)
-
-    def click(self, x, y):
-        hit = self.window_at(x, y)
-        if hit == 4:
-            for index, name in enumerate(self.nav):
-                l, t, r, b = self.nav_rect(index)
-                if l <= x < r and t <= y < b:
-                    if name == '설비관리' and '설비별공구관리' not in self.nav:
-                        self.nav.insert(index + 1, '설비별공구관리')
-                    elif name in ('설비별공구관리', '작업지시관리'):
-                        if name not in self.documents:
-                            self.documents.append(name)
-                        self.active = name
-                        self.layout()
-                    return
-        if hit == 5:
-            for index, name in enumerate(self.documents):
-                l, t, r, b = self.document_rect(index)
-                if l <= x < r and t <= y < b:
-                    self.active = name
-                    self.layout()
-                    return
-        self.bad.append('아무것도 없는 곳을 누름: 창 {} ({}, {})'.format(hit, x, y))
-
-    def shape_at(self, x, y):
-        hit = self.window_at(x, y)
-        if self.grab and self.grab[0] == 'move':
-            return MOVING
-        if self.on_menu_bar(hit, x, y):
-            return VSPLIT
-        for split in self.splits:
-            l, t, r, b = split.bar
-            if hit == split.handle and l <= x < r and t <= y < b:
-                return VSPLIT if split.vertical else HSPLIT
-        leaf = self.leaf(hit)
-        if leaf is not None and self.edge_at(leaf, x, y) is not None:
-            return SIZEWE
-        return ARROW
-
-    def press(self, x, y, now):
-        self.presses += 1
-        double = (self.last_down is not None and now - self.last_down[2] <= 0.5
-                  and abs(x - self.last_down[0]) <= 2 and abs(y - self.last_down[1]) <= 2)
-        self.last_down = (x, y, now)
-        self.grab = None
-        hit = self.window_at(x, y)
-        if self.on_menu_bar(hit, x, y):
-            if double:
-                self.bad.append('메뉴 경계선 더블클릭')
-            self.grab = ('menu', x)
-            if self.on_press:
-                self.on_press(self)
-            return
-        for split in self.splits:
-            l, t, r, b = split.bar
-            if hit == split.handle and l <= x < r and t <= y < b:
-                if double:
-                    self.bad.append('경계선 더블클릭')
-                self.grab = ('split', split, x, y)
-                break
-        else:
-            leaf = self.leaf(hit)
-            edge = self.edge_at(leaf, x, y) if leaf is not None else None
-            header = self.header_at(leaf, x, y) if leaf is not None else None
-            if edge is not None and double:
-                self.bad.append('칸 경계 더블클릭(자동 맞춤): ' + leaf.columns[edge][0])
-                leaf.columns[edge][1] = 77
-            elif edge is not None:
-                self.grab = ('column', leaf, edge, x)
-            elif header is not None and self.allow_moves:
-                self.grab = ('move', leaf, header[0], x, y)
-            elif hit in (4, 5) and self.allow_clicks:
-                self.grab = ('click', x, y)
-            else:
-                self.bad.append('경계가 아닌 곳을 누름: 창 {} ({}, {})'.format(hit, x, y))
-        if self.on_press:
-            self.on_press(self)
-
-    def release(self, x, y):
-        grab, self.grab = self.grab, None
-        if not grab:
-            return
-        if grab[0] == 'click':
-            if (x, y) == (grab[1], grab[2]):
-                self.click(x, y)
-        elif grab[0] == 'move':
-            leaf, index = grab[1], grab[2]
-            if abs(x - grab[3]) < 4 and abs(y - grab[4]) < 4:
-                self.bad.append('칸 제목을 끌지 않고 누름(정렬됨): ' + leaf.columns[index][0])
-                return
-            target = self.header_at(leaf, x, y)
-            left, top, right, bottom = self.rects[leaf.grid]
-            if target is None:
-                if left <= x < right and top + HEADER <= y < bottom:     # 표 안쪽에 놓으면 칸이 없어짐
-                    self.hidden.append(leaf.columns.pop(index)[0])
-                return
-            item = leaf.columns.pop(index)
-            place = target[0] - (1 if target[0] > index else 0)
-            leaf.columns.insert(place if target[1] else place + 1, item)
-        elif grab[0] == 'menu':
-            self.menu = max(self.menu_minimum, min(600, self.menu + x - grab[1]))
-            self.layout()
-        elif grab[0] == 'split':
-            split = grab[1]
-            split.position += (x - grab[2]) if split.vertical else (y - grab[3])
-            self.layout()
-        else:
-            leaf, index, start = grab[1], grab[2], grab[3]
-            leaf.columns[index][1] = max(leaf.minimum, leaf.columns[index][1] + x - start)
-
-    def report(self):
-        records = [{'kind': 'native_window', 'handle': handle, 'native_parent': parent,
-                    'class': 'WindowsForms10.Window.8.app.0.1'} for handle, parent in self.parent.items()]
-        ident = [0]
-
-        def element(**values):
-            ident[0] += 1
-            values.update(kind='element', id=ident[0])
-            records.append(values)
-            return ident[0]
-
-        if self.active == '작업지시관리':
-            element(parent=-1, role=37, handle=2, name='생산일보관리', selected=True, type='page tab', bounds=[self.menu + 215, 157, 80, 20])
-        for position, name in enumerate(self.documents):
-            l, t, r, b = self.document_rect(position)
-            element(parent=-1, role=37, handle=5, name=name, selected=name == self.active, type='page tab', bounds=[l, t, r - l, b - t])
-        menu = element(parent=-1, role=10, handle=4, name='메뉴', type='client', depth=0)
-        for position, name in enumerate(self.nav):
-            l, t, r, b = self.nav_rect(position)
-            element(parent=menu, role=36, handle=4, name=name, type='outline item', depth=1, bounds=[l, t, r - l, b - t])
-        for leaf in self.leaves:
-            left, top, right, bottom = self.rects[leaf.grid]
-            table = element(parent=-1, role=24, handle=leaf.grid, name='', offscreen=False,
-                            bounds=[left, top, right - left, bottom - top])
-            group = element(parent=table, role=10, handle=leaf.grid, name='헤더 패널')
-            x = left - leaf.scroll
-            for name, width in leaf.columns:
-                element(parent=group, role=25, handle=leaf.grid, name=name, bounds=[x, top, width, HEADER],
-                        offscreen=x >= right or x + width <= left)
-                x += width
-            data = element(parent=table, role=10, handle=leaf.grid, name='데이터 패널', child_count=1)
-            line = element(parent=data, role=28, handle=leaf.grid, name='행 1', value='O1009;홍길동치과;비밀환자;', bounds=[left, top + HEADER, 500, 20])
-            element(parent=line, role=29, handle=leaf.grid, name='환자명 row 0', value='비밀환자')
-        records.append({'kind': 'finish', 'limited': False, 'elements': ident[0]})
-        return {'records': records, 'exit_code': 0, 'target': {'handle': 1}}
-
-    def grid_sizes(self):
-        return [(self.rects[leaf.grid][2] - self.rects[leaf.grid][0], self.rects[leaf.grid][3] - self.rects[leaf.grid][1])
-                for leaf in self.leaves]
-
-    def widths(self):
-        return [OrderedDict(leaf.columns) for leaf in self.leaves]
-
-
-class Mouse(ctypes.Structure):
-    _fields_ = [('dx', ctypes.c_int32), ('dy', ctypes.c_int32), ('data', ctypes.c_uint32),
-                ('flags', ctypes.c_uint32), ('time', ctypes.c_uint32), ('extra', ctypes.c_size_t)]
-
-
-class Payload(ctypes.Union):
-    _fields_ = [('mi', Mouse)]
-
-
-class Input(ctypes.Structure):
-    _fields_ = [('type', ctypes.c_uint32), ('payload', Payload)]
-
-
-class FakeUser32:
-    """user32 흉내. lag: 포인터를 옮긴 뒤 MES가 모양을 바꾸기까지 걸리는 조회 횟수, frozen: MES가 응답하지 않음."""
-    def __init__(self, mes, lag=0, frozen=False):
-        self.mes = mes
-        self.lag = lag
-        self.frozen = frozen
-        self.now = [0.0]
-        self.cursor = (5, 5)
-        self.down = False
-        self.shown = ARROW
-        self.waiting = 0
-        self.keys = set()
-        self.foreground = 1
-        self.swapped = False     # 마우스 좌우 버튼 바꿈 설정
-        self.sleeps = []
-        for name in ('GetCursorInfo', 'LoadCursorW', 'GetDoubleClickTime', 'GetCursorPos', 'WindowFromPoint', 'GetParent',
-                     'GetWindowRect', 'GetAsyncKeyState', 'GetForegroundWindow', 'GetSystemMetrics', 'SendInput',
-                     'keybd_event'):
-            setattr(self, name, (lambda method: lambda *args: method(*args))(getattr(self, '_' + name)))
-
-    def clock(self):
-        return self.now[0]
-
-    def sleep(self, seconds):
-        self.sleeps.append(seconds)
-        self.now[0] += seconds
-
-    def _GetCursorInfo(self, reference):
-        self.now[0] += 0.0005
-        if not self.frozen:
-            if self.waiting > 0:
-                self.waiting -= 1
-            else:
-                self.shown = self.mes.shape_at(*self.cursor)
-        reference._obj.flags = 1
-        reference._obj.hCursor = self.shown
-        return 1
-
-    def _LoadCursorW(self, _, name):
-        return {32512: ARROW, 32514: WAIT, 32650: BUSY}[name]
-
-    def _GetDoubleClickTime(self):
-        return 500
-
-    def _GetCursorPos(self, reference):
-        reference._obj.x, reference._obj.y = self.cursor
-        return 1
-
-    def _WindowFromPoint(self, point):
-        return self.mes.window_at(point.x, point.y)
-
-    def _GetParent(self, handle):
-        return self.mes.parent.get(handle, 0)
-
-    def _GetWindowRect(self, handle, reference):
-        rect = self.mes.rects.get(handle)
-        if rect is None:
-            return 0
-        reference._obj.left, reference._obj.top, reference._obj.right, reference._obj.bottom = rect
-        return 1
-
-    def _GetAsyncKeyState(self, key):
-        return 0x8000 if key in self.keys else 0
-
-    def _GetForegroundWindow(self):
-        return self.foreground
-
-    def _keybd_event(self, code, scan, flags, extra):
-        self.now[0] += 0.0005
-        if flags & 2:
-            self.keys.discard(code)
-        else:
-            self.keys.add(code)
-            if code == 0x1B:
-                self.mes.escape(self.now[0])
-                self.keys.discard(code)     # 시험에서는 Esc를 눌렀다 바로 뗀 것으로 봅니다.
-
-    def _GetSystemMetrics(self, index):
-        return {76: 0, 77: 0, 78: 1920, 79: 1080, 23: int(self.swapped)}[index]
-
-    def _SendInput(self, count, reference, size):
-        self.now[0] += 0.0005
-        mouse = reference._obj.payload.mi
-        if mouse.flags & 0x0001:
-            # 실제 Windows처럼 환산 과정에서 1픽셀 어긋날 수 있게 내림으로 계산합니다.
-            self.cursor = (mouse.dx * 1919 // 65535, mouse.dy * 1079 // 65535)
-            self.waiting = self.lag
-            self.mes.moved_to(self.cursor[0], self.cursor[1], self.now[0])
-        if mouse.flags & (0x0800 | 0x1000):
-            notches = ctypes.c_int32(mouse.data).value // 120
-            self.mes.wheel(self.cursor[0], self.cursor[1], notches, bool(mouse.flags & 0x1000), 0x10 in self.keys)
-        press, release = (0x0008, 0x0010) if self.swapped else (0x0002, 0x0004)
-        if mouse.flags & (0x0002 | 0x0008 | 0x0004 | 0x0010) & ~(press | release):
-            self.mes.bad.append('주 버튼이 아닌 버튼을 누름')
-        if mouse.flags & press:
-            self.down = True
-            self.mes.press(self.cursor[0], self.cursor[1], self.now[0])
-        if mouse.flags & release:
-            self.down = False
-            self.mes.settle_autoscroll(self.now[0])
-            self.mes.release(*self.cursor)
-        return count
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mes_fake import (ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING, COLUMNS, WORK_COLUMNS, HEADER,   # noqa: E402,F401
+                      Leaf, Split, FakeMes, FakeUser32, Input, six)
 
 
 def run(mes, widths=None, lag=0, frozen=False, user=None):
@@ -502,14 +30,16 @@ def run(mes, widths=None, lag=0, frozen=False, user=None):
     pointer = layout.Pointer(api, sleep=user.sleep, clock=user.clock)
     notes = []
     captures = []
+    roots = []
 
     def capture(target, text, stop):
         captures.append((target.get('mode'), text))
-        return mes.report()
+        roots.append(target.get('handle'))
+        return mes.report(target.get('handle'))
 
     result = layout.align(api.target, pointer, capture, threading.Event(), lambda kind, value: notes.append((kind, value)),
                           mes.report(), widths=widths)
-    return SimpleNamespace(result=result, notes=notes, captures=captures, pointer=pointer, user=user)
+    return SimpleNamespace(result=result, notes=notes, captures=captures, roots=roots, pointer=pointer, user=user)
 
 
 STANDARD = OrderedDict((('No.', 36), ('선택', 34), ('P/No.', 52), ('거래처명', 150), ('Fixture', 64), ('Size', 60),
@@ -691,8 +221,8 @@ class SafetyTests(Checks, unittest.TestCase):
     def test_table_scrolled_sideways_is_skipped_and_reported(self):
         mes = six(widths=scrambled())
         keep = mes.report
-        def scrolled_report():
-            report = keep()
+        def scrolled_report(root=None):
+            report = keep(root)
             grid = mes.leaves[4].grid
             for record in report['records']:
                 if record.get('role') == 25 and record.get('handle') == grid:
@@ -783,8 +313,8 @@ class SafetyTests(Checks, unittest.TestCase):
         # 창 목록에서 경계선을 찾지 못해도(구성이 예상과 다름) '완료'라고 하지 않는다.
         mes = six()
         keep = mes.report
-        def report():
-            data = keep()
+        def report(root=None):
+            data = keep(root)
             data['records'] = [r for r in data['records'] if r.get('kind') != 'native_window']
             return data
         mes.report = report
@@ -804,26 +334,19 @@ class SafetyTests(Checks, unittest.TestCase):
                 run(mes, widths=STANDARD, user=user)
             self.assertEqual(mes.presses, 0)
 
-    def test_window_covering_an_edge_blocks_the_press_there(self):
+    def test_table_covered_by_another_window_stops_everything_before_any_press(self):
+        # 표 하나만 가려져 있어도 판 크기를 잘못 나누게 되므로, 아무것도 하지 않고 알려 준다.
         mes = six()
-        target = OrderedDict(COLUMNS)
-        target['거래처명'] = 150
         grid = mes.rects[mes.leaves[0].grid]
         mes.rects[9999] = (grid[0], grid[1] - 5, grid[2], grid[1] + 40)      # 왼쪽 위 표의 칸 제목을 덮은 다른 창
         mes.parent[9999] = 1
-        keep = mes.layout
-        def relayout():
-            keep()
-            now = mes.rects[mes.leaves[0].grid]
-            mes.rects[9999] = (now[0], now[1] - 5, now[2], now[1] + 40)
-            mes.parent[9999] = 1
-        mes.layout = relayout
         mes.depth = lambda handle, original=mes.depth: 99 if handle == 9999 else original(handle)
-        outcome = run(mes, widths=target)
-        self.assertEqual(mes.bad, [])
-        self.assertEqual(mes.widths()[0]['거래처명'], 120)                    # 가려진 표는 그대로
-        self.assertEqual(mes.widths()[1]['거래처명'], 150)
-        self.assertEqual(list(outcome.result['missed']), ['위쪽 왼쪽'])
+        before = mes.snapshot()
+        with self.assertRaises(RuntimeError) as caught:
+            run(mes, widths=STANDARD)
+        self.assertIn('생산일보 표 6개 중 1개가 다른 창에 가려져', str(caught.exception))
+        self.assertEqual(mes.presses, 0)
+        self.assertEqual(mes.snapshot(), before)
 
     def test_changed_screen_between_readings_stops_the_run(self):
         mes = six(widths=scrambled())
@@ -831,7 +354,7 @@ class SafetyTests(Checks, unittest.TestCase):
         api = SimpleNamespace(u=user, target={'handle': 1, 'pid': 1}, Input=Input)
         pointer = layout.Pointer(api, sleep=user.sleep, clock=user.clock)
         def capture(target, text, stop):
-            report = mes.report()
+            report = mes.report(target.get('handle'))
             report['records'] = [r for r in report['records'] if r.get('handle') != mes.leaves[5].grid]
             return report
         with self.assertRaises(RuntimeError) as caught:
@@ -886,8 +409,8 @@ class MenuTests(Checks, unittest.TestCase):
     def test_missing_or_ungrabbable_menu_divider_is_reported_and_the_rest_still_runs(self):
         mes = six(widths=scrambled(), menu=200)
         keep = mes.report
-        def report():
-            data = keep()
+        def report(root=None):
+            data = keep(root)
             data['records'] = [r for r in data['records'] if not (r.get('kind') == 'native_window' and r.get('handle') == 4)]
             return data
         mes.report = report
@@ -905,29 +428,108 @@ class MenuTests(Checks, unittest.TestCase):
         self.assertTrue(any('줄이지 못했습니다' in line for line in layout.brief(outcome.result, 1.0)[1]))
 
 
+class FrontTests(Checks, unittest.TestCase):
+    """실제 MES는 문서를 겹쳐 두고, 뒤에 가려진 문서의 표도 판독에 나온다(현장 점검 결과)."""
+
+    def test_table_behind_another_document_is_read_but_not_treated_as_visible(self):
+        mes = six()
+        mes.documents.append('설비별공구관리')
+        mes.active = '설비별공구관리'                                          # 설비별공구관리가 앞, 생산일보는 뒤
+        mes.layout()
+        report = mes.report()
+        self.assertEqual(len(layout.grids(report)), 6)                        # 판독에는 6개 판이 그대로 나옴
+        user = FakeUser32(mes)
+        api = SimpleNamespace(u=user, target={'handle': 1, 'pid': 1}, Input=Input)
+        pointer = layout.Pointer(api, sleep=user.sleep, clock=user.clock)
+        self.assertEqual(layout.front(layout.grids(report), pointer), [])
+        self.assertEqual(len(layout.front(layout.grids(report, required=()), pointer)), 1)   # 앞 문서의 표만
+        with self.assertRaises(RuntimeError) as caught:
+            layout.align(api.target, pointer, lambda *a: mes.report(), threading.Event(), lambda *a: None, report, widths=STANDARD)
+        self.assertIn('다른 화면 뒤에 가려져', str(caught.exception))
+        self.assertEqual(mes.presses, 0)
+        self.assertEqual(user.cursor, (5, 5))
+
+    def test_alignment_ignores_the_document_behind(self):
+        mes = six(widths=scrambled(), menu=200)
+        mes.documents.append('설비별공구관리')                                 # 뒤에 열려 있기만 함
+        mes.layout()
+        tool = [list(item) for item in mes.tool.columns]
+        outcome = run(mes, widths=STANDARD)
+        self.assert_widths(mes, STANDARD)
+        self.assert_even(mes)
+        self.assertEqual(mes.bad, [])
+        self.assertEqual(mes.tool.columns, tool)
+        self.assertEqual(outcome.result['tables'], 6)
+
+    def test_checks_after_moving_read_only_the_window_holding_the_panels(self):
+        mes = six(widths=scrambled())
+        outcome = run(mes, widths=STANDARD)
+        self.assertTrue(outcome.roots)
+        self.assertEqual(set(outcome.roots), {10})                           # 판 6개를 품은 가장 안쪽 창
+        self.assertEqual(layout.common_window(layout.native_parents(mes.report()), [leaf.grid for leaf in mes.panels]), 10)
+
+
+class MenuDividerTests(unittest.TestCase):
+    def test_divider_is_found_from_the_menu_side_when_no_table_is_open(self):
+        mes = six(menu=200)
+        mes.rects[8] = (212, 23, 1920, 123)                                   # 본문 위의 도구 모음(메뉴 칸 옆에 짧게 맞닿음)
+        mes.parent[8] = 3
+        user = FakeUser32(mes)
+        pointer = layout.Pointer(SimpleNamespace(u=user, target={'handle': 1, 'pid': 1}, Input=Input), sleep=user.sleep, clock=user.clock)
+        native = dict(mes.parent)
+        item = layout.menu_divider_beside(native, pointer, 7)
+        self.assertEqual((item['container'], item['first'], item['second'], item['vertical']), (3, 4, 5, True))
+        self.assertEqual(layout.divider_gap(pointer, item)[:2], (200, 212))
+        self.assertTrue(layout.drag_divider(pointer, item, -100, lambda kind, value: None))
+        self.assertEqual(mes.menu, 100)
+        self.assertEqual(mes.bad, [])
+        self.assertIsNone(layout.menu_divider_beside({7: 0}, pointer, 7))
+
+
+class MenuReadingTests(unittest.TestCase):
+    def test_groups_and_items_are_read_from_the_innermost_copy(self):
+        mes = six(menu=200)
+        tree = layout.nav_tree(mes.report())
+        self.assertEqual([group['name'] for group in tree], ['설비관리', '생산관리'])
+        self.assertEqual({group['handle'] for group in tree}, {7})            # 바깥 창(4)에 겹쳐 읽힌 것이 아니라 메뉴 창
+        closed, opened = tree
+        self.assertEqual((closed['h'], opened['h']), (23, 23 + 42 * 2))
+        self.assertEqual(closed['head'], (closed['x'] + closed['w'] // 2, closed['y'] + 11))
+        self.assertEqual(opened['head'][1], opened['y'] + 11)                 # 펼쳐진 묶음도 이름 줄은 맨 위
+        self.assertEqual([(entry['name'], entry['shown']) for entry in closed['items']],
+                         [('설비관리', False), ('공구관리', False), ('설비별공구관리', False)])
+        self.assertEqual([(entry['name'], entry['shown']) for entry in opened['items']], [('작업지시관리', True), ('생산실적관리', True)])
+        self.assertEqual(layout.nav_tree({'records': []}), [])
+
+
 class DescribeTests(unittest.TestCase):
     def test_structure_summary_lists_tabs_tables_columns_and_menu_but_no_row_values(self):
         mes = six(menu=200)
-        text = layout.describe(mes.report(), rect=lambda handle: mes.rects[handle])
-        self.assertIn('[탭]', text)
-        self.assertIn('생산일보관리 (선택)', text)
-        self.assertIn('표 @218,267', text)
-        self.assertIn('칸 11개 · 행 1개', text)
-        self.assertIn('거래처명@340,267 120x22', text)
-        self.assertIn('창 구조: 창1100[WindowsForms10.Window.8.ap](218,267,', text)
-        self.assertIn('[메뉴·탭 이름이 들어간 항목]', text)
-        self.assertIn('작업지시관리 · 종류 36(outline item) @2,286 196x21', text)
-        self.assertIn('[메뉴가 든 창의 구성] 창4', text)
+        mes.documents.append('설비별공구관리')
+        mes.layout()
+        text = layout.describe(mes.report(), rect=lambda handle: mes.rects[handle], at=lambda point: mes.window_at(*point))
+        self.assertIn('생산일보관리 (선택) @403,155 94x23 · 창201', text)
+        self.assertIn('표 @218,267 634x290 · 칸 11개 · 행 1개 · 앞에 보임 · 창1100', text)
+        self.assertIn('No. 37 | 선택 38 | P/No. 47 | 거래처명 120', text)
+        self.assertIn('칸 6개 · 행 1개 · 가려짐 · 창1230', text)                # 뒤 문서의 표
+        self.assertIn('창 구조: 1100(218,267,852,557) ← 100(', text)
+        self.assertIn('[메뉴] 묶음 2개 · 창7', text)
+        self.assertIn('묶음: 설비관리@1,192 198x23 | 생산관리@1,215 198x107', text)
+        self.assertIn('펼쳐진 묶음 "생산관리"의 항목: 작업지시관리@1,238 198x42 | 생산실적관리@1,280 198x42', text)
         for secret in ('비밀환자', '홍길동치과', 'O1009'):
             self.assertNotIn(secret, text)
 
-    def test_summary_works_without_window_positions_and_is_cut_when_too_long(self):
+    def test_columns_outside_the_table_are_marked_and_long_output_is_cut(self):
         mes = six()
+        mes.inner = '작업지시관리'
+        mes.layout()
         text = layout.describe(mes.report())
-        self.assertIn('[표]', text)
-        self.assertNotIn('위치 못 읽음', text)
-        short = layout.describe(mes.report(), limit=10)
-        self.assertEqual(len(short.split('\n')), 11)
+        self.assertIn('칸 31개', text)
+        self.assertIn('▷특이사항3 100', text)
+        self.assertNotIn('▷선택', text)
+        self.assertNotIn('창 구조', text)
+        short = layout.describe(mes.report(), limit=4)
+        self.assertEqual(len(short.split('\n')), 5)
         self.assertIn('줄임', short.split('\n')[-1])
         broken = layout.describe(mes.report(), rect=lambda handle: (_ for _ in ()).throw(RuntimeError('x')))
         self.assertIn('(위치 못 읽음)', broken)
