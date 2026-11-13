@@ -99,11 +99,12 @@ def grids(report, required=REQUIRED_HEADERS):
         columns = []
         for header in headers:
             hx, hy, hw, hh = _box(header)
-            if hw > 0 and hh > 0 and hx < x + w:     # 표 오른쪽 밖에서 시작하는 칸은 보이지 않는 칸
+            # 표의 칸 제목 줄에 실제로 놓인 것만 씁니다: 크기가 있고, 세로 위치가 표 안이고, 표 오른쪽 밖에서 시작하지 않는 것.
+            if hw > 0 and hh > 0 and hx < x + w and y - 2 <= hy < y + h:
                 columns.append({'name': str(header.get('name', '')), 'x': hx, 'y': hy, 'w': hw, 'h': hh})
         columns.sort(key=lambda column: column['x'])
         # 칸 제목이 표 왼쪽 밖으로 나가 있으면 가로 스크롤로 밀린 상태입니다(경계 위치를 믿을 수 없음).
-        scrolled = any(_box(header)[2] > 0 and _box(header)[0] < x - 1 for header in headers)
+        scrolled = any(column['x'] < x - 1 for column in columns)
         found.append({'handle': table.get('handle'), 'x': x, 'y': y, 'w': w, 'h': h, 'columns': columns,
                       'scrolled': scrolled,
                       # 판독에 나온 모든 칸 제목(표 밖 것 포함, 판독 순서 그대로): (이름, x, y, w, h)
@@ -823,37 +824,58 @@ def save_standard(path, daily, work):
 
 
 # ── 화면에 실제로 보이는 칸 ─────────────────────────────────────────────────────
+#
+# 현장 확인(2판 결과, 2026-11-13): 작업지시관리 표는 표 왼쪽 끝에서 행 번호 칸(51픽셀)만큼 떨어진 곳에서 칸 제목이
+# 시작하고, 맨 앞 몇 칸(선택·지시일·시간·프로젝트No)은 왼쪽에 고정돼 있어 표를 가로로 밀어도 제자리에 남습니다.
+# 밀린 칸은 고정 칸 밑으로 들어가는데, 가려진 칸도 표 범위에 걸쳐 있으면 판독에는 위치가 나옵니다(고정 칸과 겹침).
+# 그래서 '칸 제목끼리 이어져 있는지'가 아니라 '위치가 서로 겹치는지'로 판단합니다: 겹치지 않은 칸은 그 자리에 실제로
+# 보이는 칸이고, 겹친 칸은 어느 쪽이 보이는지 알 수 없으니 누르지 않습니다. (고정 칸 뒤의 가는 구분선 같은 틈은 정상)
+
+def _inside(grid):
+    right = grid['x'] + grid['w']
+    return sorted((column for column in grid['columns'] if grid['x'] - 1 <= column['x'] < right), key=lambda column: column['x'])
+
+
+def covered(grid):
+    """위치가 다른 칸 제목과 겹쳐 읽힌 칸 제목들(겹친 양쪽 모두)."""
+    columns = sorted(grid['columns'], key=lambda column: column['x'])
+    found = []
+    for index, one in enumerate(columns):
+        for two in columns[index + 1:]:
+            if two['x'] >= one['x'] + one['w'] - 1:
+                break
+            for column in (one, two):
+                if not any(column is item for item in found):
+                    found.append(column)
+    return found
+
 
 def chain(grid):
-    """실제로 화면에 나란히 보이는 칸 제목들(왼쪽→오른쪽).
-
-    현장 확인: 화면 밖 칸은 위치가 없고(0), 표가 가로로 밀린 뒤에는 밀려 나간 칸에 예전 위치가 남아 있기도 합니다.
-    그래서 표 안에서 시작하고 서로 빈틈없이 이어지는 줄 가운데 가장 긴 것만 믿습니다.
-    """
-    right = grid['x'] + grid['w']
-    inside = sorted((column for column in grid['columns'] if grid['x'] - 1 <= column['x'] < right), key=lambda column: column['x'])
-    best, best_width = [], 0
-    for start in range(len(inside)):
-        run = [inside[start]]
-        for column in inside[start + 1:]:
-            edge = run[-1]['x'] + run[-1]['w']
-            if abs(column['x'] - edge) <= 1:
-                run.append(column)
-            elif column['x'] > edge + 1:
-                break
-        width = sum(column['w'] for column in run)
-        if width > best_width:
-            best, best_width = run, width
-    return best
+    """그 자리에 실제로 보인다고 믿을 수 있는 칸 제목들(왼쪽→오른쪽): 표 안에서 시작하고 다른 칸 제목과 겹치지 않는 것."""
+    hidden = covered(grid)
+    return [column for column in _inside(grid) if not any(column is item for item in hidden)]
 
 
 def tidy(grid):
-    """표가 가로로 밀려 있지 않고 칸 제목 위치를 모두 믿을 수 있는지."""
-    return not grid.get('scrolled') and len(chain(grid)) == len(grid['columns'])
+    """표가 가로로 밀린 흔적이 없는지: 표 왼쪽 밖에 걸친 칸 제목도, 위치가 겹쳐 읽힌 칸 제목도 없음."""
+    return not grid.get('scrolled') and not covered(grid)
+
+
+def reach(pointer, grid):
+    """칸 제목 줄에서 이 표의 창이 직접 보이는 오른쪽 끝. 세로 스크롤 막대처럼 표에 딸린 창이 덮은 부분은 뺍니다."""
+    right = grid['x'] + grid['w']
+    if not grid['columns']:
+        return right
+    y = grid['columns'][0]['y'] + grid['columns'][0]['h'] // 2
+    for back in range(1, 42, 4):
+        if pointer.window_at((right - back, y)) == grid['handle']:
+            return right - back + 1
+    return right - 41
 
 
 def whole(grid, column):
-    return column['x'] >= grid['x'] and column['x'] + column['w'] <= grid['x'] + grid['w'] - 2
+    """칸 제목이 표의 보이는 범위 안에 온전히 들어 있는지."""
+    return column['x'] >= grid['x'] and column['x'] + column['w'] <= grid.get('reach', grid['x'] + grid['w']) - 2
 
 
 # ── 화면 찾아가기 ───────────────────────────────────────────────────────────────
@@ -945,15 +967,46 @@ class Navigator:
 
 # ── 작업지시관리 표 ─────────────────────────────────────────────────────────────
 
+DISCARD_STEPS = (40, 60, 80, 100)    # 칸 제목을 위로 끌어 올리는 거리 단계(칸 제목 가운데에서부터, 픽셀)
+DISCARD_DOWN = 140                   # 마지막 방법: 표 안쪽(아래)으로 끌어 내리는 거리
+DISCARD_WAYS = ('위로', '위로 끝까지', '아래로')
+
+
+def _center(column):
+    return column['x'] + column['w'] // 2, column['y'] + column['h'] // 2
+
+
+def spot(pointer, grid, point, patience=0.6):
+    """그 자리를 누르면 이 표가 눌리는지. 표에 딸린 창(스크롤 막대 등)이 덮고 있으면 False, 다른 창이 덮고 있으면 중단.
+
+    설명 풍선이나 끌기 표시처럼 잠깐 떴다 사라지는 창일 수 있으므로 patience초 동안은 다시 확인합니다.
+    """
+    waited = 0.0
+    while True:
+        hit = pointer.window_at(point)
+        if hit == grid['handle']:
+            return True
+        if grid['handle'] in pointer.lineage(hit):
+            return False
+        if waited >= patience:
+            raise RuntimeError('작업지시관리 표의 칸 제목 자리가 다른 창에 가려져 있어 중단했습니다.')
+        pointer.sleep(0.15)
+        waited += 0.15
+
+
+def grabbable(pointer, grid, column):
+    """칸 제목 가운데를 잡을 수 있는지(spot과 같은 규칙)."""
+    return spot(pointer, grid, _center(column))
+
+
 def carry(pointer, grid, source, end):
-    """칸 제목 source를 끌어 end에 놓습니다. 잡을 자리와 놓을 자리가 이 표인지 먼저 확인합니다.
+    """칸 제목 source를 끌어 end에 놓습니다. 잡을 자리와 놓을 자리가 이 표인지 먼저 확인합니다(아니면 누르지 않고 False).
 
     현장 확인: 다른 칸 제목의 왼쪽 절반에 놓으면 그 칸 앞으로 옮겨집니다.
     """
-    start = (source['x'] + source['w'] // 2, source['y'] + source['h'] // 2)
-    for point in (start, end):
-        if pointer.window_at(point) != grid['handle']:
-            raise RuntimeError('작업지시관리 표의 칸 제목 자리가 다른 창에 가려져 있어 중단했습니다.')
+    start = _center(source)
+    if not spot(pointer, grid, start, 1.0) or not spot(pointer, grid, end, 1.0):
+        return False
     pointer.hold(start)
     try:
         pointer.sleep(0.08)
@@ -966,39 +1019,122 @@ def carry(pointer, grid, source, end):
     finally:
         pointer.drop()
     pointer.sleep(0.4)
+    return True
+
+
+def discard(pointer, grid, source, way):
+    """칸 제목 source를 끌어다 버립니다. 반환: (끄는 동안 본 것을 적은 글, 가장 먼 단계까지 갔는지). 놓을 자리가 없으면 (None, True).
+
+    사용자 확인(2026-11-13): 필요 없는 칸은 칸 제목을 위로 끌어다 놓으면 없어집니다.
+      '위로'        위로 조금씩 올리다가 포인터 모양이 바뀌면(버리기 표시) 거기서 놓고, 바뀌지 않으면 가장 위 단계에서 놓습니다.
+      '위로 끝까지' 모양과 상관없이 가장 위 단계까지 올려서 놓습니다.
+      '아래로'      표 안쪽(아래)에 놓습니다(위로 버려지지 않을 때의 마지막 방법).
+    끄는 동안에는 이 표가 마우스를 잡고 있으므로 놓는 자리가 표 밖이어도 다른 화면이 눌리지 않습니다.
+    """
+    start = _center(source)
+    if not spot(pointer, grid, start, 1.0):
+        return None, True
+    upward = way != '아래로'
+    if upward:
+        top = max(pointer.rect(pointer.root)[1], pointer.u.GetSystemMetrics(77)) + 4     # MES 창과 화면 안에서만
+        points = [(start[0], start[1] - step) for step in DISCARD_STEPS if start[1] - step >= top]
+    else:
+        points = [(start[0], start[1] + DISCARD_DOWN)]
+        if pointer.window_at(points[0]) != grid['handle']:
+            points = []
+    if not points:
+        return None, True
+    seen = []
+    pointer.hold(start)
+    try:
+        pointer.sleep(0.08)
+        pointer.move((start[0], start[1] + (-8 if upward else 8)))     # 칸 제목 안에서 조금 움직여 끌기 시작
+        pointer.sleep(0.08)
+        base = pointer.shape()
+        for point in points:
+            pointer.move(point)
+            pointer.sleep(0.15)
+            seen.append(pointer.shape())
+            if way == '위로' and seen[-1] is not None and seen[-1] != base:
+                pointer.sleep(0.12)
+                if pointer.shape() == seen[-1]:          # 바뀐 모양이 그대로 유지될 때만 '버리기 표시'로 봅니다.
+                    break
+        pointer.sleep(0.3)
+    finally:
+        pointer.drop()
+    pointer.sleep(0.4)
+    text = '{} {}픽셀 · 모양 {} → {}'.format(way, abs(points[len(seen) - 1][1] - start[1]), base, ' '.join(str(shape) for shape in seen))
+    return text, len(seen) == len(points)
 
 
 def arrange_work(nav, handle, standard):
-    """작업지시관리 표를 기준대로 정리합니다: 기준에 없는 칸 없애기 → 칸 너비 → 칸 순서(다시 너비 확인).
+    """작업지시관리 표를 기준대로 정리합니다: 필요 없는 칸 버리기 → 칸 너비 → 칸 순서(다시 너비 확인).
 
-    화면에 보이는 칸만 다룹니다(가로 스크롤은 하지 않음). 칸을 없애고 줄이면 뒤 칸들이 화면 안으로 들어옵니다.
+    화면에 보이는 칸만 다룹니다(가로 스크롤은 하지 않음. 화면 밖 칸은 그대로 둠). 칸을 버리고 줄이면 뒤 칸들이
+    화면 안으로 들어옵니다.
     """
     pointer, emit = nav.pointer, nav.emit
     order, widths, keep = list(standard['order']), standard['widths'], set(standard['keep'])
-    result = {'removed': [], 'stuck': [], 'moved': 0, 'resized': 0, 'blocked': None, 'scrolled': False, 'remaining': []}
+    result = {'removed': [], 'stuck': [], 'moved': 0, 'resized': 0, 'blocked': None, 'scrolled': False, 'remaining': [],
+              'detail': ''}
     box = {}
 
+    def park():
+        """포인터를 표의 왼쪽 위 모서리(행 번호 칸의 제목 자리)로 치워 둡니다.
+
+        칸 제목 위에 포인터를 둔 채 화면을 읽으면 MES가 설명 풍선을 띄워 칸 제목을 가릴 수 있습니다.
+        """
+        grid = box.get('grid')
+        if not grid or not grid['columns']:
+            return
+        margin = min(column['x'] for column in grid['columns']) - grid['x']
+        point = (grid['x'] + min(20, margin // 2), grid['columns'][0]['y'] + grid['columns'][0]['h'] // 2)
+        if margin >= 12 and pointer.window_at(point) == grid['handle']:
+            pointer.move(point)
+            pointer.sleep(0.05)
+
     def look(text):
-        report = nav.read(text, handle)
-        found = [grid for grid in front(grids(report, required=()), pointer) if grid['handle'] == handle]
+        park()
+        tables = grids(nav.read(text, handle), required=())
+        found = [grid for grid in front(tables, pointer) if grid['handle'] == handle]
+        if not found:                    # 잠깐 떴다 사라지는 창(설명 풍선 등)에 가렸을 수 있어 한 번 더 봅니다.
+            pointer.sleep(0.5)
+            found = [grid for grid in front(tables, pointer) if grid['handle'] == handle]
         if not found:
             raise RuntimeError('작업지시관리 표가 화면 앞에서 사라져 중단했습니다.')
+        found[0]['reach'] = reach(pointer, found[0])
         box['grid'] = found[0]
         return found[0]
 
+    def record(grid, title):
+        """원인 파악용 기록: 표와 칸 제목 위치(이름@x+너비). 값(행 내용)은 적지 않습니다.
+
+        'record'로 보낸 줄은 진행 기록에도 남고, 다 맞추지 못했거나 오류가 났을 때 오류 기록의 끝에 따로 붙습니다.
+        """
+        hidden = covered(grid)
+        emit('record', '{} ({}, {}) {}x{} · 닿는 끝 {} · 칸 제목 {}개 중 위치 있는 것 {}개 · 왼쪽 밖 {} · 겹침 {}개'.format(
+            title, grid['x'], grid['y'], grid['w'], grid['h'], grid.get('reach'), len(grid['headers']), len(grid['columns']),
+            '있음' if grid.get('scrolled') else '없음', len(hidden)))
+        for start in range(0, len(grid['columns']), 7):
+            emit('record', '  ' + ' '.join('{}{}@{}+{}'.format('※' if any(column is item for item in hidden) else '',
+                                                             column['name'], column['x'], column['w'])
+                                         for column in grid['columns'][start:start + 7]))
+
+    def ready(grid, wanted=None):
+        """끌 수 있는 칸: 그 자리에 실제로 보이고, 온전히 들어 있고, 가운데가 이 표의 창인 것. wanted: 고를 조건(칸 → 참/거짓)"""
+        return [column for column in chain(grid) if column['name'] and whole(grid, column)
+                and (wanted is None or wanted(column)) and grabbable(pointer, grid, column)]
+
     def home():
-        """표가 가로로 밀려 있으면, 칸 제목을 끈 채 왼쪽 끝에 두어 처음 자리로 되돌립니다(Esc로 끌기는 취소)."""
+        """표가 가로로 밀려 있으면, 칸 제목을 끈 채 왼쪽 끝에 두어 처음 자리로 되돌려 봅니다(Esc로 끌기는 취소)."""
         for _ in range(3):
             grid = box['grid']
             if tidy(grid):
                 return True
-            inside = [column for column in chain(grid) if whole(grid, column) and column['x'] > grid['x'] + 40]
-            if not inside:
+            inside = [column for column in chain(grid) if column['name'] and whole(grid, column) and column['x'] > grid['x'] + 40]
+            if not inside or not grabbable(pointer, grid, inside[len(inside) // 2]):
                 return False
-            source = inside[len(inside) // 2]
-            start = (source['x'] + source['w'] // 2, source['y'] + source['h'] // 2)
-            if pointer.window_at(start) != grid['handle']:
-                return False
+            start = _center(inside[len(inside) // 2])
             pointer.hold(start)
             try:
                 pointer.sleep(0.08)
@@ -1011,7 +1147,9 @@ def arrange_work(nav, handle, standard):
             finally:
                 pointer.drop()
             pointer.sleep(0.4)
-            look('가로 스크롤 되돌린 뒤')
+            before = [(column['name'], column['x']) for column in grid['columns']]
+            if [(column['name'], column['x']) for column in look('가로 스크롤 되돌린 뒤')['columns']] == before:
+                break                                    # 아무것도 움직이지 않았으면 되풀이하지 않습니다.
         return tidy(box['grid'])
 
     def reorder():
@@ -1019,6 +1157,9 @@ def arrange_work(nav, handle, standard):
         for _ in range(60):
             nav.check()
             grid = box['grid']
+            if not tidy(grid):               # 도중에 표가 가로로 밀렸으면 순서를 판단할 수 없으니 더 옮기지 않습니다.
+                result['scrolled'] = True
+                return moves, None
             visible = chain(grid)
             names = [column['name'] for column in visible]
             present = set(header[0] for header in grid['headers'])
@@ -1027,53 +1168,108 @@ def arrange_work(nav, handle, standard):
             if index is None:
                 return moves, None
             name = wanted[index]
-            source = next((column for column in visible if column['name'] == name and whole(grid, column)), None)
-            if source is None:
-                return moves, name
+            source = next(iter(ready(grid, lambda column: column['name'] == name)), None)
             target = visible[index]
-            carry(pointer, grid, source, (target['x'] + max(3, target['w'] // 4), target['y'] + target['h'] // 2))
+            end = (target['x'] + max(3, target['w'] // 4), target['y'] + target['h'] // 2)
+            if source is None or end[0] >= grid['reach'] or not carry(pointer, grid, source, end):
+                return moves, name
             moves += 1
             now = [column['name'] for column in chain(look('칸 옮긴 뒤'))]
-            emit('note', '칸 옮김 · {} → {}번째 · {}'.format(name, index + 1, '됨' if index < len(now) and now[index] == name else '안 됨'))
+            emit('record', '칸 옮김 · {} → {}번째({} 앞) · {}'.format(name, index + 1, target['name'],
+                                                            '됨' if index < len(now) and now[index] == name else '안 됨'))
             if index >= len(now) or now[index] != name:
                 return moves, name
         return moves, None
 
-    look('작업지시관리 표')
-    if not home():
-        result['scrolled'] = True
-        return result
+    def gone(tried):
+        """버린 칸들이 정말 없어졌는지 화면을 다시 읽어 확인합니다. 반환: 그대로 남은 칸 이름들."""
+        left = set(header[0] for header in look('칸 버린 뒤')['headers'])
+        for name, seen in tried:
+            emit('record', '칸 버리기 · {} · {} · {}'.format(name, '그대로 있음' if name in left else '없어짐', seen or '놓을 자리 없음'))
+        result['removed'].extend(name for name, _ in tried if name not in left)
+        return [name for name, _ in tried if name in left]
 
-    emit('log', '작업지시관리 표: 기준에 없는 칸 없애는 중…')
-    for _ in range(40):
+    def prove(name):
+        """한 칸을 버려 보며 어떤 방법이 되는지 확인합니다. 반환: 된 방법, 모두 안 되면 None."""
+        ended = False
+        for way in DISCARD_WAYS:
+            grid = box['grid']
+            column = next(iter(ready(grid, lambda column: column['name'] == name)), None)
+            if column is None or (way == '위로 끝까지' and ended):      # 이미 끝까지 올려 봤으면 같은 동작을 되풀이하지 않습니다.
+                continue
+            nav.check()
+            seen, ended = discard(pointer, grid, column, way)
+            if not gone([(name, seen)]):
+                return way
+        return None
+
+    record(look('작업지시관리 표'), '작업지시관리 표')
+    result['scrolled'] = not home()
+    if result['scrolled']:
+        grid = box['grid']
+        record(grid, '가로로 밀린 표를 처음 자리로 되돌리지 못함')
+        hidden = sorted(covered(grid), key=lambda column: column['x'])
+        result['detail'] = (' · '.join('{}@{}+{}'.format(column['name'], column['x'], column['w']) for column in hidden[:4])
+                            or '표 왼쪽 밖에 걸친 칸 제목 있음')
+
+    # 밀린 흔적이 없을 때만 여러 칸을 이어서 끕니다. 밀린 표는 칸을 버리거나 너비를 바꾸면 표가 통째로 움직일 수 있어,
+    # 한 번 끌 때마다 화면을 다시 읽고 순서는 건드리지 않습니다.
+    calm = not result['scrolled']
+
+    emit('log', '작업지시관리 표: 필요 없는 칸 버리는 중…')
+    proven = None        # 칸이 없어지는 것을 확인한 방법
+    failures = 0
+    for _ in range(14):
         nav.check()
         grid = box['grid']
-        extra = next((column for column in chain(grid) if column['name'] and column['name'] not in keep
-                      and column['name'] not in result['stuck'] and whole(grid, column)), None)
-        if extra is None:
+        extras = ready(grid, lambda column: column['name'] not in keep and column['name'] not in result['stuck'])
+        if not extras:
             break
-        # 칸 제목을 표 안쪽(아래)으로 끌어다 놓으면 그 칸이 없어집니다.
-        carry(pointer, grid, extra, (extra['x'] + extra['w'] // 2, extra['y'] + extra['h'] // 2 + 140))
-        gone = all(header[0] != extra['name'] for header in look('칸 없앤 뒤')['headers'])
-        result['removed' if gone else 'stuck'].append(extra['name'])
-        emit('note', '칸 없애기 · {} · {}'.format(extra['name'], '없어짐' if gone else '그대로 있음'))
+        if failures >= 2:                # 두 칸이 어느 방법으로도 없어지지 않으면 더 끌지 않습니다.
+            result['stuck'].extend(column['name'] for column in extras)
+            break
+        if proven is None:
+            # 처음에는 한 칸만 버려 보고 화면을 다시 읽어 확인합니다.
+            proven = prove(extras[-1]['name'])
+            if proven is None:
+                failures += 1
+                result['stuck'].append(extras[-1]['name'])
+            continue
+        # 확인된 방법으로 오른쪽 칸부터 버립니다(버린 칸의 왼쪽 칸들은 자리가 그대로라 그때마다 다시 읽지 않아도 됩니다).
+        tried = []
+        for column in reversed(extras if calm and tidy(grid) else extras[-1:]):
+            nav.check()
+            tried.append((column['name'], discard(pointer, grid, column, proven)[0]))
+        result['stuck'].extend(gone(tried))
 
     emit('log', '작업지시관리 표: 칸 너비·순서 맞추는 중…')
-    for _ in range(3):
+    skipped = set()
+    for _ in range(5 if calm else 40):
         nav.check()
         grid = box['grid']
-        done, _ = align_columns(dict(grid, columns=chain(grid)), widths, pointer, emit, nav.check)
+        calm = calm and tidy(grid)
+        columns = chain(grid)
+        if not calm:
+            columns = [column for column in columns if column['name'] in widths and column['name'] not in skipped
+                       and whole(grid, column) and abs(int(widths[column['name']]) - column['w']) > TOLERANCE][:1]
+            if not columns:
+                break
+        done, missed = align_columns(dict(grid, columns=columns, w=grid['reach'] - grid['x']), widths, pointer, emit, nav.check)
+        skipped.update(missed)
         if done:
             result['resized'] += done
-            look('칸 너비 확인')
-        moved, blocked = reorder()
+            grid = look('칸 너비 확인')
+        moved, blocked = reorder() if calm and tidy(grid) else (0, None)
         result['moved'] += moved
         result['blocked'] = blocked
-        if not done and not moved:
+        if calm and not done and not moved:
             break
+    result['scrolled'] = result['scrolled'] or not tidy(box['grid'])
     grid = box['grid']
     result['remaining'] = [(column['name'], column['w'], int(widths[column['name']])) for column in chain(grid)
                            if column['name'] in widths and whole(grid, column) and abs(int(widths[column['name']]) - column['w']) > TOLERANCE]
+    if result['stuck'] or result['blocked'] or result['remaining']:
+        record(grid, '작업지시관리 표(끝난 뒤)')
     return result
 
 
@@ -1193,9 +1389,12 @@ def brief_all(result, elapsed):
     work, daily = result['work'], result['daily']
     lines = []
     if work['scrolled']:
-        lines.append('작업지시관리 표가 가로로 밀려 있어 정리하지 못했습니다. 표 아래 가로 스크롤을 왼쪽 끝으로 옮긴 뒤 다시 눌러 주세요.')
+        lines.append('작업지시관리 표가 가로로 밀려 있어 칸 순서는 맞추지 못했습니다(보이는 칸만 정리). '
+                     '표 아래 가로 스크롤을 왼쪽 끝으로 옮긴 뒤 다시 눌러 주세요.')
+        if work.get('detail'):
+            lines.append('  (겹쳐 읽힌 칸: {})'.format(work['detail']))
     if work['stuck']:
-        lines.append('작업지시관리: 없애지 못한 칸 — ' + ', '.join(work['stuck']))
+        lines.append('작업지시관리: 없애지 못한 칸 — {} (칸 제목을 위로 끌어도 그대로 있음)'.format(', '.join(work['stuck'])))
     if work['blocked']:
         lines.append('작업지시관리: "{}" 칸을 제자리로 옮기지 못했습니다(화면에 다 보이지 않거나 옮겨지지 않음).'.format(work['blocked']))
     if work['remaining']:

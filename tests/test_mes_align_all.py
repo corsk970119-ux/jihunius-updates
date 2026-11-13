@@ -24,12 +24,18 @@ ORDER = [name for name, _ in layout.DEFAULT_WORK_ORDER]
 ARRANGED = ORDER + ['직경', '각도', 'LOT-NO']          # 기준 순서 뒤에, 기준에 순서가 없는 칸들이 원래 순서로
 
 
-def fresh(**changes):
-    """MES를 막 켠 상태: 메뉴 칸 200, 작업지시관리 문서의 '작업지시관리' 탭, 표는 기본 순서(없앨 칸 6개 포함)."""
+def fresh(plain=False, **changes):
+    """MES를 막 켠 상태: 메뉴 칸 200, 작업지시관리 문서의 '작업지시관리' 탭, 표는 기본 순서(없앨 칸 6개 포함).
+
+    작업지시관리 표는 실제 MES처럼 행 번호 칸 51픽셀, 왼쪽 고정 칸 6개(뒤에 2픽셀 구분선), 세로 스크롤 막대가 있습니다.
+    plain=True: 고정 칸·행 번호 칸·스크롤 막대가 없는 단순한 표.
+    """
     mes = fake.six(menu=200)
     mes.inner = '작업지시관리'
     mes.allow_clicks = True
     mes.movable = {mes.work}                             # 칸 제목을 끌어도 되는 표는 작업지시관리 표뿐
+    if not plain:
+        mes.work.frozen, mes.work.indent, mes.work.scrollbar = set(fake.WORK_FROZEN), fake.WORK_INDENT, 17
     for name, value in changes.items():
         setattr(mes, name, value)
     mes.layout()
@@ -40,16 +46,17 @@ def run(mes, standard=None, user=None, stop=None, call=None):
     user = user or fake.FakeUser32(mes)
     api = SimpleNamespace(u=user, target={'handle': 1, 'pid': 1, 'title': 'ROOT MES'}, Input=fake.Input)
     pointer = layout.Pointer(api, sleep=user.sleep, clock=user.clock)
-    notes, reads = [], []
+    notes, reads, where = [], [], []
 
     def capture(target, text, halt):
         reads.append((text, target.get('handle')))
+        where.append((text, user.cursor))                 # 화면을 읽는 순간의 포인터 자리
         return mes.report(target.get('handle'))
 
     action = call or layout.align_all
     arguments = (api.target, pointer, capture, stop or threading.Event(), lambda kind, value: notes.append((kind, value)))
     result = action(*arguments) if call is layout.capture_standard else action(*arguments, standard or layout.default_standard())
-    return SimpleNamespace(result=result, notes=notes, reads=reads, pointer=pointer, user=user)
+    return SimpleNamespace(result=result, notes=notes, reads=reads, where=where, pointer=pointer, user=user)
 
 
 class Checks:
@@ -72,7 +79,7 @@ class WholeFlowTests(Checks, unittest.TestCase):
         mes = fresh()
         outcome = run(mes)
         self.assertEqual(mes.bad, [])
-        self.assertEqual(mes.hidden, list(fake.WORK_EXTRA))                   # 기준에 없는 6칸을 없앰
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))         # 기준에 없는 6칸을 없앰
         self.assert_work(mes)
         self.assert_daily(mes)
         self.assertEqual(mes.menu, 25)                                        # 파란 메뉴 칸은 끝까지
@@ -82,7 +89,7 @@ class WholeFlowTests(Checks, unittest.TestCase):
         result = outcome.result
         self.assertEqual(result['opened'], ['설비별공구관리'])
         self.assertEqual((result['menu']['before'], result['menu']['after']), (200, 25))
-        self.assertEqual(result['work']['removed'], list(fake.WORK_EXTRA))
+        self.assertEqual(sorted(result['work']['removed']), sorted(fake.WORK_EXTRA))
         self.assertEqual(result['work']['moved'], 3)                          # 특이사항1·2·3을 설비명 뒤로
         self.assertEqual((result['work']['stuck'], result['work']['blocked'], result['work']['remaining']), ([], None, []))
         title, lines = layout.brief_all(result, 31.24)
@@ -143,17 +150,31 @@ class WholeFlowTests(Checks, unittest.TestCase):
 
 class WorkTableTests(Checks, unittest.TestCase):
     def test_column_that_will_not_go_away_is_reported_and_the_rest_is_still_arranged(self):
-        mes = fresh(removal_works=False)
+        mes = fresh(plain=True, removal_works=False)
         outcome = run(mes)
         work = outcome.result['work']
         self.assertEqual(work['removed'], [])
         self.assertEqual(sorted(work['stuck']), sorted(fake.WORK_EXTRA))
         self.assertEqual(mes.hidden, [])
+        self.assertEqual([way for _, way in mes.drops], ['위', '아래', '위', '아래'])   # 두 칸만 해 보고 더 끌지 않음
         names = [name for name, _ in mes.work.columns]
         self.assertEqual(names[:7], ORDER[:7])                                # 순서는 기준대로, 못 없앤 칸은 뒤로 밀림
         title, lines = layout.brief_all(outcome.result, 20.0)
         self.assertIn('일부만', title)
         self.assertTrue(any(line.startswith('작업지시관리: 없애지 못한 칸 — ') for line in lines), lines)
+        self.assertEqual(mes.bad, [])
+        self.assertTrue(any(value.startswith('작업지시관리 표(끝난 뒤)') for kind, value in outcome.notes if kind == 'record'))
+
+    def test_stuck_frozen_columns_block_the_order_and_that_is_reported(self):
+        mes = fresh(removal_works=False)                                      # 실제처럼 고정 칸이 있는 표에서 버리기가 안 될 때
+        outcome = run(mes)
+        work = outcome.result['work']
+        self.assertEqual(sorted(work['stuck']), sorted(fake.WORK_EXTRA))
+        names = [name for name, _ in mes.work.columns]
+        self.assertEqual(names[:4], ORDER[:4])                                # 고정 칸끼리는 기준 순서로
+        self.assertEqual(work['blocked'], '작업자')                           # 고정 칸 사이로는 옮겨지지 않음
+        lines = layout.brief_all(outcome.result, 20.0)[1]
+        self.assertTrue(any('"작업자" 칸을 제자리로 옮기지 못했습니다' in line for line in lines), lines)
         self.assertEqual(mes.bad, [])
 
     def test_sideways_scrolled_table_is_brought_home_first(self):
@@ -165,18 +186,32 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assert_work(mes)
         self.assertEqual(mes.bad, [])
 
-    def test_table_that_stays_scrolled_is_not_touched_and_the_reason_is_given(self):
+    def test_table_that_stays_scrolled_keeps_its_order_and_the_reason_is_given(self):
         mes = fresh(autoscroll_left=False)
-        mes.work.scroll = 600
-        before = [list(item) for item in mes.work.columns]
+        mes.work.scroll = 480                                                 # 거래처코드부터 오른쪽이 보이는 만큼 밀림
+        mes.work.columns = [[name, {'지역': 70, 'Type': 75}.get(name, width)] for name, width in mes.work.columns]
+        before = [name for name, _ in mes.work.columns]
         outcome = run(mes)
-        self.assertTrue(outcome.result['work']['scrolled'])
-        self.assertEqual(mes.work.columns, before)
-        self.assertEqual(mes.hidden, [])
+        work = outcome.result['work']
+        self.assertTrue(work['scrolled'])
+        self.assertEqual(work['moved'], 0)                                    # 순서는 판단할 수 없어 옮기지 않음
+        self.assertEqual([name for name in before if name not in mes.hidden], [name for name, _ in mes.work.columns])
+        self.assertEqual(mes.bad, [])                                         # 가려진 칸 자리(고정 칸 밑)는 누르지 않음
+        self.assertTrue(set(mes.hidden) <= set(fake.WORK_EXTRA))              # 보이는 칸 가운데 필요 없는 것만 버림
+        self.assertEqual(mes.hidden, ['거래처코드'])
+        checks = [text for text, root in outcome.reads if text == '칸 버린 뒤']
+        self.assertEqual(len(checks), len(mes.hidden))                        # 밀린 표는 한 칸 버릴 때마다 다시 읽어 확인
+        shown = dict(mes.work.columns)
+        self.assertEqual((shown['지역'], shown['Type']), (50, 60))            # 보이는 칸의 너비는 기준대로
+        self.assertEqual(len([text for text, root in outcome.reads if text == '칸 너비 확인']), 2)   # 너비도 한 칸씩 확인
+        self.assertEqual(shown['설비명'], 150)                                # 고정 칸 밑에 가려진 칸은 그대로
+        self.assertEqual(work['remaining'], [])
+        self.assertGreater(mes.work.scroll, 0)                                # 가로로 밀린 것은 사용자가 되돌림
         self.assert_daily(mes)                                                # 생산일보는 그대로 진행
         title, lines = layout.brief_all(outcome.result, 20.0)
         self.assertIn('일부만', title)
         self.assertTrue(any('가로 스크롤을 왼쪽 끝으로' in line for line in lines), lines)
+        self.assertTrue(any('겹쳐 읽힌 칸' in line for line in lines), lines)   # 화면 사진만 봐도 원인을 알 수 있게
 
     def test_widths_land_exactly_because_the_edge_goes_where_it_is_dropped(self):
         mes = fresh()
@@ -184,19 +219,131 @@ class WorkTableTests(Checks, unittest.TestCase):
         widths = dict(mes.work.columns)
         self.assertEqual({name: widths[name] for name, _ in layout.DEFAULT_WORK_ORDER}, dict(layout.DEFAULT_WORK_ORDER))
 
-    def test_visible_run_ignores_stale_positions_left_behind_by_scrolling(self):
+    def test_columns_hidden_under_the_frozen_ones_are_not_trusted(self):
         mes = fresh()
         mes.work.scroll = 600
         mes.layout()
-        report = mes.report(1220)
-        grid = layout.grids(report, required=())[0]
-        visible = layout.chain(grid)
-        self.assertLess(len(visible), len(grid['columns']))                   # 예전 위치가 남은 칸은 빼고
+        grid = layout.grids(mes.report(1220), required=())[0]
         self.assertFalse(layout.tidy(grid))
-        for one, two in zip(visible, visible[1:]):
-            self.assertLessEqual(abs(one['x'] + one['w'] - two['x']), 1)       # 빈틈없이 이어진 줄만
+        visible = layout.chain(grid)
+        self.assertLess(len(visible), len(grid['columns']))                   # 고정 칸과 겹쳐 읽힌 칸은 빼고
+        for column in visible:                                                # 남은 칸은 그 자리에 실제로 보이는 칸
+            hit = mes.header_at(mes.work, column['x'] + column['w'] // 2, column['y'] + 5)
+            self.assertEqual(mes.work.columns[hit[0]][0], column['name'])
         mes.work.scroll = 0
         self.assertTrue(layout.tidy(layout.grids(mes.report(1220), required=())[0]))
+
+    def test_frozen_columns_and_their_divider_do_not_look_like_a_scrolled_table(self):
+        # 2026.11.13.4에서 실제 MES의 작업지시관리 표를 통째로 건너뛴 원인: 고정 칸 뒤 구분선(틈)을 '밀린 표'로 봄.
+        mes = fresh()
+        grid = layout.grids(mes.report(1220), required=())[0]
+        names = [column['name'] for column in grid['columns']]
+        gap = grid['columns'][names.index('T31수정')]['x'] - (grid['columns'][names.index('프로젝트No')]['x'] + 100)
+        self.assertEqual(gap, fake.FROZEN_GAP)
+        self.assertEqual(grid['columns'][0]['x'] - grid['x'], fake.WORK_INDENT)
+        self.assertTrue(layout.tidy(grid))
+        self.assertEqual([column['name'] for column in layout.chain(grid)], names)
+
+    def test_unneeded_columns_are_thrown_away_upward_like_the_user_does(self):
+        mes = fresh()
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual(mes.drops, [(name, '위') for name in mes.hidden])     # 모두 위로 끌어다 버림
+        self.assertEqual(outcome.result['work']['removed'], mes.hidden)
+        reads = [text for text, root in outcome.reads if text == '칸 버린 뒤']
+        self.assertEqual(len(reads), 2, reads)                                # 한 칸 확인 + 나머지 묶어서 확인
+        self.assertTrue(any('칸 버리기' in value and '위로' in value for kind, value in outcome.notes if kind == 'record'))
+
+    def test_dropping_inside_the_table_is_tried_when_upward_does_nothing(self):
+        mes = fresh(removal_works=False, removal_down_works=True)
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual(mes.drops[0][1], '위')                               # 먼저 위로 한 번
+        self.assertEqual({way for _, way in mes.drops[1:]}, {'아래'})
+        self.assert_work(mes)
+        self.assertEqual(outcome.result['work']['stuck'], [])
+        self.assertEqual(mes.bad, [])
+
+    def test_header_is_carried_further_up_until_the_pointer_shows_it_will_be_thrown_away(self):
+        mes = fresh(removal_distance=60)                                      # 꽤 멀리 올려야 버려지는 MES
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual({way for _, way in mes.drops}, {'위'})
+        self.assertEqual(len(mes.drops), 6)                                   # 헛손질 없이 한 번씩
+        first = next(value for kind, value in outcome.notes if kind == 'record' and value.startswith('칸 버리기'))
+        self.assertIn('위로 80픽셀', first)
+        self.assertIn(str(fake.REMOVING), first)                              # 바뀐 포인터 모양도 기록
+
+    def test_header_is_dropped_at_the_top_step_when_the_pointer_never_changes(self):
+        mes = fresh(removal_cursor=False)
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual(len(mes.drops), 6)
+        self.assertTrue(any('위로 100픽셀' in value for kind, value in outcome.notes if kind == 'record'))
+        self.assert_work(mes)
+
+    def test_no_room_above_the_table_means_dropping_inside_it(self):
+        mes = fresh(removal_down_works=True)
+        steps = layout.DISCARD_STEPS
+        layout.DISCARD_STEPS = (400, 500)                                     # 위로 올릴 자리가 MES 창 밖
+        try:
+            run(mes)
+        finally:
+            layout.DISCARD_STEPS = steps
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual({way for _, way in mes.drops}, {'아래'})
+        self.assertEqual(mes.bad, [])
+
+    def test_pointer_is_parked_on_the_corner_while_the_table_is_read(self):
+        # 칸 제목 위에 포인터를 둔 채 읽으면 MES가 설명 풍선을 띄워 칸 제목을 가릴 수 있다.
+        mes = fresh()
+        outcome = run(mes)
+        mes.inner = '작업지시관리'                                             # 끝나면 생산일보관리 탭이 떠 있으므로 표를 다시 띄움
+        mes.layout()
+        left, top = mes.rects[mes.work.grid][0], mes.rects[mes.work.grid][1]
+        spots = [point for text, point in outcome.where if text in ('칸 버린 뒤', '칸 옮긴 뒤', '칸 너비 확인')]
+        self.assertGreaterEqual(len(spots), 6)
+        for x, y in spots:
+            self.assertTrue(left <= x < left + fake.WORK_INDENT and top <= y < top + fake.HEADER, (x, y))
+
+    def test_scrollbar_over_the_header_row_is_not_part_of_the_table(self):
+        mes = fresh()
+        outcome = run(mes)
+        mes.inner = '작업지시관리'
+        mes.layout()
+        left, _, right, _ = mes.rects[mes.work.grid]
+        grid = layout.grids(mes.report(1220), required=())[0]
+        limit = layout.reach(outcome.pointer, grid)
+        self.assertTrue(right - 21 <= limit <= right - 17, (limit, right))
+        last = [column for column in layout.chain(grid)][-1]                  # 오른쪽 끝에서 잘린 칸
+        self.assertFalse(layout.whole(dict(grid, reach=limit), last))
+        self.assertEqual(mes.bad, [])                                         # 스크롤 막대나 그 밑은 누르지 않음
+
+    def test_columns_off_the_right_edge_are_left_alone(self):
+        mes = fresh()
+        run(mes)
+        tail = [name for name, _ in mes.work.columns if name not in ORDER]
+        self.assertEqual(tail, ['직경', '각도', 'LOT-NO'])                     # 화면 밖 칸은 순서도 너비도 그대로
+        self.assertEqual([dict(mes.work.columns)[name] for name in tail], [dict(fake.WORK_COLUMNS)[name] for name in tail])
+        self.assertEqual(mes.work.scroll, 0)                                  # 가로로 밀지 않음
+
+    def test_plain_table_without_frozen_columns_is_arranged_too(self):
+        mes = fresh(plain=True)
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assert_work(mes)
+        self.assertEqual(mes.bad, [])
+        self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'))
+
+    def test_first_look_at_the_table_is_written_to_the_record(self):
+        outcome = run(fresh())
+        notes = [value for kind, value in outcome.notes if kind == 'record']
+        first = next(value for value in notes if value.startswith('작업지시관리 표 ('))
+        self.assertIn('칸 제목 34개', first)
+        self.assertIn('겹침 0개', first)
+        self.assertTrue(any('선택@' in value and 'PART-NO@' in value for value in notes))
+        self.assertTrue(all(len(value) <= 160 for value in notes if value.startswith('  ')), notes)   # 기록 한 줄 길이 한도 안
+        self.assertFalse(any('비밀환자' in value or '홍길동' in value for value in notes))           # 행 내용은 적지 않음
 
 
 class StandardTests(Checks, unittest.TestCase):
@@ -241,7 +388,7 @@ class StandardTests(Checks, unittest.TestCase):
         names = [name for name, _ in mes.work.columns]
         self.assertEqual(names[:3], ['지시일', '선택', '시간'])
         self.assertEqual(dict(mes.work.columns)['거래처명'], 147)
-        self.assertEqual(mes.hidden, list(fake.WORK_EXTRA))
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assert_daily(mes, loaded['daily'])
         self.assertEqual(mes.bad, [])
 
@@ -324,6 +471,26 @@ class SafetyTests(unittest.TestCase):
         self.assertIn('가려져', str(caught.exception))
         self.assertEqual(mes.work.columns, before)
         self.assertEqual(mes.bad, [])
+
+    def test_small_window_that_goes_away_does_not_stop_the_run(self):
+        # 설명 풍선처럼 칸 제목 위에 잠깐 떴다 사라지는 창: 기다렸다가 계속합니다(계속 가리고 있으면 위 시험처럼 중단).
+        mes = fresh(documents=['작업지시관리', '설비별공구관리'], menu=25)
+        column = next(item for item in layout.grids(mes.report(1220), required=())[0]['columns'] if item['name'] == '거래처코드')
+        center = (column['x'] + column['w'] // 2, column['y'] + column['h'] // 2)
+        state = {'left': 2}
+        original = mes.window_at
+
+        def window_at(x, y):
+            if (x, y) == center and state['left'] > 0:
+                state['left'] -= 1
+                return 9998
+            return original(x, y)
+        mes.window_at = window_at
+        outcome = run(mes)
+        self.assertEqual(state['left'], 0)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual(mes.bad, [])
+        self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'))
 
 
 if __name__ == '__main__':

@@ -127,7 +127,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertNotIn('✗', outcome.text, outcome.text)
 
     def test_optional_column_removal_drops_the_header_into_the_table(self):
-        mes = screen()
+        mes = screen(removal_down_works=True)              # 점검 프로그램의 선택 시험은 표 안쪽(아래)에 놓아 봅니다.
         outcome = run(mes, self.scope, remove='T31수정', tool=False)
         self.assertEqual(mes.bad, [], outcome.text)
         self.assertEqual(mes.hidden, ['T31수정'])

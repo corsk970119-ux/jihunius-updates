@@ -9,11 +9,15 @@
         같은 자리를 빠르게 두 번 누르면 더블클릭(자동 맞춤)이 됩니다.
   2판 점검으로 확인한 것: 칸 경계를 끌면 '놓은 자리'가 칸의 오른쪽 끝이 된다. 화면 오른쪽 밖 칸 제목은 위치가 없다(0).
         판독에 나오는 칸 순서는 화면 순서가 아니라 원래(기본) 순서다. 표가 가로로 밀리면 밀려 나간 칸 일부에 예전 위치가 남는다.
+  작업지시관리 표(2판 결과를 다시 따져 본 것, 2026-11-13): 표 왼쪽 끝에서 51픽셀(행 번호 칸) 뒤에 첫 칸 제목이 오고,
+        맨 앞 몇 칸은 왼쪽에 고정돼 있어 표를 가로로 밀어도 제자리에 남는다(고정 칸 뒤에는 2픽셀 구분선).
+        밀린 칸은 고정 칸 밑으로 들어가는데, 표 범위에 걸쳐 있으면 가려져 있어도 판독에는 위치가 나온다.
+  사용자 확인(2026-11-13): 필요 없는 칸은 칸 제목을 위로 끌어다 버리면 없어진다.
 """
 import ctypes
 from collections import OrderedDict
 
-ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001
+ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING, REMOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001, 72001
 COLUMNS = (('No.', 37), ('선택', 38), ('P/No.', 47), ('거래처명', 120), ('Fixture', 58), ('Size', 54),
            ('환자명', 46), ('치식', 37), ('세척', 40), ('비고', 55), ('영점', 50))
 # MES를 막 켰을 때의 작업지시관리 표(화면 사진으로 본 순서). 사용자는 여기서 6칸을 없애고 특이사항 3칸을 설비명 뒤로 옮긴다.
@@ -23,6 +27,9 @@ WORK_COLUMNS = (('선택', 35), ('PART-NO', 110), ('품명', 130), ('지시일',
                 ('치식', 40), ('stl', 40), ('납기일', 90), ('배송업체', 80), ('출하일', 90), ('진행상태', 80), ('특이사항1', 100),
                 ('특이사항2', 100), ('특이사항3', 100), ('세척순서', 60), ('길이', 60), ('직경', 60), ('각도', 60), ('LOT-NO', 100))
 WORK_EXTRA = ('PART-NO', '품명', 'T31수정', '작업자코드', '좌석번호', '거래처코드')     # 사용자가 없애는 칸
+WORK_FROZEN = ('선택', 'PART-NO', '품명', '지시일', '시간', '프로젝트No')              # 왼쪽에 고정된 칸(실제 MES처럼)
+WORK_INDENT = 51             # 작업지시관리 표의 행 번호 칸 너비(표 왼쪽 끝 ~ 첫 칸 제목)
+FROZEN_GAP = 2               # 고정 칸과 나머지 칸 사이 구분선
 TOOL_COLUMNS = (('선택', 35), ('설비코드', 100), ('설비명', 150), ('공구대', 80), ('공구코드', 110), ('공구명', 130))
 WORK_TABS = ('작업지시관리', '작업지시조회', '생산일보관리')
 TOOL_TABS = ('설비별공구관리', '공구교체이력관리')
@@ -39,6 +46,9 @@ class Leaf:
         self.fixed = set(fixed)      # 너비를 바꿀 수 없는 칸
         self.scroll = 0              # 가로로 밀린 픽셀
         self.reading = [name for name, _ in columns]     # 판독에 나오는 순서(원래 순서; 화면에서 옮겨도 그대로)
+        self.frozen = set()          # 왼쪽에 고정된 칸 이름(가로로 밀어도 제자리)
+        self.indent = 0              # 표 왼쪽 끝과 첫 칸 제목 사이(행 번호 칸)
+        self.scrollbar = 0           # 표 오른쪽 끝의 세로 스크롤 막대 너비(칸 제목 줄을 덮는 별도 창)
 
 
 class Split:
@@ -88,7 +98,11 @@ class FakeMes:
         self.movable = set()         # 칸 제목을 끌어도 되는 표(전체 정렬은 작업지시관리 표만 건드려야 함)
         self.allow_clicks = False    # 왼쪽 메뉴·탭 누르기
         self.escape_cancels = True
-        self.removal_works = True    # 칸 제목을 표 안쪽에 놓으면 칸이 없어짐
+        self.removal_works = True    # 칸 제목을 표 위쪽 밖으로 끌어다 놓으면 칸이 없어짐(사용자가 쓰는 방법)
+        self.removal_down_works = False   # 칸 제목을 표 안쪽(아래)에 놓아도 칸이 없어지는지
+        self.removal_distance = 25   # 칸 제목 줄에서 이만큼 벗어나야 '버리기'가 됨
+        self.removal_cursor = True   # 버려지는 자리에서 포인터 모양이 바뀌는지
+        self.drops = []              # 칸 제목을 버리려고 놓은 자리: (칸 이름, '위'/'아래')
         self.autoscroll_left = True  # 칸 제목을 끈 채 왼쪽 끝에 두면 표가 처음 자리로 돌아감
         self.hwheel_works = True
         self.shift_wheel_works = True
@@ -141,6 +155,9 @@ class FakeMes:
             self.parent[node.panel] = parent
             self.rects[node.grid] = (left + 3, top + 87, right - 3, bottom - 3)
             self.parent[node.grid] = node.panel
+            if node.scrollbar:
+                self.rects[node.grid + 5000] = (right - 3 - node.scrollbar, top + 87, right - 3, bottom - 3)
+                self.parent[node.grid + 5000] = node.grid
             self.leaves.append(node)
             return
         self.rects[node.handle] = rect
@@ -236,37 +253,64 @@ class FakeMes:
         self.bad.append('아무것도 없는 곳을 누름: 창 {} ({}, {})'.format(hit, x, y))
 
     # ── 표 ──
-    def edge_at(self, leaf, x, y):
-        left, top, right, _ = self.rects[leaf.grid]
-        if not (top <= y < top + HEADER and left <= x < right):
-            return None
-        position = left - leaf.scroll
-        best = None
+    def spread(self, leaf):
+        """칸들의 화면 배치(왼쪽→오른쪽): [(목록 번호, 이름, x, 너비, 보이는 왼쪽, 보이는 오른쪽)].
+
+        x는 판독에 나오는 위치입니다. 고정 칸은 늘 제자리이고, 나머지 칸은 밀린 만큼 왼쪽으로 가서 고정 칸 밑으로 들어갑니다.
+        보이는 범위가 없으면(가려졌거나 화면 밖) 보이는 왼쪽 == 보이는 오른쪽입니다.
+        """
+        left, _, right, _ = self.rects[leaf.grid]
+        right -= leaf.scrollbar
+        found = []
+        x = left + leaf.indent
         for index, (name, width) in enumerate(leaf.columns):
-            position += width
-            if name not in leaf.fixed and position - 4 <= x <= position + 3:
-                if best is None or abs(x - position) < best[0]:
-                    best = (abs(x - position), index)
+            if name in leaf.frozen:
+                found.append((index, name, x, width, min(x, right), min(x + width, right)))
+                x += width
+        start = x + (FROZEN_GAP if x > left + leaf.indent else 0)      # 밀리는 칸들이 보이기 시작하는 곳
+        x = start - leaf.scroll
+        for index, (name, width) in enumerate(leaf.columns):
+            if name not in leaf.frozen:
+                shown = (max(x, start), min(x + width, right))
+                found.append((index, name, x, width, shown[0], max(shown)))
+                x += width
+        return found
+
+    def viewport(self, leaf):
+        """밀리는 칸들이 보이는 가로 범위 너비."""
+        left, _, right, _ = self.rects[leaf.grid]
+        fixed = sum(width for name, width in leaf.columns if name in leaf.frozen)
+        return right - leaf.scrollbar - (left + leaf.indent + fixed + (FROZEN_GAP if fixed else 0))
+
+    def in_header(self, leaf, x, y):
+        left, top, right, _ = self.rects[leaf.grid]
+        return top <= y < top + HEADER and left <= x < right - leaf.scrollbar
+
+    def edge_at(self, leaf, x, y):
+        if not self.in_header(leaf, x, y):
+            return None
+        best = None
+        for index, name, position, width, shown_left, shown_right in self.spread(leaf):
+            edge = position + width
+            if name not in leaf.fixed and shown_left < shown_right == edge and edge - 4 <= x <= edge + 3:
+                if best is None or abs(x - edge) < best[0]:
+                    best = (abs(x - edge), index)
         return None if best is None else best[1]
 
     def header_at(self, leaf, x, y):
         """(칸 번호, 왼쪽 절반인지) 또는 None"""
-        left, top, right, _ = self.rects[leaf.grid]
-        if not (top <= y < top + HEADER and left <= x < right):
+        if not self.in_header(leaf, x, y):
             return None
-        position = left - leaf.scroll
-        for index, (name, width) in enumerate(leaf.columns):
-            if position <= x < position + width:
+        for index, name, position, width, shown_left, shown_right in self.spread(leaf):
+            if shown_left <= x < shown_right:
                 return index, x < position + width / 2.0
-            position += width
         return None
 
     def near_right_edge(self, leaf, x):
         return self.rects[leaf.grid][2] - 14 <= x < self.rects[leaf.grid][2]
 
     def scroll_by(self, leaf, amount):
-        left, _, right, _ = self.rects[leaf.grid]
-        limit = max(0, sum(width for _, width in leaf.columns) - (right - left))
+        limit = max(0, sum(width for name, width in leaf.columns if name not in leaf.frozen) - self.viewport(leaf))
         leaf.scroll = max(0, min(limit, leaf.scroll + amount))
 
     def moved_to(self, x, y, now):
@@ -309,7 +353,7 @@ class FakeMes:
     def shape_at(self, x, y):
         hit = self.window_at(x, y)
         if self.grab and self.grab[0] == 'move':
-            return MOVING
+            return REMOVING if self.removal_cursor and self.discards(self.grab[1], x, y) else MOVING
         if self.on_menu_bar(hit, x, y):
             return VSPLIT
         for split in self.splits:
@@ -320,6 +364,15 @@ class FakeMes:
         if leaf is not None and self.edge_at(leaf, x, y) is not None:
             return SIZEWE
         return ARROW
+
+    def discards(self, leaf, x, y):
+        """끌고 있는 칸 제목을 (x, y)에 놓으면 그 칸이 없어지는지: '위' / '아래' / None"""
+        left, top, right, bottom = self.rects[leaf.grid]
+        if y < top - self.removal_distance and self.removal_works:
+            return '위'
+        if left <= x < right and top + HEADER + self.removal_distance <= y < bottom and self.removal_down_works:
+            return '아래'
+        return None
 
     def press(self, x, y, now):
         self.presses += 1
@@ -371,11 +424,15 @@ class FakeMes:
                 self.bad.append('칸 제목을 끌지 않고 누름(정렬됨): ' + leaf.columns[index][0])
                 return
             target = self.header_at(leaf, x, y)
-            left, top, right, bottom = self.rects[leaf.grid]
+            top = self.rects[leaf.grid][1]
             if target is None:
-                if left <= x < right and top + HEADER <= y < bottom and self.removal_works:     # 표 안쪽에 놓으면 칸이 없어짐
+                if not top <= y < top + HEADER:
+                    self.drops.append((leaf.columns[index][0], '위' if y < top else '아래'))
+                if self.discards(leaf, x, y):
                     self.hidden.append(leaf.columns.pop(index)[0])
                 return
+            if (leaf.columns[index][0] in leaf.frozen) != (leaf.columns[target[0]][0] in leaf.frozen):
+                return                                   # 고정 칸과 나머지 칸 사이로는 옮겨지지 않음
             item = leaf.columns.pop(index)
             place = target[0] - (1 if target[0] > index else 0)
             leaf.columns.insert(place if target[1] else place + 1, item)
@@ -389,7 +446,7 @@ class FakeMes:
         else:
             # 현장 확인: 놓은 자리가 그 칸의 오른쪽 끝이 됩니다(잡은 자리와의 차이는 유지되지 않음).
             leaf, index = grab[1], grab[2]
-            begin = self.rects[leaf.grid][0] - leaf.scroll + sum(width for _, width in leaf.columns[:index])
+            begin = next(position for number, _, position, _, _, _ in self.spread(leaf) if number == index)
             leaf.columns[index][1] = max(leaf.minimum, x - begin)
 
     # ── 화면 판독 결과 ──
@@ -437,18 +494,16 @@ class FakeMes:
                             bounds=[left, top, right - left, bottom - top])
             group = element(parent=table, role=10, handle=leaf.grid, name='헤더 패널')
             spots = {}
-            x = left - leaf.scroll
-            stale = 2 if leaf.scroll else 0
-            home = left
-            for name, width in leaf.columns:
+            stale = 2 if leaf.scroll and not leaf.frozen else 0
+            home = left + leaf.indent
+            for _, name, x, width, _, _ in self.spread(leaf):
                 if x >= right:                                   # 화면 오른쪽 밖: 위치 없음
                     spots[name] = [0, 0, 0, 0]
-                elif x + width <= left:                          # 왼쪽으로 밀려 나감: 앞의 두 칸은 예전 위치가 남음
+                elif x + width <= left:                          # 왼쪽으로 밀려 나감: (고정 칸이 없는 표) 앞의 두 칸은 예전 위치가 남음
                     spots[name] = [home, top, width, HEADER] if stale > 0 else [0, 0, 0, 0]
                     stale -= 1
-                else:
+                else:                                            # 표 범위에 걸쳐 있으면 고정 칸 밑에 가려져 있어도 위치가 나옴
                     spots[name] = [x, top, width, HEADER]
-                x += width
                 home += width
             for name in leaf.reading + [name for name in spots if name not in leaf.reading]:   # 판독 순서 = 원래 순서(없앤 칸은 빠짐)
                 if name in spots:

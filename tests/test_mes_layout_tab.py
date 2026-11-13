@@ -114,7 +114,7 @@ class MesLayoutTabTests(unittest.TestCase):
         status = wash.layout_status.get()
         self.assertTrue(status.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 6·옮김 3'), status)
         self.assertEqual(mes.bad, [])
-        self.assertEqual(mes.hidden, list(fake.WORK_EXTRA))
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assertEqual([name for name, _ in mes.work.columns], flow.ARRANGED)
         self.assertEqual((mes.menu, mes.active, mes.inner), (25, '작업지시관리', '생산일보관리'))
         sizes = mes.grid_sizes()
@@ -228,7 +228,12 @@ class MesLayoutTabTests(unittest.TestCase):
         record = self.m.SuiteErrors.capture.call_args                       # 원인 파악용으로 진행 기록과 함께 남김
         self.assertEqual((record.kwargs['feature'], record.kwargs['stage']), ('MES 정렬', '일부만 완료'))
         self.assertIn('없애지 못한 칸', record.kwargs['detail'])
-        self.assertIn('칸 없애기 · PART-NO · 그대로 있음', record.kwargs['context'])
+        self.assertIn('칸 버리기 · 거래처코드 · 그대로 있음 · 위로', record.kwargs['context'])
+        tail = record.kwargs['detail'].split('[작업지시관리 표 기록]')[1]       # 표 기록은 길이 제한에 잘리지 않게 따로 붙임
+        self.assertIn('작업지시관리 표 (', tail)
+        self.assertIn('PART-NO@', tail)
+        self.assertIn('칸 버리기 · 거래처코드 · 그대로 있음 · 아래로', tail)
+        self.assertNotIn('비밀환자', record.kwargs['detail'] + record.kwargs['context'])
 
     def test_error_record_carries_the_trail_for_diagnosis(self):
         app = self.launch()

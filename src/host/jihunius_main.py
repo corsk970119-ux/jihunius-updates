@@ -3013,10 +3013,14 @@ class WashApp:
     def layout_work(self,mode):
         """MES 정렬·기준 저장·화면 구조 복사. 화면 판독·창 준비는 세척완료와 같은 함수를 씁니다."""
         reader=None;pointer=None;outcome={'title':'','lines':[],'error':None,'stopped':False,'text':None}
+        kept=[]   # 작업지시관리 표 기록(칸 제목 위치·버리기·옮기기 결과). 오류 기록 끝에 따로 붙입니다(행 내용은 없음).
         def emit(kind,value):
             if kind=='log':
                 self._error_stage=str(value)[:300];self.note(value);self.events.put(('layout_log',value))
             elif kind=='note':self.note(value)
+            elif kind=='record':
+                self.note(value)
+                if len(kept)<90:kept.append(str(value).replace('\n',' ')[:200])
             elif kind in ('reading','reading_done'):self.events.put((kind,value))
         try:
             windows=self.pop.visible_windows()
@@ -3062,7 +3066,8 @@ class WashApp:
                 result=self.layout.align_all(mes_target,pointer,capture,self.stop,emit,self.layout.load_standard(path))
                 outcome['title'],outcome['lines']=self.layout.brief_all(result,time.monotonic()-self.started)
                 if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
-                    SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',detail='\n'.join(outcome['lines']),
+                    SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',
+                                        detail='\n'.join(outcome['lines']+(['','[작업지시관리 표 기록]']+kept if kept else [])),
                                         work=str(self.started),context='\n'.join(self.trail[-150:]))
         except Exception as error:
             stopped=self.stop.is_set() or type(error).__name__=='Stopped'
@@ -3071,7 +3076,8 @@ class WashApp:
             if not stopped:
                 import traceback
                 SuiteErrors.capture(str(error),feature='MES 정렬',stage=getattr(self,'_error_stage','처리'),
-                                    detail=traceback.format_exc(),work=str(self.started),context='\n'.join(self.trail[-150:]))
+                                    detail=traceback.format_exc()+('\n[작업지시관리 표 기록]\n'+'\n'.join(kept) if kept else ''),
+                                    work=str(self.started),context='\n'.join(self.trail[-150:]))
         finally:
             if pointer is not None and not outcome['stopped']:pointer.restore()
             if reader:
@@ -5564,7 +5570,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.13.4'
+SUITE_APP_VERSION = '2026.11.13.5'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
