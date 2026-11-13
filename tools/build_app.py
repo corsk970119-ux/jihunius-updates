@@ -7,6 +7,7 @@ but it is now generated. Edit these instead of app.pyw:
   src/host/stl_finder.py      STL 찾기 (embedded as STL_FINDER_SOURCE)
   src/host/wash_mes.py        MES 세척완료 판독/조작 (WASH_MES_SOURCE)
   src/host/wash_pop.py        POP 세척완료 저장 (WASH_POP_SOURCE)
+  src/host/mes_layout.py      MES 정렬: 판 크기·칸 너비 맞춤 (MES_LAYOUT_SOURCE)
   src/host/card_modifier_10_30.py   카드에 복사하는 수정10.30 스크립트 (CARD_MODIFIER_BYTES)
   src/host/windows_tray.py    시스템 트레이
   src/*.py                    보조창·소재·오류기록·업데이트 (as before)
@@ -69,6 +70,7 @@ def host_lines(root):
         'STL_FINDER_SOURCE': "STL_FINDER_SOURCE = r'''" + stl + "'''\n",
         'WASH_MES_SOURCE': 'WASH_MES_SOURCE = ' + repr(_text(root, 'src/host/wash_mes.py')) + '\n',
         'WASH_POP_SOURCE': 'WASH_POP_SOURCE = ' + repr(_text(root, 'src/host/wash_pop.py')) + '\n',
+        'MES_LAYOUT_SOURCE': 'MES_LAYOUT_SOURCE = ' + repr(_text(root, 'src/host/mes_layout.py')) + '\n',
         'SuiteWindowsTray': "SuiteWindowsTray = _suite_load_support('jihunius_suite_tray', "
                             + repr(_text(root, 'src/host/windows_tray.py')) + ').WindowsTray\n',
         'SuiteUpdater': updater_line(root),

@@ -2299,6 +2299,7 @@ def load_stl_finder():
 
 WASH_MES_SOURCE = ...  # build: tools/build_app.py
 WASH_POP_SOURCE = ...  # build: tools/build_app.py
+MES_LAYOUT_SOURCE = ...  # build: tools/build_app.py
 def load_wash_module(source, name):
     import types
     module = types.ModuleType(name)
@@ -2513,6 +2514,22 @@ def wash_profile_path():
     return Path(os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'mes_query_button.json'
 
 
+def mes_layout_path():
+    """MES 정렬 기준(칸 너비)을 저장하는 파일. PC마다 따로 둡니다."""
+    return Path(os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'mes_layout.json'
+
+
+def mes_structure_reader(module):
+    """화면 구조 점검용 판독기. 세척완료 판독기와 같은 코드에서, 표·버튼뿐 아니라 메뉴 등 모든 종류의
+    항목 위치를 읽도록 조건 한 줄만 넓힌 사본을 씁니다(세척완료가 쓰는 원본은 그대로)."""
+    import types
+    narrow="if(role==24 || role==25 || role==28 || (role==29 && CellBoundsMode!=1 && !skipCellBounds) || role==37 || (role>=41 && role<=47)) {"
+    source=module.POWERSHELL
+    if source.count(narrow)!=1:return WashReader(module)
+    return WashReader(types.SimpleNamespace(POWERSHELL=source.replace(narrow,"if(role!=29 || (CellBoundsMode!=1 && !skipCellBounds)) {"),
+                                            check_capture=module.check_capture,base64=module.base64))
+
+
 def wash_save_query_profile(module,report,binding):
     import json,tempfile
     matches=[(items,layout) for items,layout in wash_toolbar_profiles(module,report) if any(n['handle']==binding['handle'] for n in items)]
@@ -2725,7 +2742,7 @@ class WashRunMarker:
 
 
 class WashApp:
-    def __init__(self,host,parent):
+    def __init__(self,host,parent,layout_parent=None):
         import tkinter as tk
         from tkinter import ttk
         from datetime import date
@@ -2735,6 +2752,8 @@ class WashApp:
         self.capture_stage=None;self.capture_status=None
         self.mes=load_wash_module(WASH_MES_SOURCE,'jihuni_wash_mes')
         self.pop=load_wash_module(WASH_POP_SOURCE,'jihuni_wash_pop')
+        self.layout=load_wash_module(MES_LAYOUT_SOURCE,'jihuni_mes_layout')
+        self.layout_running=False
         style=ttk.Style(self.root)
         style.configure('Wash.TCombobox',fieldbackground='#060b16',background='#0e1a35',foreground='#ffffff',padding=6)
         style.map('Wash.TCombobox',fieldbackground=[('readonly','#060b16')],foreground=[('readonly','#ffffff')],selectbackground=[('readonly','#060b16')],selectforeground=[('readonly','#ffffff')])
@@ -2757,7 +2776,26 @@ class WashApp:
         ttk.Button(actions,text='중지 (F9)',command=lambda:self.stop.set(),style='Secondary.TButton').pack(side='left')
         self.status=tk.StringVar(value='대기 중 · 세척순번 기본값 06')
         ttk.Label(body,textvariable=self.status,wraplength=900,foreground='#93c5fd').pack(anchor='w',pady=(0,10))
+        self.build_layout_page(layout_parent if layout_parent is not None else parent)
         self.root.after(80,self.poll)
+
+    def build_layout_page(self,parent):
+        """'MES 정렬' 탭: 생산일보관리의 판 크기와 칸 너비 맞춤. 세척완료와 같은 창·같은 중지 키(F9)를 씁니다."""
+        import tkinter as tk
+        from tkinter import ttk
+        body=ttk.Frame(parent,padding=18);body.pack(fill='both',expand=True)
+        ttk.Label(body,text='MES 정렬',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(body,text='생산일보관리의 판을 모두 같은 크기로 → 모든 표의 칸 너비를 기준에 맞춤',font=('맑은 고딕',12,'bold')).pack(anchor='w',pady=(8,6))
+        ttk.Label(body,text='누르면 MES를 앞으로 가져와 왼쪽 파란 메뉴 칸을 끝까지 줄이고, 판 사이 경계선과 칸 제목 경계선을 자동으로 끌어 맞춥니다. 중지: F9',foreground='#93c5fd').pack(anchor='w')
+        ttk.Label(body,text='기준은 왼쪽 위 판입니다. 왼쪽 위 판의 칸 너비를 원하는 대로 맞춘 뒤 [기준 저장]을 누르면, 그 뒤로는 [MES 정렬]만 눌러도 모든 판이 그 너비로 맞춰집니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.',wraplength=900).pack(anchor='w',pady=10)
+        actions=ttk.Frame(body);actions.pack(fill='x',pady=18)
+        self.layout_button=ttk.Button(actions,text='MES 정렬',command=lambda:self.launch_layout('align'),style='Accent.TButton');self.layout_button.pack(side='left',padx=10)
+        self.layout_save_button=ttk.Button(actions,text='기준 저장 (왼쪽 위 판)',command=lambda:self.launch_layout('save'),style='Secondary.TButton');self.layout_save_button.pack(side='left')
+        ttk.Button(actions,text='중지 (F9)',command=lambda:self.stop.set(),style='Secondary.TButton').pack(side='left',padx=10)
+        # 점검용: 지금 MES 화면의 칸 제목·탭·메뉴 이름과 위치만 읽어 글로 복사합니다(누르지 않음, 행의 값은 담지 않음).
+        self.layout_inspect_button=ttk.Button(actions,text='화면 구조 복사 (읽기만)',command=lambda:self.launch_layout('inspect'),style='Secondary.TButton');self.layout_inspect_button.pack(side='left')
+        self.layout_status=tk.StringVar(value=self.layout_preset_text())
+        ttk.Label(body,textvariable=self.layout_status,wraplength=900,foreground='#93c5fd').pack(anchor='w',pady=(0,10))
 
     def note(self,text):
         """오류가 났을 때 함께 남길 진행 기록. 자동 작업에는 영향을 주지 않습니다."""
@@ -2819,7 +2857,7 @@ class WashApp:
             self.events.put((kind,value))
 
     def controls(self):
-        for button in (self.run_button,):button.configure(state='disabled' if self.busy else 'normal')
+        for button in (self.run_button,self.layout_button,self.layout_save_button,self.layout_inspect_button):button.configure(state='disabled' if self.busy else 'normal')
         for i,entry in enumerate(self.entries):entry.configure(state='disabled' if self.busy else ('readonly' if i==2 else 'normal'))
 
     def launch(self,run):
@@ -2946,6 +2984,110 @@ class WashApp:
             if marker is not None:run_bounded(marker.release)
             self.emit('done',{'elapsed':time.monotonic()-self.started,'result':finished_result,'error':failure})
 
+    def layout_preset_text(self):
+        try:
+            widths=self.layout.load_preset(mes_layout_path())
+            if widths:
+                saved=self.layout.preset_saved_at(mes_layout_path())
+                return '대기 중 · 기준 저장됨: 칸 {}개{}'.format(len(widths),' · '+saved if saved else '')
+        except Exception:pass
+        return '대기 중 · 저장한 기준 없음 → 처음 [MES 정렬]을 누르면 왼쪽 위 판의 지금 너비를 기준으로 저장합니다.'
+
+    def launch_layout(self,mode):
+        """mode: 'align'=정렬, 'save'=왼쪽 위 판을 기준으로 저장(읽기만), 'inspect'=화면 구조 복사(읽기만)"""
+        if self.busy:return
+        if os.name!='nt':return self.host.messagebox.showinfo('Windows 전용','MES가 실행 중인 Windows PC에서 사용해 주세요.',parent=self.root)
+        if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
+        self.busy=True;self.layout_running=True;self.stop=threading.Event();self.controls();self.started=time.monotonic()
+        self.trail=[];self.reads=[];self.progress={};self.last_result=None
+        self.host.suspend_machine_alerts()
+        self.capture_stage=None;self.capture_status=None
+        self.layout_status.set('MES 창 확인 중…')
+        threading.Thread(target=self.layout_work,args=(mode,),daemon=True).start()
+
+    def layout_work(self,mode):
+        """MES 정렬·기준 저장·화면 구조 복사. 화면 판독·창 준비는 세척완료와 같은 함수를 씁니다."""
+        reader=None;pointer=None;outcome={'title':'','lines':[],'error':None,'stopped':False,'text':None}
+        def emit(kind,value):
+            if kind=='log':
+                self._error_stage=str(value)[:300];self.note(value);self.events.put(('layout_log',value))
+            elif kind=='note':self.note(value)
+            elif kind in ('reading','reading_done'):self.events.put((kind,value))
+        try:
+            windows=self.pop.visible_windows()
+            matches=[w for w in windows if w['title']=='ROOT MES']
+            if len(matches)!=1:raise RuntimeError('ROOT MES 창을 하나만 실행해 주세요.')
+            mes_target=matches[0];ma=self.mes.WindowsClicks(mes_target)
+            def capture(t,label,stop):
+                started=time.monotonic();emit('reading',(label,started))
+                try:
+                    report=reader.capture(t,label,stop)
+                    self.note('판독 {:.1f}초 · {}'.format(time.monotonic()-started,label))
+                    return report
+                except Exception as error:
+                    raise RuntimeError('{} · {:.1f}초 경과 · {}'.format(label,time.monotonic()-started,error)) from error
+                finally:emit('reading_done',None)
+            if mode=='inspect':
+                # 읽기만: 창을 앞으로 가져오거나 탭을 누르지 않고, 지금 보이는 화면 그대로 읽습니다.
+                reader=mes_structure_reader(self.pop)
+                report=capture({**mes_target,'mode':'mes_rows'},'MES 화면 구조',self.stop)
+                def rect(handle):
+                    r=ma.rect(handle);return r.left,r.top,r.right,r.bottom
+                text=self.layout.describe(report,rect=rect)
+                outcome['text']='지후니우스 {} · MES 화면 구조 (읽기만 함)\n'.format(SUITE_APP_VERSION)+text
+                outcome['title']='화면 구조를 복사했습니다 · {}줄 · 채팅에 붙여넣어 주세요'.format(text.count('\n')+1)
+                return
+            reader=WashReader(self.pop)
+            emit('log','ROOT MES 최대화 상태 확인 중…')
+            wash_prepare_window(ma,self.stop)
+            ma.activate()
+            report=capture({**mes_target,'mode':'mes_rows'},'MES 구조',self.stop)
+            report=wash_ensure_mes_production(self.mes,ma,report,capture,self.stop,emit)
+            path=mes_layout_path()
+            if mode=='save':
+                rows=self.layout.arrange(self.layout.grids(report))
+                if not rows or not rows[0][0]['columns']:raise RuntimeError('MES 생산일보관리에서 왼쪽 위 표의 칸 제목을 읽지 못했습니다.')
+                if self.layout.clipped(rows[0][0]):raise RuntimeError('왼쪽 위 표의 칸이 표 밖으로 잘려 있어 너비를 정확히 읽을 수 없습니다. 왼쪽 위 판의 칸을 모두 보이게 맞춘 뒤 다시 저장해 주세요.')
+                widths=self.layout.widths_of(rows[0][0])
+                self.layout.save_preset(path,widths,self.layout.label(rows,0,0))
+                outcome['title']='기준 저장 완료 · 왼쪽 위 판의 칸 {}개 · {}'.format(len(widths),' '.join('{} {}'.format(name,width) for name,width in widths.items()))
+            else:
+                widths=self.layout.load_preset(path)
+                emit('log','시작합니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.')
+                pointer=self.layout.Pointer(ma)
+                result=self.layout.align(mes_target,pointer,capture,self.stop,emit,report,widths=widths)
+                if result['used_reference']:self.layout.save_preset(path,result['widths'],result['reference'])
+                outcome['title'],outcome['lines']=self.layout.brief(result,time.monotonic()-self.started)
+                if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
+                    SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',detail='\n'.join(outcome['lines']),
+                                        work=str(self.started),context='\n'.join(self.trail[-150:]))
+        except Exception as error:
+            stopped=self.stop.is_set() or type(error).__name__=='Stopped'
+            outcome['stopped']=stopped;outcome['error']=str(error)
+            self.note('중단: '+str(error))
+            if not stopped:
+                import traceback
+                SuiteErrors.capture(str(error),feature='MES 정렬',stage=getattr(self,'_error_stage','처리'),
+                                    detail=traceback.format_exc(),work=str(self.started),context='\n'.join(self.trail[-150:]))
+        finally:
+            if pointer is not None and not outcome['stopped']:pointer.restore()
+            if reader:
+                try:reader.close()
+                except Exception:pass
+            self.events.put(('layout_done',outcome))
+
+    def copy_structure(self,text):
+        """화면 구조 글을 클립보드에 넣고 파일로도 남깁니다(붙여넣기가 안 될 때 파일을 보내면 됨)."""
+        saved=''
+        try:
+            path=mes_layout_path().with_name('mes_structure.txt');path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text(text,encoding='utf-8');saved=str(path)
+        except OSError:pass
+        try:
+            self.root.clipboard_clear();self.root.clipboard_append(text);self.root.update_idletasks()
+        except Exception:pass
+        return saved
+
     def show_completion(self,title,brief):
         import tkinter as tk
         from tkinter import ttk
@@ -2981,6 +3123,19 @@ class WashApp:
                 elif kind in ('log','error'):
                     line=('중단: ' if kind=='error' else '')+str(value)
                     self.status.set(line)
+                elif kind=='layout_log':self.layout_status.set(str(value))
+                elif kind=='layout_done':
+                    self.busy=False;self.layout_running=False;self.controls();self.capture_stage=None
+                    if value['error']:
+                        self.layout_status.set(('중지함 · ' if value['stopped'] else '중단: ')+value['error'])
+                        if not value['stopped']:completion=('MES 정렬 중단','중단 사유: '+value['error']+'\n\n누르기 전에 확인하는 단계에서 멈췄습니다. MES 화면을 확인한 뒤 다시 눌러 주세요.\n같은 문제가 계속되면 오류 기록 창의 [AI 전달용 복사]로 내용을 전달해 주세요.')
+                    elif value.get('text'):
+                        saved=self.copy_structure(value['text'])
+                        self.layout_status.set(value['title'])
+                        completion=('화면 구조 복사','복사했습니다. 채팅 입력칸에 붙여넣기(Ctrl+V) 해 주세요.'+('\n같은 내용의 파일: '+saved if saved else '')+'\n\n'+value['text'])
+                    else:
+                        self.layout_status.set(value['title'])
+                        if value['lines']:completion=(value['title'].split(' · ')[0],'\n'.join([value['title'],'']+value['lines']))
                 elif kind=='done':
                     self.busy=False;self.controls();self.capture_stage=None
                     title,brief=wash_completion_brief(value['result'] or self.result,value['elapsed'],value['error'])
@@ -2996,7 +3151,7 @@ class WashApp:
             state=(label,elapsed,self.stop.is_set())
             if state!=self.capture_status:
                 self.capture_status=state
-                self.status.set(('중지 요청 처리 중' if state[2] else '화면 읽는 중')+f' · {label} · {elapsed}초')
+                (self.layout_status if self.layout_running else self.status).set(('중지 요청 처리 중' if state[2] else '화면 읽는 중')+f' · {label} · {elapsed}초')
         if completion:self.show_completion(*completion)
 
 
@@ -3118,7 +3273,7 @@ class IntegrationApp:
         self.active_tab = "cnc"
         self.tab_focus = {}
         self.tab_buttons = {}
-        for key, label in (("cnc", "지후니우스"), ("stl", "STL찾기"), ("wash", "세척완료")):
+        for key, label in (("cnc", "지후니우스"), ("stl", "STL찾기"), ("wash", "세척완료"), ("mes", "MES 정렬")):
             button = ttk.Button(tabs, text=label, style="AppTab.TButton",
                                 command=lambda selected=key: self.select_app_tab(selected))
             button.pack(side="left", padx=1)
@@ -3150,7 +3305,7 @@ class IntegrationApp:
         page_host.grid(row=0, column=1, sticky="nsew")
         page_host.rowconfigure(0, weight=1)
         page_host.columnconfigure(0, weight=1)
-        self.app_pages = {key: ttk.Frame(page_host) for key in ("cnc", "stl", "wash")}
+        self.app_pages = {key: ttk.Frame(page_host) for key in ("cnc", "stl", "wash", "mes")}
         frame = self.app_pages["cnc"]
         frame.grid(row=0, column=0, sticky="nsew")
         frame.columnconfigure(0, weight=1)
@@ -3290,7 +3445,7 @@ class IntegrationApp:
         window.minsize(1000, self.minimum_height)
         window.geometry("1120x{}".format(max(830, minimum_height)))
         self.stl_app = load_stl_finder().App(window, self.app_pages["stl"])
-        self.wash_app = WashApp(self, self.app_pages["wash"])
+        self.wash_app = WashApp(self, self.app_pages["wash"], self.app_pages["mes"])
         self.apply_visual_theme()
         window.update_idletasks()
         body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), log_card.winfo_reqheight())
@@ -3415,7 +3570,8 @@ class IntegrationApp:
         self.active_tab = selected
         target = self.tab_focus.get(selected)
         if target is None or not target.winfo_exists():
-            target = self.folder_input if selected == "cnc" else (self.stl_app.input if selected == "stl" else self.wash_app.input)
+            target = {"cnc": self.folder_input, "stl": self.stl_app.input,
+                      "mes": self.wash_app.layout_button}.get(selected, self.wash_app.input)
         target.focus_set()
 
     def refresh_active_tab(self, event=None):
@@ -3885,10 +4041,12 @@ class IntegrationApp:
             button.configure(image=visual["popup_icon"], compound="right")
         self.apply_n3_marks(visual["images"])
         # Keep the wash form compact within the same card surface as other pages.
-        wash_body = self.app_pages["wash"].winfo_children()[0]
-        wash_body.configure(style="RoundedCard.TFrame", padding=20)
-        wash_body.pack_configure(fill="x", expand=False)
-        wash_widgets = list(wash_body.winfo_children())
+        wash_widgets = []
+        for page in ("wash", "mes"):
+            wash_body = self.app_pages[page].winfo_children()[0]
+            wash_body.configure(style="RoundedCard.TFrame", padding=20)
+            wash_body.pack_configure(fill="x", expand=False)
+            wash_widgets.extend(wash_body.winfo_children())
         while wash_widgets:
             widget = wash_widgets.pop()
             wash_widgets.extend(widget.winfo_children())
@@ -3936,7 +4094,7 @@ class IntegrationApp:
             left = anchor_button.winfo_rootx() - header.winfo_rootx()
             self.handover_toggle.place(relx=0, x=left, width=anchor_button.winfo_width(), rely=0.5, anchor="w")
             return
-        last_tab = self.tab_buttons['wash']
+        last_tab = self.tab_buttons['mes']
         left = last_tab.winfo_rootx() + last_tab.winfo_width() - header.winfo_rootx()
         right = header.winfo_width()
         self.handover_toggle.place(relx=0, x=round((left + right) / 2), rely=0.5, anchor="center")
@@ -5403,7 +5561,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.12.1'
+SUITE_APP_VERSION = '2026.11.13.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
