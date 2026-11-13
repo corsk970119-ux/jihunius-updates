@@ -90,15 +90,15 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(outcome.user.keys, set())
         for expected in ('메뉴 칸 너비 25', '경계를 오른쪽으로 끌어 넓힘 → 너비 200',
                          '묶음 "생산관리"이 접혀 있음 → 이름 줄', '→ 묶음이 펼쳐짐 · "작업지시관리"', '→ 작업지시관리 문서가 앞에 옴 (탭 창201)',
-                         '■ 작업지시관리 탭의 표', '탭 "작업지시관리" (', '칸 제목 31개(표 안 ', '▷특이사항3 100',
+                         '■ 작업지시관리 탭의 표', '탭 "작업지시관리" (', '칸 제목 34개(표 안 ', '▷LOT-NO 0',
                          '시험에 쓰는 칸: "품명" 과 그 오른쪽 "지시일"',
                          '-2◆', '+7·', '그 자리 맨 위 창 이 표',
-                         '경계를 오른쪽으로 12 끎 → "품명" 너비 130 → 142 (+12)', '되돌린 뒤 너비 130 (처음 130) → 원래대로',
+                         '칸 끝에서 12 오른쪽에 놓음 → "품명" 너비 130 → 142 (+12)', '되돌린 뒤 너비 130 (처음 130) → 원래대로',
                          '두 칸이 자리를 바꿈', '원래 순서로 돌아옴', '순서 그대로(Esc로 끌기가 취소됨)',
                          '가로 휠 3칸: 표가 가로로 120픽셀 움직임', '반대로 굴림 → 원래 자리',
                          '표가 가로로 90픽셀 움직임', '휠로 원래 자리로 되돌림',
                          '■ 생산일보관리 탭의 표', '판 6개 · 표 너비', '시험에 쓰는 칸: "P/No." 과 그 오른쪽 "거래처명"',
-                         '경계를 오른쪽으로 12 끎 → "P/No." 너비 47 → 59 (+12)',
+                         '칸 끝에서 12 오른쪽에 놓음 → "P/No." 너비 47 → 59 (+12)',
                          '묶음 "설비관리"이 접혀 있음', '→ 설비별공구관리 문서가 앞에 옴', '→ 작업지시관리 문서가 다시 앞에 옴',
                          '메뉴 칸 너비를 처음(25)으로 되돌림 → 25', '판독 시간(초):'):
             self.assertIn(expected, text, expected)
@@ -146,7 +146,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(mes.snapshot(), before)
         self.assertEqual(mes.menu, 25)
         self.assertLessEqual(mes.presses, 2)                                  # 탭 두 번(작업지시관리로 갔다가 돌아오기)뿐
-        self.assertIn('PART-NO 90 | 품명 130', outcome.text)
+        self.assertIn('PART-NO 110 | 품명 130', outcome.text)
         self.assertIn('거래처명120', outcome.text)
         self.assertNotIn('칸 너비 끌기', outcome.text)
         self.assertNotIn('메뉴 칸 넓히기', outcome.text)
@@ -155,7 +155,7 @@ class ExperimentTests(unittest.TestCase):
         behind.active = '설비별공구관리'
         behind.layout()
         outcome = run(behind, self.scope, list_only=True)                     # 문서가 뒤에 있으면 메뉴로 앞에 띄운 뒤 읽음
-        self.assertIn('PART-NO 90 | 품명 130', outcome.text)
+        self.assertIn('PART-NO 110 | 품명 130', outcome.text)
         self.assertEqual(behind.bad, [])
 
     def test_escape_that_does_not_cancel_is_noticed_and_the_order_is_restored(self):

@@ -7,6 +7,8 @@
   메뉴: 묶음(종류 33)은 맨 위 23픽셀이 이름 줄이고 펼쳐지면 항목들까지 포함합니다. 항목(종류 30)은 펼쳐진 묶음에서만 위치가 있습니다.
   규칙: 경계선 위에서만 포인터가 크기 조절 모양이 되고, 칸 제목 가운데를 누르면 정렬(=잘못된 누름)로 기록하며,
         같은 자리를 빠르게 두 번 누르면 더블클릭(자동 맞춤)이 됩니다.
+  2판 점검으로 확인한 것: 칸 경계를 끌면 '놓은 자리'가 칸의 오른쪽 끝이 된다. 화면 오른쪽 밖 칸 제목은 위치가 없다(0).
+        판독에 나오는 칸 순서는 화면 순서가 아니라 원래(기본) 순서다. 표가 가로로 밀리면 밀려 나간 칸 일부에 예전 위치가 남는다.
 """
 import ctypes
 from collections import OrderedDict
@@ -14,11 +16,13 @@ from collections import OrderedDict
 ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001
 COLUMNS = (('No.', 37), ('선택', 38), ('P/No.', 47), ('거래처명', 120), ('Fixture', 58), ('Size', 54),
            ('환자명', 46), ('치식', 37), ('세척', 40), ('비고', 55), ('영점', 50))
-WORK_COLUMNS = (('선택', 35), ('PART-NO', 90), ('품명', 130), ('지시일', 90), ('시간', 80), ('프로젝트No', 100), ('T31수정', 60),
-                ('작업자코드', 80), ('작업자', 100), ('좌석번호', 60), ('설비코드', 80), ('설비명', 150), ('거래처코드', 100),
+# MES를 막 켰을 때의 작업지시관리 표(화면 사진으로 본 순서). 사용자는 여기서 6칸을 없애고 특이사항 3칸을 설비명 뒤로 옮긴다.
+WORK_COLUMNS = (('선택', 35), ('PART-NO', 110), ('품명', 130), ('지시일', 90), ('시간', 80), ('프로젝트No', 100), ('T31수정', 60),
+                ('작업자코드', 80), ('작업자', 100), ('좌석번호', 60), ('설비코드', 90), ('설비명', 150), ('거래처코드', 120),
                 ('거래처명', 140), ('지역', 50), ('Fixture Name', 80), ('Type', 60), ('Size', 60), ('치과명', 80), ('환자명', 80),
-                ('치식', 50), ('stl', 50), ('납기일', 90), ('배송업체', 80), ('출하일', 90), ('진행상태', 90), ('세척순서', 70),
-                ('길이', 50), ('특이사항1', 100), ('특이사항2', 100), ('특이사항3', 100))
+                ('치식', 40), ('stl', 40), ('납기일', 90), ('배송업체', 80), ('출하일', 90), ('진행상태', 80), ('특이사항1', 100),
+                ('특이사항2', 100), ('특이사항3', 100), ('세척순서', 60), ('길이', 60), ('직경', 60), ('각도', 60), ('LOT-NO', 100))
+WORK_EXTRA = ('PART-NO', '품명', 'T31수정', '작업자코드', '좌석번호', '거래처코드')     # 사용자가 없애는 칸
 TOOL_COLUMNS = (('선택', 35), ('설비코드', 100), ('설비명', 150), ('공구대', 80), ('공구코드', 110), ('공구명', 130))
 WORK_TABS = ('작업지시관리', '작업지시조회', '생산일보관리')
 TOOL_TABS = ('설비별공구관리', '공구교체이력관리')
@@ -34,6 +38,7 @@ class Leaf:
         self.minimum = minimum
         self.fixed = set(fixed)      # 너비를 바꿀 수 없는 칸
         self.scroll = 0              # 가로로 밀린 픽셀
+        self.reading = [name for name, _ in columns]     # 판독에 나오는 순서(원래 순서; 화면에서 옮겨도 그대로)
 
 
 class Split:
@@ -79,9 +84,12 @@ class FakeMes:
         self.last_down = None
         self.on_press = None
         # 아래는 '조작 점검' 시험용 동작(기본은 꺼 둠: 생산일보 정렬은 칸 제목을 누르면 안 됨)
-        self.allow_moves = False     # 칸 제목을 끌어 순서 바꾸기·없애기
+        self.allow_moves = False     # 모든 표에서 칸 제목을 끌어 순서 바꾸기·없애기 허용
+        self.movable = set()         # 칸 제목을 끌어도 되는 표(전체 정렬은 작업지시관리 표만 건드려야 함)
         self.allow_clicks = False    # 왼쪽 메뉴·탭 누르기
         self.escape_cancels = True
+        self.removal_works = True    # 칸 제목을 표 안쪽에 놓으면 칸이 없어짐
+        self.autoscroll_left = True  # 칸 제목을 끈 채 왼쪽 끝에 두면 표가 처음 자리로 돌아감
         self.hwheel_works = True
         self.shift_wheel_works = True
         self.hidden = []             # 없앤 칸 이름
@@ -262,15 +270,21 @@ class FakeMes:
         leaf.scroll = max(0, min(limit, leaf.scroll + amount))
 
     def moved_to(self, x, y, now):
-        if self.grab and self.grab[0] == 'move' and self.near_right_edge(self.grab[1], x):
-            if self.near_edge_since is None:
-                self.near_edge_since = now
-        else:
+        side = None
+        if self.grab and self.grab[0] == 'move':
+            left = self.rects[self.grab[1].grid][0]
+            side = 'right' if self.near_right_edge(self.grab[1], x) else ('left' if left <= x < left + 55 else None)
+        if side is None:
             self.near_edge_since = None
+        elif self.near_edge_since is None or self.near_edge_since[0] != side:
+            self.near_edge_since = (side, now)
 
     def settle_autoscroll(self, now):
-        if self.grab and self.grab[0] == 'move' and self.near_edge_since is not None and now - self.near_edge_since >= 1.0:
-            self.scroll_by(self.grab[1], 90)
+        if self.grab and self.grab[0] == 'move' and self.near_edge_since is not None and now - self.near_edge_since[1] >= 1.0:
+            if self.near_edge_since[0] == 'right':
+                self.scroll_by(self.grab[1], 90)
+            elif self.autoscroll_left:
+                self.scroll_by(self.grab[1], -int(740 * (now - self.near_edge_since[1])))
         self.near_edge_since = None
 
     def escape(self, now):
@@ -335,7 +349,7 @@ class FakeMes:
                     leaf.columns[edge][1] = 77
                 elif edge is not None:
                     self.grab = ('column', leaf, edge, x)
-                elif header is not None and self.allow_moves:
+                elif header is not None and (self.allow_moves or leaf in self.movable):
                     self.grab = ('move', leaf, header[0], x, y)
                 elif hit in (7, 201, 211) and self.allow_clicks:
                     self.grab = ('click', x, y)
@@ -359,7 +373,7 @@ class FakeMes:
             target = self.header_at(leaf, x, y)
             left, top, right, bottom = self.rects[leaf.grid]
             if target is None:
-                if left <= x < right and top + HEADER <= y < bottom:     # 표 안쪽에 놓으면 칸이 없어짐
+                if left <= x < right and top + HEADER <= y < bottom and self.removal_works:     # 표 안쪽에 놓으면 칸이 없어짐
                     self.hidden.append(leaf.columns.pop(index)[0])
                 return
             item = leaf.columns.pop(index)
@@ -373,8 +387,10 @@ class FakeMes:
             split.position += (x - grab[2]) if split.vertical else (y - grab[3])
             self.layout()
         else:
-            leaf, index, start = grab[1], grab[2], grab[3]
-            leaf.columns[index][1] = max(leaf.minimum, leaf.columns[index][1] + x - start)
+            # 현장 확인: 놓은 자리가 그 칸의 오른쪽 끝이 됩니다(잡은 자리와의 차이는 유지되지 않음).
+            leaf, index = grab[1], grab[2]
+            begin = self.rects[leaf.grid][0] - leaf.scroll + sum(width for _, width in leaf.columns[:index])
+            leaf.columns[index][1] = max(leaf.minimum, x - begin)
 
     # ── 화면 판독 결과 ──
     def report(self, root=None):
@@ -420,11 +436,23 @@ class FakeMes:
             table = element(parent=-1, role=24, handle=leaf.grid, name='', offscreen=False,
                             bounds=[left, top, right - left, bottom - top])
             group = element(parent=table, role=10, handle=leaf.grid, name='헤더 패널')
+            spots = {}
             x = left - leaf.scroll
+            stale = 2 if leaf.scroll else 0
+            home = left
             for name, width in leaf.columns:
-                element(parent=group, role=25, handle=leaf.grid, name=name, bounds=[x, top, width, HEADER],
-                        offscreen=x >= right or x + width <= left)
+                if x >= right:                                   # 화면 오른쪽 밖: 위치 없음
+                    spots[name] = [0, 0, 0, 0]
+                elif x + width <= left:                          # 왼쪽으로 밀려 나감: 앞의 두 칸은 예전 위치가 남음
+                    spots[name] = [home, top, width, HEADER] if stale > 0 else [0, 0, 0, 0]
+                    stale -= 1
+                else:
+                    spots[name] = [x, top, width, HEADER]
                 x += width
+                home += width
+            for name in leaf.reading + [name for name in spots if name not in leaf.reading]:   # 판독 순서 = 원래 순서(없앤 칸은 빠짐)
+                if name in spots:
+                    element(parent=group, role=25, handle=leaf.grid, name=name, bounds=spots[name], offscreen=spots[name][2] == 0)
             data = element(parent=table, role=10, handle=leaf.grid, name='데이터 패널', child_count=1)
             line = element(parent=data, role=28, handle=leaf.grid, name='행 1', value='O1009;홍길동치과;비밀환자;', bounds=[left, top + HEADER, 500, 20])
             element(parent=line, role=29, handle=leaf.grid, name='환자명 row 0', value='비밀환자')

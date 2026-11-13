@@ -2519,15 +2519,20 @@ def mes_layout_path():
     return Path(os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'mes_layout.json'
 
 
-def mes_structure_reader(module):
-    """화면 구조 점검용 판독기. 세척완료 판독기와 같은 코드에서, 표·버튼뿐 아니라 메뉴 등 모든 종류의
-    항목 위치를 읽도록 조건 한 줄만 넓힌 사본을 씁니다(세척완료가 쓰는 원본은 그대로)."""
+def mes_layout_reader(module):
+    """MES 정렬용 판독기. 세척완료 판독기와 같은 코드의 사본에서 두 줄만 바꿉니다(세척완료가 쓰는 원본은 그대로).
+
+    1) 표·버튼뿐 아니라 메뉴 등 모든 종류의 항목 위치를 읽습니다.
+    2) 표의 행('데이터 패널' 아래)은 읽지 않습니다. 정렬은 칸 제목만 보면 되고, 행을 읽지 않으면 훨씬 빠릅니다.
+    """
     import types
     narrow="if(role==24 || role==25 || role==28 || (role==29 && CellBoundsMode!=1 && !skipCellBounds) || role==37 || (role>=41 && role<=47)) {"
+    rows="        if(secret || child!=0 || total==0 || AtLimit())return;\n"
     source=module.POWERSHELL
-    if source.count(narrow)!=1:return WashReader(module)
-    return WashReader(types.SimpleNamespace(POWERSHELL=source.replace(narrow,"if(role!=29 || (CellBoundsMode!=1 && !skipCellBounds)) {"),
-                                            check_capture=module.check_capture,base64=module.base64))
+    if source.count(narrow)==1:source=source.replace(narrow,"if(role!=29 || (CellBoundsMode!=1 && !skipCellBounds)) {")
+    if source.count(rows)==1:source=source.replace(rows,'        if(secret || child!=0 || total==0 || AtLimit() || Convert.ToString(row["name"])=="데이터 패널")return;\n')
+    if source==module.POWERSHELL:return WashReader(module)
+    return WashReader(types.SimpleNamespace(POWERSHELL=source,check_capture=module.check_capture,base64=module.base64))
 
 
 def wash_save_query_profile(module,report,binding):
@@ -2785,12 +2790,12 @@ class WashApp:
         from tkinter import ttk
         body=ttk.Frame(parent,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text='MES 정렬',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(body,text='생산일보관리의 판을 모두 같은 크기로 → 모든 표의 칸 너비를 기준에 맞춤',font=('맑은 고딕',12,'bold')).pack(anchor='w',pady=(8,6))
-        ttk.Label(body,text='누르면 MES를 앞으로 가져와 왼쪽 파란 메뉴 칸을 끝까지 줄이고, 판 사이 경계선과 칸 제목 경계선을 자동으로 끌어 맞춥니다. 중지: F9',foreground='#93c5fd').pack(anchor='w')
-        ttk.Label(body,text='기준은 왼쪽 위 판입니다. 왼쪽 위 판의 칸 너비를 원하는 대로 맞춘 뒤 [기준 저장]을 누르면, 그 뒤로는 [MES 정렬]만 눌러도 모든 판이 그 너비로 맞춰집니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.',wraplength=900).pack(anchor='w',pady=10)
+        ttk.Label(body,text='작업지시관리·설비별공구관리 열기 → 메뉴 칸 줄이기 → 작업지시관리 표 → 생산일보관리',font=('맑은 고딕',12,'bold')).pack(anchor='w',pady=(8,6))
+        ttk.Label(body,text='누르면 MES를 앞으로 가져와 화면을 열고, 왼쪽 파란 메뉴 칸을 끝까지 줄인 뒤, 작업지시관리 표(칸 없애기·순서·너비)와 생산일보관리(판 크기·칸 너비)를 기준대로 맞춥니다. 중지: F9',wraplength=900,foreground='#93c5fd').pack(anchor='w')
+        ttk.Label(body,text='기준을 바꾸려면 MES에서 두 화면을 원하는 대로 정리한 뒤 [기준 저장]을 누르세요(생산일보는 왼쪽 위 판 기준). 실행 중에는 마우스·키보드 조작을 멈춰 주세요.',wraplength=900).pack(anchor='w',pady=10)
         actions=ttk.Frame(body);actions.pack(fill='x',pady=18)
         self.layout_button=ttk.Button(actions,text='MES 정렬',command=lambda:self.launch_layout('align'),style='Accent.TButton');self.layout_button.pack(side='left',padx=10)
-        self.layout_save_button=ttk.Button(actions,text='기준 저장 (왼쪽 위 판)',command=lambda:self.launch_layout('save'),style='Secondary.TButton');self.layout_save_button.pack(side='left')
+        self.layout_save_button=ttk.Button(actions,text='기준 저장 (지금 화면)',command=lambda:self.launch_layout('save'),style='Secondary.TButton');self.layout_save_button.pack(side='left')
         ttk.Button(actions,text='중지 (F9)',command=lambda:self.stop.set(),style='Secondary.TButton').pack(side='left',padx=10)
         # 점검용: 지금 MES 화면의 칸 제목·탭·메뉴 이름과 위치만 읽어 글로 복사합니다(누르지 않음, 행의 값은 담지 않음).
         self.layout_inspect_button=ttk.Button(actions,text='화면 구조 복사 (읽기만)',command=lambda:self.launch_layout('inspect'),style='Secondary.TButton');self.layout_inspect_button.pack(side='left')
@@ -2986,12 +2991,12 @@ class WashApp:
 
     def layout_preset_text(self):
         try:
-            widths=self.layout.load_preset(mes_layout_path())
-            if widths:
-                saved=self.layout.preset_saved_at(mes_layout_path())
-                return '대기 중 · 기준 저장됨: 칸 {}개{}'.format(len(widths),' · '+saved if saved else '')
+            standard=self.layout.load_standard(mes_layout_path())
+            if standard['custom']:
+                return '대기 중 · 기준: 저장한 화면{} · 작업지시관리 칸 {}개 순서, 생산일보 칸 {}개'.format(
+                    ' ('+standard['saved_at']+')' if standard['saved_at'] else '',len(standard['work']['order']),len(standard['daily']))
         except Exception:pass
-        return '대기 중 · 저장한 기준 없음 → 처음 [MES 정렬]을 누르면 왼쪽 위 판의 지금 너비를 기준으로 저장합니다.'
+        return '대기 중 · 기준: 기본값(2026-11-13에 정리해 둔 화면). 바꾸려면 화면을 정리한 뒤 [기준 저장]을 누르세요.'
 
     def launch_layout(self,mode):
         """mode: 'align'=정렬, 'save'=왼쪽 위 판을 기준으로 저장(읽기만), 'inspect'=화면 구조 복사(읽기만)"""
@@ -3029,7 +3034,7 @@ class WashApp:
                 finally:emit('reading_done',None)
             if mode=='inspect':
                 # 읽기만: 창을 앞으로 가져오거나 탭을 누르지 않고, 지금 보이는 화면 그대로 읽습니다.
-                reader=mes_structure_reader(self.pop)
+                reader=mes_layout_reader(self.pop)
                 report=capture({**mes_target,'mode':'mes_rows'},'MES 화면 구조',self.stop)
                 def rect(handle):
                     r=ma.rect(handle);return r.left,r.top,r.right,r.bottom
@@ -3040,27 +3045,22 @@ class WashApp:
                 outcome['text']='지후니우스 {} · MES 화면 구조 (읽기만 함)\n'.format(SUITE_APP_VERSION)+text
                 outcome['title']='화면 구조를 복사했습니다 · {}줄 · 채팅에 붙여넣어 주세요'.format(text.count('\n')+1)
                 return
-            reader=WashReader(self.pop)
+            reader=mes_layout_reader(self.pop)
             emit('log','ROOT MES 최대화 상태 확인 중…')
             wash_prepare_window(ma,self.stop)
             ma.activate()
-            report=capture({**mes_target,'mode':'mes_rows'},'MES 구조',self.stop)
-            report=wash_ensure_mes_production(self.mes,ma,report,capture,self.stop,emit)
             path=mes_layout_path()
+            pointer=self.layout.Pointer(ma)
             if mode=='save':
-                rows=self.layout.arrange(self.layout.grids(report))
-                if not rows or not rows[0][0]['columns']:raise RuntimeError('MES 생산일보관리에서 왼쪽 위 표의 칸 제목을 읽지 못했습니다.')
-                if self.layout.clipped(rows[0][0]):raise RuntimeError('왼쪽 위 표의 칸이 표 밖으로 잘려 있어 너비를 정확히 읽을 수 없습니다. 왼쪽 위 판의 칸을 모두 보이게 맞춘 뒤 다시 저장해 주세요.')
-                widths=self.layout.widths_of(rows[0][0])
-                self.layout.save_preset(path,widths,self.layout.label(rows,0,0))
-                outcome['title']='기준 저장 완료 · 왼쪽 위 판의 칸 {}개 · {}'.format(len(widths),' '.join('{} {}'.format(name,width) for name,width in widths.items()))
+                # 지금 화면(손으로 정리해 둔 상태)을 기준으로 읽습니다. 탭만 누르고 표는 건드리지 않습니다.
+                found=self.layout.capture_standard(mes_target,pointer,capture,self.stop,emit)
+                self.layout.save_standard(path,found['daily'],found['work'])
+                outcome['title']='기준 저장 완료 · 작업지시관리 칸 {}개 순서·너비(남길 칸 {}개), 생산일보 칸 {}개 너비'.format(
+                    len(found['work']['order']),len(found['work']['keep']),len(found['daily']))
             else:
-                widths=self.layout.load_preset(path)
                 emit('log','시작합니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.')
-                pointer=self.layout.Pointer(ma)
-                result=self.layout.align(mes_target,pointer,capture,self.stop,emit,report,widths=widths)
-                if result['used_reference']:self.layout.save_preset(path,result['widths'],result['reference'])
-                outcome['title'],outcome['lines']=self.layout.brief(result,time.monotonic()-self.started)
+                result=self.layout.align_all(mes_target,pointer,capture,self.stop,emit,self.layout.load_standard(path))
+                outcome['title'],outcome['lines']=self.layout.brief_all(result,time.monotonic()-self.started)
                 if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
                     SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',detail='\n'.join(outcome['lines']),
                                         work=str(self.started),context='\n'.join(self.trail[-150:]))
@@ -5564,7 +5564,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.13.3'
+SUITE_APP_VERSION = '2026.11.13.4'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

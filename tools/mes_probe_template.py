@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-PROBE_VERSION = '2'
+PROBE_VERSION = '3'
 APP_VERSION = ...  # build: 지후니우스 버전
 WASH_POP_SOURCE = ...  # build: src/host/wash_pop.py
 WASH_MES_SOURCE = ...  # build: src/host/wash_mes.py
@@ -124,8 +124,8 @@ def experiments(env):
 
     def listing(grid):
         right = grid['x'] + grid['w']
-        text = ['{}{} {}'.format('▷' if header[1] >= right else ('◁' if header[1] < grid['x'] - 1 else ''), header[0], header[3])
-                for header in sorted(grid['headers'], key=lambda header: (header[3] <= 0, header[1]))]
+        text = ['{}{} {}'.format('▷' if header[3] <= 0 or header[1] >= right else ('◁' if header[1] < grid['x'] - 1 else ''),
+                                  header[0], header[3]) for header in sorted(grid['headers'], key=lambda header: (header[3] <= 0, header[1]))]
         return ['    ' + ' | '.join(text[start:start + 10]) for start in range(0, len(text), 10)]
 
     def refresh(label):
@@ -289,20 +289,22 @@ def experiments(env):
         if point is None:
             say('  ✗ 경계에서 크기 조절 모양을 확인하지 못해 누르지 않음 · ' + pointer.trace)
             return
-        pointer.drag(point, (point[0] + 12, point[1]))
+        # 2판 현장 결과: 놓은 자리가 칸의 오른쪽 끝이 된다 → 지금 끝에서 12 오른쪽에 놓는다.
+        edge = column(grid, one)['x'] + column(grid, one)['w']
+        pointer.drag(point, (edge + 12, point[1]))
         pointer.sleep(0.3)
         now = refresh('칸 너비 +12 뒤')
         after = dict(L.widths_of(now))
         got = after.get(one, 0) - before[one]
         others = {name: after[name] - before[name] for name in after if name != one and name in before and after[name] != before[name]}
-        say('  경계를 오른쪽으로 12 끎 → "{}" 너비 {} → {} ({:+d})'.format(one, before[one], after.get(one), got))
+        say('  칸 끝에서 12 오른쪽에 놓음 → "{}" 너비 {} → {} ({:+d})'.format(one, before[one], after.get(one), got))
         say('  바로 뒤 칸 "{}" 위치 {:+d} · 다른 칸 너비 변화 {}'.format(two, column(now, two)['x'] - spot if column(now, two) else 0, others or '없음'))
         if got:
             point = grab_edge(one)
             if point is None:
                 say('  ✗ 되돌리려는데 경계를 잡지 못함 · ' + pointer.trace)
                 return
-            pointer.drag(point, (point[0] - got, point[1]))
+            pointer.drag(point, (column(now, one)['x'] + before[one], point[1]))
             pointer.sleep(0.3)
             now = refresh('칸 너비 되돌린 뒤')
         final = L.widths_of(now).get(one)

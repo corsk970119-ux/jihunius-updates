@@ -21,10 +21,31 @@ TOLERANCE = 1                # 이 픽셀 이내 차이는 같은 크기로 봅�
 MAX_GAP = 60                 # 판 사이 틈이 이보다 넓으면 경계선으로 보지 않습니다.
 PANEL_ROUNDS = 4             # 판 크기 맞춤 반복 한도
 COLUMN_PASSES = 3            # 칸 너비 맞춤 반복 한도(매번 화면을 다시 읽어 확인)
-EDGE_OFFSETS = (-2, -1, -3, 0, -4, 1, 2)   # 칸 경계에서 포인터를 올려 볼 위치(경계 기준 픽셀)
+# 칸 경계에서 포인터를 올려 볼 위치(경계 기준 픽셀). 현장 확인: 크기 조절 모양이 되는 범위는 표에 따라 -2~+3 또는 -5~+3.
+EDGE_OFFSETS = (-1, 0, -2, 1, 2, -3, -4)
 HOVER_SECONDS = 0.15         # 포인터 모양이 바뀌기를 기다리는 시간
 MENU_COLLAPSED = 40          # 왼쪽 메뉴 칸(파란 바)이 이 너비 이하면 이미 줄여 둔 것으로 봅니다.
 PRESET_VERSION = 1
+
+
+WORK_GROUP, WORK_ITEM = '생산관리', '작업지시관리'      # 왼쪽 메뉴의 묶음 → 항목
+TOOL_GROUP, TOOL_ITEM = '설비관리', '설비별공구관리'
+WORK_TAB, DAILY_TAB = '작업지시관리', '생산일보관리'    # 작업지시관리 문서의 안쪽 탭
+MENU_WORKING_WIDTH = 200     # 메뉴 항목을 누를 때의 메뉴 칸 너비(좁으면 글자가 세로로 접혀 항목이 화면 밖으로 밀림)
+
+# 기본 기준: 2026-11-13 현장 PC에서 사용자가 손으로 정리해 둔 화면을 점검 프로그램으로 읽은 값.
+# [기준 저장]을 누르면 그때 화면이 이 값을 대신합니다.
+DEFAULT_DAILY = (('No.', 40), ('선택', 35), ('P/No.', 50), ('거래처명', 119), ('Fixture', 61), ('Size', 50),
+                 ('환자명', 50), ('치식', 35), ('세척', 40), ('비고', 55), ('영점', 51))
+DEFAULT_WORK_ORDER = (('선택', 35), ('지시일', 85), ('시간', 47), ('프로젝트No', 49), ('작업자', 48), ('설비코드', 54), ('설비명', 125),
+                      ('특이사항1', 100), ('특이사항2', 100), ('특이사항3', 100), ('거래처명', 140), ('지역', 50), ('Fixture Name', 80),
+                      ('Type', 60), ('Size', 60), ('치과명', 80), ('환자명', 80), ('치식', 40), ('stl', 40), ('납기일', 90),
+                      ('배송업체', 80), ('출하일', 90), ('진행상태', 80), ('세척순서', 60), ('길이', 60))
+# 정리된 표에 남아 있던 칸 전부(화면 오른쪽 밖 칸 포함). 여기에 없는 칸은 없앱니다.
+DEFAULT_WORK_KEEP = tuple(name for name, _ in DEFAULT_WORK_ORDER) + (
+    '직경', '각도', '순서', 'LOT-NO', '소재구분', '소재 LOT-NO', '투입스크류 LOT-NO', 'M/M No.', 'V/C No.', 'V/M No.', '표준코드',
+    '수량', '잔량', '라벨출력여부', '재가공구분', '수주보류', '거래명세서입력여부', '거래명세서입력일', '가공', '공정검사', '세척', '포장',
+    '완제품검사', '작지승인', '성적서승인', '작지작성구분', '완료구분')
 
 
 class Stopped(Exception):
@@ -544,7 +565,8 @@ def align_columns(grid, widths, pointer, emit, check):
         point = pointer.find_edge(neutral, points, lambda hit: hit == grid['handle'])
         if point is None:
             return False
-        pointer.drag(point, (point[0] + amount, point[1]))
+        # 현장 확인: 칸의 오른쪽 끝은 '놓은 자리'로 옵니다(잡은 자리와의 차이는 유지되지 않음). 그래서 목표 끝 위치에 놓습니다.
+        pointer.drag(point, (at + amount, point[1]))
         applied[index] += amount
         return True
 
@@ -578,7 +600,7 @@ def align_columns(grid, widths, pointer, emit, check):
 
 # ── 전체 흐름 ───────────────────────────────────────────────────────────────────
 
-def align(target, pointer, capture, stop, emit, report, widths=None):
+def align(target, pointer, capture, stop, emit, report, widths=None, collapse=True):
     """판 크기를 같게 하고 칸 너비를 widths(칸 이름 → 너비)에 맞춥니다.
 
     widths가 없으면 왼쪽 위 표의 지금 너비를 기준으로 씁니다(result['used_reference']=True).
@@ -641,9 +663,12 @@ def align(target, pointer, capture, stop, emit, report, widths=None):
             pass
     before = {grid['handle']: pointer.rect(grid['handle']) for row in rows for grid in row}
     # 왼쪽 메뉴 칸을 먼저 줄여야 본문 너비가 정해지고, 그 너비를 판들이 똑같이 나눕니다.
-    emit('log', '왼쪽 메뉴 칸 줄이는 중…')
     check()
-    result['menu'] = collapse_menu(rows, native, pointer, emit)
+    if collapse:
+        emit('log', '왼쪽 메뉴 칸 줄이는 중…')
+        result['menu'] = collapse_menu(rows, native, pointer, emit)
+    else:   # 전체 정렬에서는 메뉴 칸을 이미 줄여 두고 들어옵니다.
+        result['menu'] = {'found': True, 'moved': False, 'failed': False}
     emit('log', '판 {}개 크기 맞추는 중…'.format(count))
     result['panels'] = equalize(rows, native, pointer, emit, check)
     emit('note', '판 크기 {} · 경계 {}개 중 {}회 이동 · 못 잡음 {}'.format(
@@ -729,6 +754,461 @@ def brief(result, elapsed):
     return 'MES 정렬 완료 · ' + done, []
 
 
+# ── 기준(칸 순서·너비) ──────────────────────────────────────────────────────────
+
+def default_standard():
+    return {'daily': OrderedDict(DEFAULT_DAILY),
+            'work': {'order': [name for name, _ in DEFAULT_WORK_ORDER], 'widths': OrderedDict(DEFAULT_WORK_ORDER),
+                     'keep': list(DEFAULT_WORK_KEEP)},
+            'saved_at': '', 'custom': False}
+
+
+def load_standard(path):
+    """저장한 기준을 읽습니다. 파일이 없거나 읽을 수 없는 부분은 기본값을 씁니다.
+
+    반환: {'daily': 생산일보 칸 이름→너비, 'work': {'order': [이름…], 'widths': {이름: 너비}, 'keep': [이름…]},
+           'saved_at': 저장한 때, 'custom': 저장한 기준을 썼는지}
+    """
+    standard = default_standard()
+    try:
+        with open(str(path), encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return standard
+    if not isinstance(data, dict):
+        return standard
+
+    def pairs(items):
+        found = OrderedDict()
+        for name, width in items:
+            if isinstance(name, str) and name and isinstance(width, int) and not isinstance(width, bool) and 5 <= width <= 3000:
+                found[name] = width
+        return found
+
+    try:
+        daily = pairs(data.get('columns') or ())
+        if daily:
+            standard['daily'] = daily
+            standard['custom'] = True
+    except (TypeError, ValueError):
+        pass
+    try:
+        work = data.get('work') or {}
+        order = pairs(work.get('order') or ())
+        keep = [name for name in (work.get('keep') or ()) if isinstance(name, str) and name]
+        if order and keep:
+            standard['work'] = {'order': list(order), 'widths': order, 'keep': keep}
+            standard['custom'] = True
+    except (TypeError, ValueError, AttributeError):
+        pass
+    if standard['custom']:
+        standard['saved_at'] = str(data.get('saved_at', ''))
+    return standard
+
+
+def save_standard(path, daily, work):
+    """기준 저장. daily: 생산일보 칸 이름→너비. work: 작업지시관리 표의 {'order', 'widths', 'keep'}."""
+    data = {'version': 2, 'columns': [[str(name), int(width)] for name, width in daily.items()],
+            'work': {'order': [[str(name), int(work['widths'][name])] for name in work['order']],
+                     'keep': [str(name) for name in work['keep']]},
+            'saved_at': time.strftime('%Y-%m-%d %H:%M')}
+    directory = os.path.dirname(str(path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    temporary = str(path) + '.tmp'
+    with open(temporary, 'w', encoding='utf-8') as handle:
+        json.dump(data, handle, ensure_ascii=False)
+    os.replace(temporary, str(path))
+    return data
+
+
+# ── 화면에 실제로 보이는 칸 ─────────────────────────────────────────────────────
+
+def chain(grid):
+    """실제로 화면에 나란히 보이는 칸 제목들(왼쪽→오른쪽).
+
+    현장 확인: 화면 밖 칸은 위치가 없고(0), 표가 가로로 밀린 뒤에는 밀려 나간 칸에 예전 위치가 남아 있기도 합니다.
+    그래서 표 안에서 시작하고 서로 빈틈없이 이어지는 줄 가운데 가장 긴 것만 믿습니다.
+    """
+    right = grid['x'] + grid['w']
+    inside = sorted((column for column in grid['columns'] if grid['x'] - 1 <= column['x'] < right), key=lambda column: column['x'])
+    best, best_width = [], 0
+    for start in range(len(inside)):
+        run = [inside[start]]
+        for column in inside[start + 1:]:
+            edge = run[-1]['x'] + run[-1]['w']
+            if abs(column['x'] - edge) <= 1:
+                run.append(column)
+            elif column['x'] > edge + 1:
+                break
+        width = sum(column['w'] for column in run)
+        if width > best_width:
+            best, best_width = run, width
+    return best
+
+
+def tidy(grid):
+    """표가 가로로 밀려 있지 않고 칸 제목 위치를 모두 믿을 수 있는지."""
+    return not grid.get('scrolled') and len(chain(grid)) == len(grid['columns'])
+
+
+def whole(grid, column):
+    return column['x'] >= grid['x'] and column['x'] + column['w'] <= grid['x'] + grid['w'] - 2
+
+
+# ── 화면 찾아가기 ───────────────────────────────────────────────────────────────
+
+class Navigator:
+    """MES 화면 찾아가기: 왼쪽 메뉴로 문서를 앞에 띄우고, 문서 안쪽 탭을 고릅니다.
+
+    현장 확인(2026-11-13): 메뉴 항목을 한 번 누르면 그 화면이 열리거나(이미 열려 있으면) 앞으로 옵니다. 접힌 묶음은
+    이름 줄을 누르면 펼쳐집니다. 누르기 전에는 그 자리의 맨 위 창이 메뉴·탭 자신인지 확인합니다.
+    """
+
+    def __init__(self, target, pointer, capture, stop, emit):
+        self.target, self.pointer, self.capture, self.stop, self.emit = target, pointer, capture, stop, emit
+        self.menu_window = None      # 메뉴(navBarControl) 창
+        self.document = None         # 작업지시관리 문서의 탭 창
+
+    def check(self):
+        if self.stop.is_set():
+            raise Stopped('사용자 중지')
+
+    def read(self, text, root=None):
+        self.check()
+        return self.capture(dict(self.target, handle=root or self.target.get('handle'), mode='mes_rows'), text, self.stop)
+
+    def tap(self, point, handle, what):
+        hit = self.pointer.window_at(point)
+        if handle not in self.pointer.lineage(hit):
+            raise RuntimeError('{}: 그 자리가 다른 창에 가려져 있어 누르지 않고 중단했습니다.'.format(what))
+        self.pointer.click(point)
+
+    def menu(self):
+        return nav_tree(self.read('MES 메뉴', self.menu_window))
+
+    def open_from_menu(self, group_name, item_name):
+        """메뉴에서 묶음을 (접혀 있으면) 펼치고 항목을 눌러 그 화면을 열거나 앞으로 가져옵니다."""
+        def find():
+            group = next((one for one in self.menu() if one['name'] == group_name), None)
+            if group is None:
+                raise RuntimeError('MES 메뉴에서 "{}"을 찾지 못했습니다.'.format(group_name))
+            entry = next((one for one in group['items'] if one['name'] == item_name), None)
+            if entry is None:
+                raise RuntimeError('MES 메뉴 "{}"에서 "{}"을 찾지 못했습니다.'.format(group_name, item_name))
+            return group, entry
+        group, entry = find()
+        if not entry['shown']:
+            self.tap(group['head'], group['handle'], '메뉴 ' + group_name)
+            self.pointer.sleep(0.8)
+            group, entry = find()
+            if not entry['shown']:
+                raise RuntimeError('MES 메뉴 "{}"을 눌러도 "{}"이 보이지 않습니다.'.format(group_name, item_name))
+        self.emit('note', '메뉴 {} → {} @{},{} {}x{}'.format(group_name, item_name, entry['x'], entry['y'], entry['w'], entry['h']))
+        self.tap((entry['x'] + entry['w'] // 2, entry['y'] + entry['h'] // 2), group['handle'], '메뉴 ' + item_name)
+        self.pointer.sleep(1.6)
+
+    def front_tab(self, report, name):
+        """앞에 보이는 탭 name: (항목, 누를 자리). 없으면 None."""
+        for item in elements(report):
+            bounds = item.get('bounds') or ()
+            if item.get('role') == 37 and str(item.get('name', '')).strip() == name and len(bounds) == 4 and bounds[2] > 4:
+                point = (bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+                if item.get('handle') in self.pointer.lineage(self.pointer.window_at(point)):
+                    return item, point
+        return None
+
+    def selected_tab(self, report):
+        """작업지시관리 문서에서 지금 선택된 안쪽 탭 이름(앞에 보이는 것). 없으면 None."""
+        for name in (WORK_TAB, DAILY_TAB, '작업지시조회'):
+            found = self.front_tab(report, name)
+            if found is not None and found[0].get('selected'):
+                return name
+        return None
+
+    def select_tab(self, name):
+        """작업지시관리 문서의 안쪽 탭을 고르고, 그 문서 아래를 읽은 결과를 돌려줍니다."""
+        report = self.read('MES 탭', self.document)
+        found = self.front_tab(report, name)
+        if found is None and self.document:
+            report = self.read('MES 탭', None)
+            found = self.front_tab(report, name)
+        if found is None:
+            raise RuntimeError('MES에서 "{}" 탭이 앞에 보이지 않아 중단했습니다.'.format(name))
+        tab, point = found
+        self.document = tab.get('handle')
+        if not tab.get('selected'):
+            self.tap(point, tab.get('handle'), '탭 ' + name)
+            self.pointer.sleep(1.2)
+        return self.read(name + ' 탭', self.document)
+
+
+# ── 작업지시관리 표 ─────────────────────────────────────────────────────────────
+
+def carry(pointer, grid, source, end):
+    """칸 제목 source를 끌어 end에 놓습니다. 잡을 자리와 놓을 자리가 이 표인지 먼저 확인합니다.
+
+    현장 확인: 다른 칸 제목의 왼쪽 절반에 놓으면 그 칸 앞으로 옮겨집니다.
+    """
+    start = (source['x'] + source['w'] // 2, source['y'] + source['h'] // 2)
+    for point in (start, end):
+        if pointer.window_at(point) != grid['handle']:
+            raise RuntimeError('작업지시관리 표의 칸 제목 자리가 다른 창에 가려져 있어 중단했습니다.')
+    pointer.hold(start)
+    try:
+        pointer.sleep(0.08)
+        pointer.move((start[0], start[1] + 8) if end[1] != start[1] else (start[0] + (6 if end[0] >= start[0] else -6), start[1]))
+        pointer.sleep(0.06)
+        pointer.move(((start[0] + end[0]) // 2, (start[1] + end[1]) // 2))
+        pointer.sleep(0.15)
+        pointer.move(end)
+        pointer.sleep(0.35)
+    finally:
+        pointer.drop()
+    pointer.sleep(0.4)
+
+
+def arrange_work(nav, handle, standard):
+    """작업지시관리 표를 기준대로 정리합니다: 기준에 없는 칸 없애기 → 칸 너비 → 칸 순서(다시 너비 확인).
+
+    화면에 보이는 칸만 다룹니다(가로 스크롤은 하지 않음). 칸을 없애고 줄이면 뒤 칸들이 화면 안으로 들어옵니다.
+    """
+    pointer, emit = nav.pointer, nav.emit
+    order, widths, keep = list(standard['order']), standard['widths'], set(standard['keep'])
+    result = {'removed': [], 'stuck': [], 'moved': 0, 'resized': 0, 'blocked': None, 'scrolled': False, 'remaining': []}
+    box = {}
+
+    def look(text):
+        report = nav.read(text, handle)
+        found = [grid for grid in front(grids(report, required=()), pointer) if grid['handle'] == handle]
+        if not found:
+            raise RuntimeError('작업지시관리 표가 화면 앞에서 사라져 중단했습니다.')
+        box['grid'] = found[0]
+        return found[0]
+
+    def home():
+        """표가 가로로 밀려 있으면, 칸 제목을 끈 채 왼쪽 끝에 두어 처음 자리로 되돌립니다(Esc로 끌기는 취소)."""
+        for _ in range(3):
+            grid = box['grid']
+            if tidy(grid):
+                return True
+            inside = [column for column in chain(grid) if whole(grid, column) and column['x'] > grid['x'] + 40]
+            if not inside:
+                return False
+            source = inside[len(inside) // 2]
+            start = (source['x'] + source['w'] // 2, source['y'] + source['h'] // 2)
+            if pointer.window_at(start) != grid['handle']:
+                return False
+            pointer.hold(start)
+            try:
+                pointer.sleep(0.08)
+                pointer.move((start[0] - 6, start[1]))
+                pointer.sleep(0.06)
+                pointer.move((grid['x'] + 30, start[1]))     # 표의 왼쪽 끝(맨 앞 번호 칸 위)
+                pointer.sleep(2.5)
+                pointer.key(0x1B)
+                pointer.sleep(0.2)
+            finally:
+                pointer.drop()
+            pointer.sleep(0.4)
+            look('가로 스크롤 되돌린 뒤')
+        return tidy(box['grid'])
+
+    def reorder():
+        moves = 0
+        for _ in range(60):
+            nav.check()
+            grid = box['grid']
+            visible = chain(grid)
+            names = [column['name'] for column in visible]
+            present = set(header[0] for header in grid['headers'])
+            wanted = [name for name in order if name in present]
+            index = next((i for i, name in enumerate(wanted) if i < len(names) and names[i] != name), None)
+            if index is None:
+                return moves, None
+            name = wanted[index]
+            source = next((column for column in visible if column['name'] == name and whole(grid, column)), None)
+            if source is None:
+                return moves, name
+            target = visible[index]
+            carry(pointer, grid, source, (target['x'] + max(3, target['w'] // 4), target['y'] + target['h'] // 2))
+            moves += 1
+            now = [column['name'] for column in chain(look('칸 옮긴 뒤'))]
+            emit('note', '칸 옮김 · {} → {}번째 · {}'.format(name, index + 1, '됨' if index < len(now) and now[index] == name else '안 됨'))
+            if index >= len(now) or now[index] != name:
+                return moves, name
+        return moves, None
+
+    look('작업지시관리 표')
+    if not home():
+        result['scrolled'] = True
+        return result
+
+    emit('log', '작업지시관리 표: 기준에 없는 칸 없애는 중…')
+    for _ in range(40):
+        nav.check()
+        grid = box['grid']
+        extra = next((column for column in chain(grid) if column['name'] and column['name'] not in keep
+                      and column['name'] not in result['stuck'] and whole(grid, column)), None)
+        if extra is None:
+            break
+        # 칸 제목을 표 안쪽(아래)으로 끌어다 놓으면 그 칸이 없어집니다.
+        carry(pointer, grid, extra, (extra['x'] + extra['w'] // 2, extra['y'] + extra['h'] // 2 + 140))
+        gone = all(header[0] != extra['name'] for header in look('칸 없앤 뒤')['headers'])
+        result['removed' if gone else 'stuck'].append(extra['name'])
+        emit('note', '칸 없애기 · {} · {}'.format(extra['name'], '없어짐' if gone else '그대로 있음'))
+
+    emit('log', '작업지시관리 표: 칸 너비·순서 맞추는 중…')
+    for _ in range(3):
+        nav.check()
+        grid = box['grid']
+        done, _ = align_columns(dict(grid, columns=chain(grid)), widths, pointer, emit, nav.check)
+        if done:
+            result['resized'] += done
+            look('칸 너비 확인')
+        moved, blocked = reorder()
+        result['moved'] += moved
+        result['blocked'] = blocked
+        if not done and not moved:
+            break
+    grid = box['grid']
+    result['remaining'] = [(column['name'], column['w'], int(widths[column['name']])) for column in chain(grid)
+                           if column['name'] in widths and whole(grid, column) and abs(int(widths[column['name']]) - column['w']) > TOLERANCE]
+    return result
+
+
+# ── 전체 정렬 ───────────────────────────────────────────────────────────────────
+
+def menu_bar(nav, first):
+    """왼쪽 메뉴 칸의 경계선과 너비 재기·끌기 함수."""
+    pointer = nav.pointer
+    tree = nav_tree(first)
+    if not tree:
+        raise RuntimeError('MES 왼쪽 메뉴를 읽지 못했습니다. MES 화면을 확인해 주세요.')
+    nav.menu_window = tree[0]['handle']
+    item = menu_divider_beside(native_parents(first), pointer, nav.menu_window)
+    if item is None:
+        raise RuntimeError('MES 왼쪽 메뉴 칸의 경계선을 찾지 못했습니다.')
+
+    def width():
+        left, _, right, _ = pointer.rect(item['first'])
+        return right - left
+
+    def pull(amount):
+        if not drag_divider(pointer, item, amount, nav.emit):
+            raise RuntimeError('MES 왼쪽 메뉴 칸의 경계선에서 크기 조절 모양을 확인하지 못해 중단했습니다.')
+        settle(pointer, item)
+        pointer.sleep(0.3)
+
+    def collapse():
+        if width() > MENU_COLLAPSED:
+            pull(pointer.rect(item['first'])[0] - divider_gap(pointer, item)[0] + 1)
+
+    return width, pull, collapse
+
+
+def align_all(target, pointer, capture, stop, emit, standard):
+    """MES 정렬 전체: 메뉴로 작업지시관리·설비별공구관리 열기 → 메뉴 칸 줄이기 → 작업지시관리 표 → 생산일보관리."""
+    nav = Navigator(target, pointer, capture, stop, emit)
+    result = {'opened': [], 'menu': {}, 'work': None, 'daily': None}
+    emit('log', 'MES 화면 읽는 중…')
+    first = nav.read('MES 구조')
+    width, pull, collapse = menu_bar(nav, first)
+    result['menu']['before'] = width()
+
+    names = set(str(item.get('name', '')).strip() for item in elements(first) if item.get('role') == 37)
+    work_open, tool_open = WORK_TAB in names and DAILY_TAB in names, TOOL_ITEM in names
+    shown = work_open and nav.front_tab(first, WORK_TAB) is not None
+    emit('note', '작업지시관리 {} · 설비별공구관리 {} · 메뉴 칸 {}'.format(
+        ('앞에 있음' if shown else '뒤에 있음') if work_open else '안 열림', '열림' if tool_open else '안 열림', width()))
+    if not (work_open and tool_open and shown):
+        emit('log', '메뉴에서 화면 여는 중…')
+        if width() < MENU_WORKING_WIDTH - 20:
+            pull(MENU_WORKING_WIDTH - width())
+        if not work_open:
+            nav.open_from_menu(WORK_GROUP, WORK_ITEM)
+            result['opened'].append(WORK_ITEM)
+        if not tool_open:
+            nav.open_from_menu(TOOL_GROUP, TOOL_ITEM)
+            result['opened'].append(TOOL_ITEM)
+        if not tool_open or (work_open and not shown):     # 작업지시관리를 다시 앞으로
+            nav.open_from_menu(WORK_GROUP, WORK_ITEM)
+        if nav.front_tab(nav.read('MES 문서 확인'), WORK_TAB) is None:
+            raise RuntimeError('메뉴에서 작업지시관리를 눌렀지만 그 화면이 앞에 보이지 않아 중단했습니다.')
+
+    emit('log', '왼쪽 메뉴 칸 줄이는 중…')
+    collapse()
+    result['menu']['after'] = width()
+
+    emit('log', '작업지시관리 표 읽는 중…')
+    tables = front(grids(nav.select_tab(WORK_TAB), required=()), pointer)
+    if not tables:
+        raise RuntimeError('작업지시관리 탭에서 표를 찾지 못해 중단했습니다.')
+    result['work'] = arrange_work(nav, max(tables, key=lambda grid: len(grid['headers']))['handle'], standard['work'])
+
+    emit('log', '생산일보관리 읽는 중…')
+    result['daily'] = align(target, pointer, capture, stop, emit, nav.select_tab(DAILY_TAB), widths=standard['daily'], collapse=False)
+    return result
+
+
+def capture_standard(target, pointer, capture, stop, emit):
+    """지금 화면(손으로 정리해 둔 상태)을 기준으로 읽습니다. 탭만 누르고 표는 건드리지 않습니다.
+
+    반환: {'daily': 생산일보 왼쪽 위 판의 칸 이름→너비, 'work': {'order', 'widths', 'keep'}}
+    """
+    nav = Navigator(target, pointer, capture, stop, emit)
+    first = nav.read('MES 구조')
+    if nav.front_tab(first, WORK_TAB) is None:
+        raise RuntimeError('작업지시관리 화면이 앞에 보이지 않습니다. MES에서 작업지시관리를 띄운 뒤 다시 눌러 주세요.')
+    chosen = nav.selected_tab(first)
+    tables = front(grids(nav.select_tab(WORK_TAB), required=()), pointer)
+    if not tables:
+        raise RuntimeError('작업지시관리 탭에서 표를 찾지 못했습니다.')
+    grid = max(tables, key=lambda one: len(one['headers']))
+    if not tidy(grid):
+        raise RuntimeError('작업지시관리 표가 가로로 밀려 있어 칸 순서를 정확히 읽을 수 없습니다. '
+                           '표 아래 가로 스크롤을 왼쪽 끝으로 옮긴 뒤 다시 눌러 주세요.')
+    visible = [column for column in chain(grid) if column['name']]
+    if visible and not whole(grid, visible[-1]):     # 오른쪽 끝에서 잘린 칸은 너비를 믿을 수 없습니다.
+        visible = visible[:-1]
+    names = [column['name'] for column in visible]
+    if len(set(names)) != len(names) or not names:
+        raise RuntimeError('작업지시관리 표의 칸 이름을 구분할 수 없어 기준으로 저장하지 못했습니다.')
+    work = {'order': names, 'widths': OrderedDict((column['name'], column['w']) for column in visible),
+            'keep': [header[0] for header in grid['headers'] if header[0]]}
+    rows = arrange(front(grids(nav.select_tab(DAILY_TAB)), pointer))
+    if not rows or not rows[0][0]['columns']:
+        raise RuntimeError('생산일보관리에서 왼쪽 위 표의 칸 제목을 읽지 못했습니다.')
+    if clipped(rows[0][0]):
+        raise RuntimeError('생산일보관리 왼쪽 위 표의 칸이 표 밖으로 잘려 있어 너비를 정확히 읽을 수 없습니다. '
+                           '왼쪽 위 판의 칸을 모두 보이게 맞춘 뒤 다시 저장해 주세요.')
+    daily = widths_of(rows[0][0])
+    if chosen and chosen != DAILY_TAB:
+        nav.select_tab(chosen)
+    return {'daily': daily, 'work': work}
+
+
+def brief_all(result, elapsed):
+    """전체 정렬 결과 요약. 반환: (제목, 자세한 줄들)"""
+    work, daily = result['work'], result['daily']
+    lines = []
+    if work['scrolled']:
+        lines.append('작업지시관리 표가 가로로 밀려 있어 정리하지 못했습니다. 표 아래 가로 스크롤을 왼쪽 끝으로 옮긴 뒤 다시 눌러 주세요.')
+    if work['stuck']:
+        lines.append('작업지시관리: 없애지 못한 칸 — ' + ', '.join(work['stuck']))
+    if work['blocked']:
+        lines.append('작업지시관리: "{}" 칸을 제자리로 옮기지 못했습니다(화면에 다 보이지 않거나 옮겨지지 않음).'.format(work['blocked']))
+    if work['remaining']:
+        lines.append('작업지시관리: 기준과 다른 칸 너비 — ' + ', '.join('{} {}→{}'.format(name, now, want) for name, now, want in work['remaining']))
+    lines.extend(line for line in brief(daily, elapsed)[1] if line != '맞추지 못한 곳:')
+    done = '{}작업지시관리 칸 없앰 {}·옮김 {}·너비 {} · 생산일보 판 경계 {}회·칸 {}개 · {:.1f}초'.format(
+        '{} 열기 · '.format('·'.join(result['opened'])) if result['opened'] else '',
+        len(work['removed']), work['moved'], work['resized'], daily['panels']['moved'], daily['columns_moved'], elapsed)
+    if lines:
+        return 'MES 정렬 일부만 완료 · ' + done, ['맞추지 못한 곳:'] + lines
+    return 'MES 정렬 완료 · ' + done, []
+
+
 # ── 화면 구조 요약(읽기 전용 점검) ───────────────────────────────────────────────
 
 def describe(report, rect=None, at=None, limit=260):
@@ -752,7 +1232,7 @@ def describe(report, rect=None, at=None, limit=260):
         if item.get('role') == 37:
             lines.append('  {}{} {} · 창{}'.format(item.get('name', ''), ' (선택)' if item.get('selected') else '', spot(item), item.get('handle')))
 
-    lines.append('[표] 칸 이름과 너비(▷ 표 오른쪽 밖, ◁ 왼쪽 밖). 겹쳐 읽힌 표는 한 번만 적음')
+    lines.append('[표] 칸 이름과 너비(판독 순서. ▷ 화면 밖이라 위치 없음, ◁ 왼쪽으로 밀려 있음). 겹쳐 읽힌 표는 한 번만 적음')
     kept = {}
     for grid in grids(report, required=()):
         key = (grid['x'], grid['y'], grid['w'], grid['h'], tuple(header[0] for header in grid['headers']))
@@ -761,27 +1241,25 @@ def describe(report, rect=None, at=None, limit=260):
             kept[key] = (depth, grid)
     for key in sorted(kept, key=lambda item: (item[1], item[0])):
         grid = kept[key][1]
-        rows = sum(1 for table in items if table.get('role') == 24 and table.get('handle') == grid['handle']
-                   for group in children.get(table.get('id'), ()) for row in children.get(group.get('id'), ()) if row.get('role') == 28)
         seen = ''
         if at is not None and grid['columns']:
             first = grid['columns'][0]
             seen = ' · 앞에 보임' if at((grid['x'] + min(20, grid['w'] // 2), first['y'] + first['h'] // 2)) == grid['handle'] else ' · 가려짐'
-        lines.append('  표 @{},{} {}x{} · 칸 {}개 · 행 {}개{} · 창{}'.format(
-            grid['x'], grid['y'], grid['w'], grid['h'], len(grid['headers']), rows, seen, grid['handle']))
+        lines.append('  표 @{},{} {}x{} · 칸 {}개(화면에 이어져 보이는 것 {}개){} · 창{}'.format(
+            grid['x'], grid['y'], grid['w'], grid['h'], len(grid['headers']), len(chain(grid)), seen, grid['handle']))
         right = grid['x'] + grid['w']
-        text = ['{}{} {}'.format('▷' if header[1] >= right else ('◁' if header[1] < grid['x'] - 1 else ''), header[0], header[3])
-                for header in grid['headers']]
+        text = ['{}{} {}'.format('▷' if header[3] <= 0 or header[1] >= right else ('◁' if header[1] < grid['x'] - 1 else ''),
+                                  header[0], header[3]) for header in grid['headers']]
         for start in range(0, len(text), 10):
             lines.append('    ' + ' | '.join(text[start:start + 10]))
         if rect is not None:
-            chain = []
+            links = []
             for handle in lineage(native, grid['handle'])[:8]:
                 try:
-                    chain.append('{}({},{},{},{})'.format(handle, *rect(handle)))
+                    links.append('{}({},{},{},{})'.format(handle, *rect(handle)))
                 except Exception:
-                    chain.append('{}(위치 못 읽음)'.format(handle))
-            lines.append('    창 구조: ' + ' ← '.join(chain))
+                    links.append('{}(위치 못 읽음)'.format(handle))
+            lines.append('    창 구조: ' + ' ← '.join(links))
 
     tree = nav_tree(report)
     lines.append('[메뉴] 묶음 {}개{}'.format(len(tree), ' · 창{}'.format(tree[0]['handle']) if tree else ''))

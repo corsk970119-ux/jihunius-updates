@@ -509,9 +509,9 @@ class DescribeTests(unittest.TestCase):
         mes.layout()
         text = layout.describe(mes.report(), rect=lambda handle: mes.rects[handle], at=lambda point: mes.window_at(*point))
         self.assertIn('생산일보관리 (선택) @403,155 94x23 · 창201', text)
-        self.assertIn('표 @218,267 634x290 · 칸 11개 · 행 1개 · 앞에 보임 · 창1100', text)
+        self.assertIn('표 @218,267 634x290 · 칸 11개(화면에 이어져 보이는 것 11개) · 앞에 보임 · 창1100', text)
         self.assertIn('No. 37 | 선택 38 | P/No. 47 | 거래처명 120', text)
-        self.assertIn('칸 6개 · 행 1개 · 가려짐 · 창1230', text)                # 뒤 문서의 표
+        self.assertIn('칸 6개(화면에 이어져 보이는 것 6개) · 가려짐 · 창1230', text)   # 뒤 문서의 표
         self.assertIn('창 구조: 1100(218,267,852,557) ← 100(', text)
         self.assertIn('[메뉴] 묶음 2개 · 창7', text)
         self.assertIn('묶음: 설비관리@1,192 198x23 | 생산관리@1,215 198x107', text)
@@ -524,8 +524,8 @@ class DescribeTests(unittest.TestCase):
         mes.inner = '작업지시관리'
         mes.layout()
         text = layout.describe(mes.report())
-        self.assertIn('칸 31개', text)
-        self.assertIn('▷특이사항3 100', text)
+        self.assertIn('칸 34개(화면에 이어져 보이는 것 ', text)
+        self.assertIn('▷LOT-NO 0', text)                                      # 화면 밖 칸은 위치가 없음
         self.assertNotIn('▷선택', text)
         self.assertNotIn('창 구조', text)
         short = layout.describe(mes.report(), limit=4)
@@ -565,7 +565,7 @@ class PointerTests(unittest.TestCase):
         for _ in range(3):
             edge = grid[0] + sum(width for _, width in leaf.columns[:4])
             point = pointer.find_edge((edge - 60, y), [(edge - 2, y)], lambda hit: hit == leaf.grid)
-            pointer.drag(point, (point[0] + 3, y))
+            pointer.drag(point, (edge + 3, y))                                # 놓은 자리가 칸의 오른쪽 끝이 됨
         self.assertEqual(mes.bad, [])
         self.assertEqual(leaf.columns[3][1], 129)
         self.assertEqual(len([seconds for seconds in user.sleeps if seconds >= 0.3]), 2)
