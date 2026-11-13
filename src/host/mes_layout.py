@@ -56,8 +56,8 @@ def _box(item):
     return int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3])
 
 
-def grids(report):
-    """화면에 보이는 생산일보 표와 칸 제목 위치."""
+def grids(report, required=REQUIRED_HEADERS):
+    """화면에 보이는 표와 칸 제목 위치. required: 이 칸 이름이 모두 있는 표만(기본: 생산일보 표), ()이면 모든 표."""
     items = elements(report)
     children = {}
     for item in items:
@@ -72,9 +72,9 @@ def grids(report):
         headers = [header for group in children.get(table.get('id'), ())
                    for header in children.get(group.get('id'), ()) if header.get('role') == 25]
         names = [str(header.get('name', '')) for header in headers]
-        if any(name not in names for name in REQUIRED_HEADERS):
+        if not names or any(name not in names for name in required):
             continue
-        if len(set(names)) != len(names):
+        if required and len(set(names)) != len(names):
             raise RuntimeError('칸 이름이 겹쳐 표를 구분할 수 없습니다.')
         columns = []
         for header in headers:
@@ -85,7 +85,9 @@ def grids(report):
         # 칸 제목이 표 왼쪽 밖으로 나가 있으면 가로 스크롤로 밀린 상태입니다(경계 위치를 믿을 수 없음).
         scrolled = any(_box(header)[2] > 0 and _box(header)[0] < x - 1 for header in headers)
         found.append({'handle': table.get('handle'), 'x': x, 'y': y, 'w': w, 'h': h, 'columns': columns,
-                      'scrolled': scrolled})
+                      'scrolled': scrolled,
+                      # 판독에 나온 모든 칸 제목(표 밖 것 포함, 판독 순서 그대로): (이름, x, y, w, h)
+                      'headers': [(str(header.get('name', '')),) + _box(header) for header in headers]})
     return found
 
 
@@ -709,6 +711,7 @@ class Pointer:
         self.trace = ''          # 마지막 모양 확인 내용(오류 기록용)
         self.presses = 0
         self.last_press = None
+        self.holding = False     # 지금 버튼을 누르고 있는지
 
         class CursorInfo(ctypes.Structure):
             _fields_ = [('cbSize', wintypes.DWORD), ('flags', wintypes.DWORD),
@@ -766,11 +769,12 @@ class Pointer:
         if any(u.GetAsyncKeyState(key) & 0x8000 for key in (1, 2, 16, 17, 18, 91, 92)):
             raise RuntimeError('마우스 버튼 또는 보조 키가 눌려 있어 중단했습니다.')
 
-    def _send(self, flags, x=0, y=0):
+    def _send(self, flags, x=0, y=0, data=0):
         item = self.api.Input()
         item.type = 0
         item.payload.mi.dx = x
         item.payload.mi.dy = y
+        item.payload.mi.data = data & 0xffffffff
         item.payload.mi.flags = flags
         if self.u.SendInput(1, ctypes.byref(item), ctypes.sizeof(self.api.Input)) != 1:
             raise RuntimeError('Windows가 마우스 입력을 받지 않았습니다.')
@@ -834,8 +838,8 @@ class Pointer:
         self.trace = '평소 모양 {} · 화살표 {} · 확인 {}'.format(base, self.arrow, ' '.join(seen[:9]))
         return None
 
-    def drag(self, start, end):
-        """start(이미 크기 조절 모양을 확인한 곳)를 누르고 end까지 끈 뒤 놓습니다."""
+    def hold(self, start):
+        """start를 누른 채로 둡니다. 반드시 drop()으로 놓습니다."""
         self.check()
         if self.last_press is not None:
             (px, py), at = self.last_press
@@ -847,7 +851,17 @@ class Pointer:
             self.move(start)
         self.last_press = ((start[0], start[1]), self.clock())
         self.presses += 1
+        self.holding = True
         self._send(self.press_flag)
+
+    def drop(self):
+        """누르고 있던 버튼을 놓습니다(누르고 있지 않아도 놓기 입력을 보내 안전하게 둡니다)."""
+        self.holding = False
+        self._send(self.release_flag)
+
+    def drag(self, start, end):
+        """start(이미 크기 조절 모양을 확인한 곳)를 누르고 end까지 끈 뒤 놓습니다."""
+        self.hold(start)
         try:
             dx, dy = end[0] - start[0], end[1] - start[1]
             for step in (0.34, 0.67):
@@ -857,8 +871,51 @@ class Pointer:
             self.move(end)
             self.sleep(0.03)
         finally:
-            self._send(self.release_flag)   # 어떤 경우에도 버튼은 놓습니다.
+            self.drop()   # 어떤 경우에도 버튼은 놓습니다.
         self.sleep(0.02)
+
+    def click(self, point):
+        """point를 한 번 누릅니다(움직이지 않고 눌렀다 놓음)."""
+        self.hold(point)
+        try:
+            self.sleep(0.03)
+        finally:
+            self.drop()
+        self.sleep(0.02)
+
+    def double_click(self, point):
+        """point를 빠르게 두 번 누릅니다(일부러 하는 더블클릭)."""
+        self.check()
+        if self.position() != (point[0], point[1]):
+            self.move(point)
+        try:
+            for _ in range(2):
+                self.presses += 1
+                self.holding = True
+                self._send(self.press_flag)
+                self.sleep(0.03)
+                self.drop()
+                self.sleep(0.07)
+        finally:
+            if self.holding:
+                self.drop()
+        self.last_press = ((point[0], point[1]), self.clock())
+
+    def key(self, code, down=True, up=True):
+        """키 입력(예: Esc 0x1B, Shift 0x10)."""
+        u = self.u
+        u.keybd_event.argtypes = [self.wintypes.BYTE, self.wintypes.BYTE, self.wintypes.DWORD, ctypes.c_size_t]
+        u.keybd_event.restype = None
+        if down:
+            u.keybd_event(code, 0, 0, 0)
+            self.sleep(0.02)
+        if up:
+            u.keybd_event(code, 0, 2, 0)
+            self.sleep(0.02)
+
+    def wheel(self, notches, horizontal=False):
+        """포인터 아래에서 휠을 굴립니다(+: 위·오른쪽)."""
+        self._send(0x1000 if horizontal else 0x0800, data=int(notches) * 120)
 
     def restore(self):
         try:

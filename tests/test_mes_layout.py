@@ -19,7 +19,7 @@ spec = importlib.util.spec_from_file_location('mes_layout_under_test', ROOT / 's
 layout = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(layout)
 
-ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT = 65539, 65543, 65561, 65555, 70001, 70003
+ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001
 COLUMNS = (('No.', 37), ('선택', 38), ('P/No.', 47), ('거래처명', 120), ('Fixture', 58), ('Size', 54),
            ('환자명', 46), ('치식', 37), ('세척', 40), ('비고', 55), ('영점', 50))
 HEADER = 22
@@ -33,6 +33,7 @@ class Leaf:
         self.columns = [[name, width] for name, width in columns]
         self.minimum = minimum
         self.fixed = set(fixed)      # 너비를 바꿀 수 없는 칸
+        self.scroll = 0              # 가로로 밀린 픽셀
 
 
 class Split:
@@ -75,7 +76,25 @@ class FakeMes:
         self.grab = None
         self.last_down = None
         self.on_press = None
+        # 아래는 '조작 점검' 시험용 동작(기본은 꺼 둠: 정렬 기능은 칸 제목을 누르면 안 됨)
+        self.allow_moves = False     # 칸 제목을 끌어 순서 바꾸기·없애기
+        self.allow_clicks = False    # 왼쪽 메뉴·문서 탭 누르기
+        self.escape_cancels = True
+        self.hwheel_works = True
+        self.shift_wheel_works = True
+        self.hidden = []             # 없앤 칸 이름
+        self.near_edge_since = None
+        self.nav = ['설비관리', '생산관리', '작업지시관리']
+        self.documents = ['작업지시관리']
+        self.active = '작업지시관리'
         self.layout()
+
+    def nav_rect(self, index):
+        return (2, 240 + 23 * index, 2 + min(196, max(8, self.menu - 4)), 261 + 23 * index)
+
+    def document_rect(self, index):
+        body = self.menu + 12
+        return (body + 4 + 110 * index, 130, body + 104 + 110 * index, 150)
 
     def layout(self):
         body = self.menu + 12
@@ -86,6 +105,15 @@ class FakeMes:
         self.leaves = []
         self.splits = []
         self.place(self.tree, self.rects[2], 2)
+        self.all_leaves = list(self.leaves)
+        if self.active != '작업지시관리':        # 다른 문서가 앞에 있으면 판·표 창은 보이지 않음
+            for handle in [h for h in self.rects if h not in (1, 3, 4, 5)]:
+                del self.rects[handle]
+                del self.parent[handle]
+            self.rects[6] = (body + 3, 180, 1917, 1030)
+            self.parent[6] = 5
+            self.leaves = []
+            self.splits = []
 
     def on_menu_bar(self, hit, x, y):
         l, t, r, b = self.menu_bar
@@ -142,7 +170,7 @@ class FakeMes:
         left, top, right, _ = self.rects[leaf.grid]
         if not (top <= y < top + HEADER and left <= x < right):
             return None
-        position = left
+        position = left - leaf.scroll
         best = None
         for index, (name, width) in enumerate(leaf.columns):
             position += width
@@ -151,8 +179,80 @@ class FakeMes:
                     best = (abs(x - position), index)
         return None if best is None else best[1]
 
+    def header_at(self, leaf, x, y):
+        """(칸 번호, 왼쪽 절반인지) 또는 None"""
+        left, top, right, _ = self.rects[leaf.grid]
+        if not (top <= y < top + HEADER and left <= x < right):
+            return None
+        position = left - leaf.scroll
+        for index, (name, width) in enumerate(leaf.columns):
+            if position <= x < position + width:
+                return index, x < position + width / 2.0
+            position += width
+        return None
+
+    def near_right_edge(self, leaf, x):
+        return self.rects[leaf.grid][2] - 14 <= x < self.rects[leaf.grid][2]
+
+    def scroll_by(self, leaf, amount):
+        left, _, right, _ = self.rects[leaf.grid]
+        limit = max(0, sum(width for _, width in leaf.columns) - (right - left))
+        leaf.scroll = max(0, min(limit, leaf.scroll + amount))
+
+    def moved_to(self, x, y, now):
+        if self.grab and self.grab[0] == 'move' and self.near_right_edge(self.grab[1], x):
+            if self.near_edge_since is None:
+                self.near_edge_since = now
+        else:
+            self.near_edge_since = None
+
+    def settle_autoscroll(self, now):
+        if self.grab and self.grab[0] == 'move' and self.near_edge_since is not None and now - self.near_edge_since >= 1.0:
+            self.scroll_by(self.grab[1], 90)
+        self.near_edge_since = None
+
+    def escape(self, now):
+        if self.grab and self.grab[0] == 'move':
+            self.settle_autoscroll(now)
+            if self.escape_cancels:
+                self.grab = None
+
+    def wheel(self, x, y, notches, horizontal, shift):
+        leaf = self.leaf(self.window_at(x, y))
+        if leaf is None:
+            return
+        if horizontal and self.hwheel_works:
+            self.scroll_by(leaf, notches * 40)
+        elif not horizontal and shift and self.shift_wheel_works:
+            self.scroll_by(leaf, -notches * 40)
+
+    def click(self, x, y):
+        hit = self.window_at(x, y)
+        if hit == 4:
+            for index, name in enumerate(self.nav):
+                l, t, r, b = self.nav_rect(index)
+                if l <= x < r and t <= y < b:
+                    if name == '설비관리' and '설비별공구관리' not in self.nav:
+                        self.nav.insert(index + 1, '설비별공구관리')
+                    elif name in ('설비별공구관리', '작업지시관리'):
+                        if name not in self.documents:
+                            self.documents.append(name)
+                        self.active = name
+                        self.layout()
+                    return
+        if hit == 5:
+            for index, name in enumerate(self.documents):
+                l, t, r, b = self.document_rect(index)
+                if l <= x < r and t <= y < b:
+                    self.active = name
+                    self.layout()
+                    return
+        self.bad.append('아무것도 없는 곳을 누름: 창 {} ({}, {})'.format(hit, x, y))
+
     def shape_at(self, x, y):
         hit = self.window_at(x, y)
+        if self.grab and self.grab[0] == 'move':
+            return MOVING
         if self.on_menu_bar(hit, x, y):
             return VSPLIT
         for split in self.splits:
@@ -188,11 +288,16 @@ class FakeMes:
         else:
             leaf = self.leaf(hit)
             edge = self.edge_at(leaf, x, y) if leaf is not None else None
+            header = self.header_at(leaf, x, y) if leaf is not None else None
             if edge is not None and double:
                 self.bad.append('칸 경계 더블클릭(자동 맞춤): ' + leaf.columns[edge][0])
                 leaf.columns[edge][1] = 77
             elif edge is not None:
                 self.grab = ('column', leaf, edge, x)
+            elif header is not None and self.allow_moves:
+                self.grab = ('move', leaf, header[0], x, y)
+            elif hit in (4, 5) and self.allow_clicks:
+                self.grab = ('click', x, y)
             else:
                 self.bad.append('경계가 아닌 곳을 누름: 창 {} ({}, {})'.format(hit, x, y))
         if self.on_press:
@@ -202,7 +307,24 @@ class FakeMes:
         grab, self.grab = self.grab, None
         if not grab:
             return
-        if grab[0] == 'menu':
+        if grab[0] == 'click':
+            if (x, y) == (grab[1], grab[2]):
+                self.click(x, y)
+        elif grab[0] == 'move':
+            leaf, index = grab[1], grab[2]
+            if abs(x - grab[3]) < 4 and abs(y - grab[4]) < 4:
+                self.bad.append('칸 제목을 끌지 않고 누름(정렬됨): ' + leaf.columns[index][0])
+                return
+            target = self.header_at(leaf, x, y)
+            left, top, right, bottom = self.rects[leaf.grid]
+            if target is None:
+                if left <= x < right and top + HEADER <= y < bottom:     # 표 안쪽에 놓으면 칸이 없어짐
+                    self.hidden.append(leaf.columns.pop(index)[0])
+                return
+            item = leaf.columns.pop(index)
+            place = target[0] - (1 if target[0] > index else 0)
+            leaf.columns.insert(place if target[1] else place + 1, item)
+        elif grab[0] == 'menu':
             self.menu = max(self.menu_minimum, min(600, self.menu + x - grab[1]))
             self.layout()
         elif grab[0] == 'split':
@@ -224,19 +346,24 @@ class FakeMes:
             records.append(values)
             return ident[0]
 
-        element(parent=-1, role=37, handle=2, name='생산일보관리', selected=True, type='page tab', bounds=[self.menu + 215, 157, 80, 20])
+        if self.active == '작업지시관리':
+            element(parent=-1, role=37, handle=2, name='생산일보관리', selected=True, type='page tab', bounds=[self.menu + 215, 157, 80, 20])
+        for position, name in enumerate(self.documents):
+            l, t, r, b = self.document_rect(position)
+            element(parent=-1, role=37, handle=5, name=name, selected=name == self.active, type='page tab', bounds=[l, t, r - l, b - t])
         menu = element(parent=-1, role=10, handle=4, name='메뉴', type='client', depth=0)
-        for position, name in enumerate(('설비관리', '생산관리', '작업지시관리')):
-            element(parent=menu, role=36, handle=4, name=name, type='outline item', depth=1, bounds=[2, 240 + 23 * position, 196, 21])
+        for position, name in enumerate(self.nav):
+            l, t, r, b = self.nav_rect(position)
+            element(parent=menu, role=36, handle=4, name=name, type='outline item', depth=1, bounds=[l, t, r - l, b - t])
         for leaf in self.leaves:
             left, top, right, bottom = self.rects[leaf.grid]
             table = element(parent=-1, role=24, handle=leaf.grid, name='', offscreen=False,
                             bounds=[left, top, right - left, bottom - top])
             group = element(parent=table, role=10, handle=leaf.grid, name='헤더 패널')
-            x = left
+            x = left - leaf.scroll
             for name, width in leaf.columns:
                 element(parent=group, role=25, handle=leaf.grid, name=name, bounds=[x, top, width, HEADER],
-                        offscreen=x >= right)
+                        offscreen=x >= right or x + width <= left)
                 x += width
             data = element(parent=table, role=10, handle=leaf.grid, name='데이터 패널', child_count=1)
             line = element(parent=data, role=28, handle=leaf.grid, name='행 1', value='O1009;홍길동치과;비밀환자;', bounds=[left, top + HEADER, 500, 20])
@@ -281,7 +408,8 @@ class FakeUser32:
         self.swapped = False     # 마우스 좌우 버튼 바꿈 설정
         self.sleeps = []
         for name in ('GetCursorInfo', 'LoadCursorW', 'GetDoubleClickTime', 'GetCursorPos', 'WindowFromPoint', 'GetParent',
-                     'GetWindowRect', 'GetAsyncKeyState', 'GetForegroundWindow', 'GetSystemMetrics', 'SendInput'):
+                     'GetWindowRect', 'GetAsyncKeyState', 'GetForegroundWindow', 'GetSystemMetrics', 'SendInput',
+                     'keybd_event'):
             setattr(self, name, (lambda method: lambda *args: method(*args))(getattr(self, '_' + name)))
 
     def clock(self):
@@ -331,6 +459,16 @@ class FakeUser32:
     def _GetForegroundWindow(self):
         return self.foreground
 
+    def _keybd_event(self, code, scan, flags, extra):
+        self.now[0] += 0.0005
+        if flags & 2:
+            self.keys.discard(code)
+        else:
+            self.keys.add(code)
+            if code == 0x1B:
+                self.mes.escape(self.now[0])
+                self.keys.discard(code)     # 시험에서는 Esc를 눌렀다 바로 뗀 것으로 봅니다.
+
     def _GetSystemMetrics(self, index):
         return {76: 0, 77: 0, 78: 1920, 79: 1080, 23: int(self.swapped)}[index]
 
@@ -341,6 +479,10 @@ class FakeUser32:
             # 실제 Windows처럼 환산 과정에서 1픽셀 어긋날 수 있게 내림으로 계산합니다.
             self.cursor = (mouse.dx * 1919 // 65535, mouse.dy * 1079 // 65535)
             self.waiting = self.lag
+            self.mes.moved_to(self.cursor[0], self.cursor[1], self.now[0])
+        if mouse.flags & (0x0800 | 0x1000):
+            notches = ctypes.c_int32(mouse.data).value // 120
+            self.mes.wheel(self.cursor[0], self.cursor[1], notches, bool(mouse.flags & 0x1000), 0x10 in self.keys)
         press, release = (0x0008, 0x0010) if self.swapped else (0x0002, 0x0004)
         if mouse.flags & (0x0002 | 0x0008 | 0x0004 | 0x0010) & ~(press | release):
             self.mes.bad.append('주 버튼이 아닌 버튼을 누름')
@@ -349,6 +491,7 @@ class FakeUser32:
             self.mes.press(self.cursor[0], self.cursor[1], self.now[0])
         if mouse.flags & release:
             self.down = False
+            self.mes.settle_autoscroll(self.now[0])
             self.mes.release(*self.cursor)
         return count
 
