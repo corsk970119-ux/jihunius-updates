@@ -21,7 +21,9 @@ layout = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(layout)
 
 ORDER = [name for name, _ in layout.DEFAULT_WORK_ORDER]
-ARRANGED = ORDER + ['직경', '각도', 'LOT-NO']          # 기준 순서 뒤에, 기준에 순서가 없는 칸들이 원래 순서로
+# 기준 순서 뒤에, 기준에 순서가 없는 칸들이 원래 순서로(화면 밖이라 건드리지 않음)
+ARRANGED = ORDER + [name for name, _ in fake.WORK_COLUMNS if name not in ORDER and name not in fake.WORK_EXTRA]
+SHOWN_EXTRA = list(fake.WORK_EXTRA[:6])                # 새로 켰을 때 화면에 보이는 필요 없는 칸
 
 
 def fresh(plain=False, **changes):
@@ -81,7 +83,7 @@ class WholeFlowTests(Checks, unittest.TestCase):
         mes = fresh()
         outcome = run(mes)
         self.assertEqual(mes.bad, [])
-        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))         # 기준에 없는 6칸을 없앰
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))         # 기준에 없는 9칸을 없앰(뒤의 3칸은 앞 칸을 버린 뒤 화면에 들어옴)
         self.assert_work(mes)
         self.assert_daily(mes)
         self.assertEqual(mes.menu, 25)                                        # 파란 메뉴 칸은 끝까지
@@ -95,7 +97,7 @@ class WholeFlowTests(Checks, unittest.TestCase):
         self.assertEqual(result['work']['moved'], 3)                          # 특이사항1·2·3을 설비명 뒤로
         self.assertEqual((result['work']['stuck'], result['work']['blocked'], result['work']['remaining']), ([], None, []))
         title, lines = layout.brief_all(result, 31.24)
-        self.assertTrue(title.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 6·옮김 3·너비 '), title)
+        self.assertTrue(title.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 9·옮김 3·너비 '), title)
         self.assertIn('31.2초', title)
         self.assertEqual(lines, [])
         self.assertFalse(outcome.user.down)
@@ -156,7 +158,8 @@ class WorkTableTests(Checks, unittest.TestCase):
         outcome = run(mes)
         work = outcome.result['work']
         self.assertEqual(work['removed'], [])
-        self.assertEqual(sorted(work['stuck']), sorted(fake.WORK_EXTRA))
+        self.assertTrue(set(SHOWN_EXTRA) <= set(work['stuck']) <= set(fake.WORK_EXTRA), work['stuck'])
+        self.assertEqual(len(set(work['stuck'])), len(work['stuck']))
         self.assertEqual(mes.hidden, [])
         self.assertEqual([way for _, way in mes.drops], ['위', '아래', '위', '아래'])   # 두 칸만 해 보고 더 끌지 않음
         names = [name for name, _ in mes.work.columns]
@@ -171,7 +174,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         mes = fresh(removal_works=False)                                      # 실제처럼 고정 칸이 있는 표에서 버리기가 안 될 때
         outcome = run(mes)
         work = outcome.result['work']
-        self.assertEqual(sorted(work['stuck']), sorted(fake.WORK_EXTRA))
+        self.assertTrue(set(SHOWN_EXTRA) <= set(work['stuck']) <= set(fake.WORK_EXTRA), work['stuck'])
         names = [name for name, _ in mes.work.columns]
         self.assertEqual(names[:4], ORDER[:4])                                # 고정 칸끼리는 기준 순서로
         self.assertEqual(work['blocked'], '작업자')                           # 고정 칸 사이로는 옮겨지지 않음
@@ -200,7 +203,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assertEqual([name for name in before if name not in mes.hidden], [name for name, _ in mes.work.columns])
         self.assertEqual(mes.bad, [])                                         # 가려진 칸 자리(고정 칸 밑)는 누르지 않음
         self.assertTrue(set(mes.hidden) <= set(fake.WORK_EXTRA))              # 보이는 칸 가운데 필요 없는 것만 버림
-        self.assertEqual(mes.hidden, ['거래처코드'])
+        self.assertEqual(sorted(mes.hidden), sorted(['거래처코드', '아노다이징', '스크류수량', '소재사용수량']))   # 밀린 화면에 보이던 것
         checks = [text for text, root in outcome.reads if text == '칸 버린 뒤']
         self.assertEqual(len(checks), len(mes.hidden))                        # 밀린 표는 한 칸 버릴 때마다 다시 읽어 확인
         shown = dict(mes.work.columns)
@@ -255,7 +258,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assertEqual(mes.drops, [(name, '위') for name in mes.hidden])     # 모두 위로 끌어다 버림
         self.assertEqual(outcome.result['work']['removed'], mes.hidden)
         reads = [text for text, root in outcome.reads if text == '칸 버린 뒤']
-        self.assertEqual(len(reads), 2, reads)                                # 한 칸 확인 + 나머지 묶어서 확인
+        self.assertEqual(len(reads), 3, reads)                                # 한 칸 확인 + 보이던 5칸 묶음 + 새로 들어온 3칸 묶음
         self.assertTrue(any('칸 버리기' in value and '위로' in value for kind, value in outcome.notes if kind == 'record'))
 
     def test_dropping_inside_the_table_is_tried_when_upward_does_nothing(self):
@@ -273,7 +276,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         outcome = run(mes)
         self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assertEqual({way for _, way in mes.drops}, {'위'})
-        self.assertEqual(len(mes.drops), 6)                                   # 헛손질 없이 한 번씩
+        self.assertEqual(len(mes.drops), 9)                                   # 헛손질 없이 한 번씩
         first = next(value for kind, value in outcome.notes if kind == 'record' and value.startswith('칸 버리기'))
         self.assertIn('표 위 80픽셀', first)
         self.assertIn(str(fake.REMOVING), first)                              # 바뀐 포인터 모양도 기록
@@ -282,7 +285,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         mes = fresh(removal_cursor=False)
         outcome = run(mes)
         self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
-        self.assertEqual(len(mes.drops), 6)
+        self.assertEqual(len(mes.drops), 9)
         self.assertTrue(any('표 위 80픽셀' in value for kind, value in outcome.notes if kind == 'record'))
         self.assert_work(mes)
 
@@ -395,11 +398,65 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assertEqual(mes.bad, [])
         self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'))
 
+    def test_unneeded_column_that_comes_into_view_only_later_is_thrown_away_too(self):
+        # 현장 점검 4판: 새로 켠 표에는 화면 밖(stl 뒤)에도 필요 없는 칸이 3개 있다. 앞 칸들이 넓어 그 칸이 화면 끝에
+        # 걸려 있으면 처음에는 잡지 못하고, 칸 너비를 줄인 뒤에야 화면에 들어온다.
+        mes = fresh()
+        mes.work.columns = [[name, {'거래처명': 420, '치과명': 260, '환자명': 260}.get(name, width)] for name, width in mes.work.columns]
+        mes.layout()
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assert_work(mes)
+        self.assertEqual(mes.bad, [])
+        self.assertEqual(outcome.result['work']['left'], [])
+        self.assertGreaterEqual(len([text for text, root in outcome.reads if text == '칸 버린 뒤']), 3)
+        self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'))
+
+    def test_other_default_widths_still_end_up_arranged(self):
+        # 화면 밖 칸의 기본 너비는 알 수 없다. 너비가 어떻든 화면에 온전히 보이는 기준 칸은 순서·너비가 맞아야 한다.
+        import random
+        standard = dict(layout.DEFAULT_WORK_ORDER)
+        for seed in (0, 7, 19, 33, 48, 77):
+            rng = random.Random(seed)
+            mes = fresh()
+            if seed % 3 == 0:
+                mes.work.scrollbar = 0
+            mes.work.columns = [[name, width if name == '선택' else rng.choice([40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 260])]
+                                for name, width in mes.work.columns]
+            mes.layout()
+            outcome = run(mes)                                                # (48: 넓힐 자리가 모니터 밖으로 나가던 경우)
+            self.assertEqual(mes.bad, [], seed)
+            self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA), seed)
+            self.assertEqual([name for name, _ in mes.work.columns][:len(ORDER)], ORDER, seed)
+            self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'), seed)
+            mes.inner = '작업지시관리'
+            mes.layout()
+            grid = layout.grids(mes.report(1220), required=())[0]
+            grid['reach'] = layout.reach(outcome.pointer, grid)
+            for column in layout.chain(grid):
+                if column['name'] in standard and layout.whole(grid, column):
+                    self.assertLessEqual(abs(column['w'] - standard[column['name']]), 1, (seed, column['name']))
+
+    def test_pointer_is_never_sent_outside_the_monitor_when_widening(self):
+        mes = fresh(documents=['작업지시관리', '설비별공구관리'], menu=25)
+        outcome = run(mes, call=lambda *arguments: None)
+        self.assertEqual(outcome.pointer.within((2500, -30)), (1919, 0))
+        self.assertEqual(outcome.pointer.within((-5, 2000)), (0, 1079))
+        self.assertEqual(outcome.pointer.within((640, 480)), (640, 480))
+
+    def test_leftover_unneeded_column_at_the_screen_edge_is_reported(self):
+        outcome = run(fresh())
+        result = dict(outcome.result, work=dict(outcome.result['work'], left=['소재사용수량']))
+        title, lines = layout.brief_all(result, 9.0)
+        self.assertIn('일부만', title)
+        self.assertIn('작업지시관리: 화면 끝에 걸려 버리지 못한 칸 — 소재사용수량', lines)
+
     def test_columns_off_the_right_edge_are_left_alone(self):
         mes = fresh()
         run(mes)
         tail = [name for name, _ in mes.work.columns if name not in ORDER]
-        self.assertEqual(tail, ['직경', '각도', 'LOT-NO'])                     # 화면 밖 칸은 순서도 너비도 그대로
+        self.assertEqual(tail, ARRANGED[len(ORDER):])                         # 화면 밖 칸은 순서도 너비도 그대로
+        self.assertEqual(len(tail), 27)
         self.assertEqual([dict(mes.work.columns)[name] for name in tail], [dict(fake.WORK_COLUMNS)[name] for name in tail])
         self.assertEqual(mes.work.scroll, 0)                                  # 가로로 밀지 않음
 
@@ -415,7 +472,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         outcome = run(fresh())
         notes = [value for kind, value in outcome.notes if kind == 'record']
         first = next(value for value in notes if value.startswith('작업지시관리 표 ('))
-        self.assertIn('칸 제목 34개', first)
+        self.assertIn('칸 제목 61개', first)
         self.assertIn('겹침 0개', first)
         self.assertTrue(any('선택@' in value and 'PART-NO@' in value for value in notes))
         self.assertTrue(all(len(value) <= 160 for value in notes if value.startswith('  ')), notes)   # 기록 한 줄 길이 한도 안
@@ -432,6 +489,8 @@ class StandardTests(Checks, unittest.TestCase):
         self.assertNotIn('PART-NO', standard['work']['keep'])
         self.assertEqual(sum(standard['work']['widths'].values()), 1833)
         self.assertEqual(standard['daily']['거래처명'], 119)
+        self.assertEqual(standard['daily']['Fixture'], 72)                    # 사용자 요청(2026-11-16): 글자 하나 더 보이게 61 → 72
+        self.assertLessEqual(sum(standard['daily'].values()) + 1, 617 - 17)   # 판(617) 안에 세로 스크롤 막대가 있어도 다 보임
         self.assertFalse(standard['custom'])
 
     def test_saved_screen_becomes_the_standard_and_is_applied_to_a_fresh_mes(self):

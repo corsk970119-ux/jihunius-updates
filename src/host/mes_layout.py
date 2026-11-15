@@ -35,7 +35,7 @@ MENU_WORKING_WIDTH = 200     # 메뉴 항목을 누를 때의 메뉴 칸 너비(
 
 # 기본 기준: 2026-11-13 현장 PC에서 사용자가 손으로 정리해 둔 화면을 점검 프로그램으로 읽은 값.
 # [기준 저장]을 누르면 그때 화면이 이 값을 대신합니다.
-DEFAULT_DAILY = (('No.', 40), ('선택', 35), ('P/No.', 50), ('거래처명', 119), ('Fixture', 61), ('Size', 50),
+DEFAULT_DAILY = (('No.', 40), ('선택', 35), ('P/No.', 50), ('거래처명', 119), ('Fixture', 72), ('Size', 50),
                  ('환자명', 50), ('치식', 35), ('세척', 40), ('비고', 55), ('영점', 51))
 DEFAULT_WORK_ORDER = (('선택', 35), ('지시일', 85), ('시간', 47), ('프로젝트No', 49), ('작업자', 48), ('설비코드', 54), ('설비명', 125),
                       ('특이사항1', 100), ('특이사항2', 100), ('특이사항3', 100), ('거래처명', 140), ('지역', 50), ('Fixture Name', 80),
@@ -567,8 +567,10 @@ def align_columns(grid, widths, pointer, emit, check):
         if point is None:
             return False
         # 현장 확인: 칸의 오른쪽 끝은 '놓은 자리'로 옵니다(잡은 자리와의 차이는 유지되지 않음). 그래서 목표 끝 위치에 놓습니다.
-        pointer.drag(point, (at + amount, point[1]))
-        applied[index] += amount
+        # 목표 자리가 모니터 밖이면 모니터 끝까지만 넓힙니다(그 칸은 어차피 화면 끝에서 잘려 보이는 칸).
+        goal = pointer.within((at + amount, point[1]))[0]
+        pointer.drag(point, (goal, point[1]))
+        applied[index] += goal - at
         return True
 
     done = 0
@@ -1124,8 +1126,8 @@ def arrange_work(nav, handle, standard):
     """
     pointer, emit = nav.pointer, nav.emit
     order, widths, keep = list(standard['order']), standard['widths'], set(standard['keep'])
-    result = {'removed': [], 'stuck': [], 'moved': 0, 'resized': 0, 'blocked': None, 'scrolled': False, 'remaining': [],
-              'detail': ''}
+    result = {'removed': [], 'stuck': [], 'left': [], 'moved': 0, 'resized': 0, 'blocked': None, 'scrolled': False,
+              'remaining': [], 'detail': ''}
     box = {}
 
     def look(text):
@@ -1248,42 +1250,50 @@ def arrange_work(nav, handle, standard):
 
     # 밀린 흔적이 없을 때만 여러 칸을 이어서 끕니다. 밀린 표는 칸을 버리거나 너비를 바꾸면 표가 통째로 움직일 수 있어,
     # 한 번 끌 때마다 화면을 다시 읽고 순서는 건드리지 않습니다.
-    calm = not result['scrolled']
+    state = {'calm': not result['scrolled'], 'way': None, 'failures': 0}
+
+    def purge():
+        """지금 화면에 보이는 필요 없는 칸(기준의 남길 칸에 없는 것)을 버립니다. 반환: 이번에 버린 칸 수.
+
+        현장 확인(점검 4판): 새로 켠 표에는 화면 밖에도 필요 없는 칸이 있습니다(아노다이징·스크류수량·소재사용수량).
+        앞의 칸을 버리거나 줄이면 화면 안으로 들어오므로, 너비·순서를 맞춘 뒤에도 다시 부릅니다.
+        """
+        before = len(result['removed'])
+        for _ in range(14):
+            nav.check()
+            grid = box['grid']
+            extras = ready(grid, lambda column: column['name'] not in keep and column['name'] not in result['stuck'])
+            if not extras:
+                break
+            if state['failures'] >= 2:           # 두 칸이 어느 방법으로도 없어지지 않으면 더 끌지 않습니다.
+                result['stuck'].extend(column['name'] for column in extras)
+                break
+            if state['way'] is None:
+                # 처음에는 한 칸만 버려 보고 화면을 다시 읽어 확인합니다.
+                state['way'] = prove(extras[-1]['name'])
+                if state['way'] is None:
+                    state['failures'] += 1
+                    result['stuck'].append(extras[-1]['name'])
+                continue
+            # 확인된 방법으로 오른쪽 칸부터 버립니다(버린 칸의 왼쪽 칸들은 자리가 그대로라 그때마다 다시 읽지 않아도 됩니다).
+            tried = []
+            for column in reversed(extras if state['calm'] and tidy(grid) else extras[-1:]):
+                nav.check()
+                tried.append((column['name'], discard(pointer, grid, column, state['way'])[0]))
+            result['stuck'].extend(gone(tried))
+        return len(result['removed']) - before
 
     emit('log', '작업지시관리 표: 필요 없는 칸 버리는 중…')
-    proven = None        # 칸이 없어지는 것을 확인한 방법
-    failures = 0
-    for _ in range(14):
-        nav.check()
-        grid = box['grid']
-        extras = ready(grid, lambda column: column['name'] not in keep and column['name'] not in result['stuck'])
-        if not extras:
-            break
-        if failures >= 2:                # 두 칸이 어느 방법으로도 없어지지 않으면 더 끌지 않습니다.
-            result['stuck'].extend(column['name'] for column in extras)
-            break
-        if proven is None:
-            # 처음에는 한 칸만 버려 보고 화면을 다시 읽어 확인합니다.
-            proven = prove(extras[-1]['name'])
-            if proven is None:
-                failures += 1
-                result['stuck'].append(extras[-1]['name'])
-            continue
-        # 확인된 방법으로 오른쪽 칸부터 버립니다(버린 칸의 왼쪽 칸들은 자리가 그대로라 그때마다 다시 읽지 않아도 됩니다).
-        tried = []
-        for column in reversed(extras if calm and tidy(grid) else extras[-1:]):
-            nav.check()
-            tried.append((column['name'], discard(pointer, grid, column, proven)[0]))
-        result['stuck'].extend(gone(tried))
+    purge()
 
     emit('log', '작업지시관리 표: 칸 너비·순서 맞추는 중…')
     skipped = set()
-    for _ in range(5 if calm else 40):
+    for _ in range(8 if state['calm'] else 40):
         nav.check()
         grid = box['grid']
-        calm = calm and tidy(grid)
+        state['calm'] = state['calm'] and tidy(grid)
         columns = chain(grid)
-        if not calm:
+        if not state['calm']:
             columns = [column for column in columns if column['name'] in widths and column['name'] not in skipped
                        and whole(grid, column) and abs(int(widths[column['name']]) - column['w']) > TOLERANCE][:1]
             if not columns:
@@ -1293,16 +1303,20 @@ def arrange_work(nav, handle, standard):
         if done:
             result['resized'] += done
             grid = look('칸 너비 확인')
-        moved, blocked = reorder() if calm and tidy(grid) else (0, None)
+        moved, blocked = reorder() if state['calm'] and tidy(grid) else (0, None)
         result['moved'] += moved
         result['blocked'] = blocked
-        if calm and not done and not moved:
+        cleared = purge()                        # 줄이거나 옮긴 뒤 새로 화면에 들어온 필요 없는 칸
+        if state['calm'] and not done and not moved and not cleared:
             break
     result['scrolled'] = result['scrolled'] or not tidy(box['grid'])
     grid = box['grid']
     result['remaining'] = [(column['name'], column['w'], int(widths[column['name']])) for column in chain(grid)
                            if column['name'] in widths and whole(grid, column) and abs(int(widths[column['name']]) - column['w']) > TOLERANCE]
-    if result['stuck'] or result['blocked'] or result['remaining']:
+    # 끝까지 화면에 남은 필요 없는 칸(오른쪽 끝에서 잘려 잡지 못한 것 등)
+    result['left'] = [column['name'] for column in chain(grid)
+                      if column['name'] and column['name'] not in keep and column['name'] not in result['stuck']]
+    if result['stuck'] or result['left'] or result['blocked'] or result['remaining']:
         record(grid, '작업지시관리 표(끝난 뒤)')
     return result
 
@@ -1429,6 +1443,8 @@ def brief_all(result, elapsed):
             lines.append('  (겹쳐 읽힌 칸: {})'.format(work['detail']))
     if work['stuck']:
         lines.append('작업지시관리: 없애지 못한 칸 — {} (칸 제목을 위로 끌어도 그대로 있음)'.format(', '.join(work['stuck'])))
+    if work.get('left'):
+        lines.append('작업지시관리: 화면 끝에 걸려 버리지 못한 칸 — ' + ', '.join(work['left']))
     if work['blocked']:
         lines.append('작업지시관리: "{}" 칸을 제자리로 옮기지 못했습니다(화면에 다 보이지 않거나 옮겨지지 않음).'.format(work['blocked']))
     if work['remaining']:
@@ -1610,6 +1626,15 @@ class Pointer:
             aim_x += (x - now[0]) * unit_x * 0.34
             aim_y += (y - now[1]) * unit_y * 0.34
         return self.position()
+
+    def within(self, point):
+        """모니터 표시 범위 안으로 당긴 자리(범위 밖으로는 포인터를 보낼 수 없습니다)."""
+        u = self.u
+        left, top = u.GetSystemMetrics(76), u.GetSystemMetrics(77)
+        width, height = u.GetSystemMetrics(78), u.GetSystemMetrics(79)
+        if width <= 1 or height <= 1:
+            return int(point[0]), int(point[1])
+        return max(left, min(left + width - 1, int(point[0]))), max(top, min(top + height - 1, int(point[1])))
 
     def settled(self, accept, seconds=HOVER_SECONDS):
         """포인터 모양이 accept를 만족한 채 두 번 연속 같을 때까지 기다립니다. 시간이 지나면 마지막 모양을 돌려줍니다."""

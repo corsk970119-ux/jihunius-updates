@@ -112,7 +112,7 @@ class MesLayoutTabTests(unittest.TestCase):
         wash, user, reader = self.connect(app, mes)
         self.finish(wash, 'align')
         status = wash.layout_status.get()
-        self.assertTrue(status.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 6·옮김 3'), status)
+        self.assertTrue(status.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 9·옮김 3'), status)
         self.assertEqual(mes.bad, [])
         self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assertEqual([name for name, _ in mes.work.columns], flow.ARRANGED)

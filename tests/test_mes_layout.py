@@ -524,7 +524,7 @@ class DescribeTests(unittest.TestCase):
         mes.inner = '작업지시관리'
         mes.layout()
         text = layout.describe(mes.report())
-        self.assertIn('칸 34개(화면에 이어져 보이는 것 ', text)
+        self.assertIn('칸 61개(화면에 이어져 보이는 것 ', text)
         self.assertIn('▷LOT-NO 0', text)                                      # 화면 밖 칸은 위치가 없음
         self.assertNotIn('▷선택', text)
         self.assertNotIn('창 구조', text)
