@@ -20,18 +20,22 @@ def probe():
 
 
 def screen(**changes):
-    """평소 쓰던 상태: 메뉴 칸은 접혀 있고(25), 생산일보관리 탭이 떠 있으며, 메뉴는 설비관리 묶음이 펼쳐져 있음."""
+    """MES를 새로 켜고 작업지시관리 화면을 띄워 둔 상태(2026-11-16 사용자 화면): 작업지시관리 탭, 표는 기본 순서.
+
+    표는 실제처럼 행 번호 칸 51픽셀, 왼쪽 고정 칸 6개(뒤에 2픽셀 선), 칸 제목 줄 위의 그룹화 칸이 있습니다.
+    """
     mes = fake.six(menu=25)
-    mes.expanded = '설비관리'
-    mes.allow_moves = True
+    mes.inner = '작업지시관리'
     mes.allow_clicks = True
+    mes.movable = {mes.work}
+    mes.work.frozen, mes.work.indent, mes.work.band = set(fake.WORK_FROZEN), fake.WORK_INDENT, fake.WORK_BAND
     for name, value in changes.items():
         setattr(mes, name, value)
     mes.layout()
     return mes
 
 
-def run(mes, scope, remove='', tool=True, list_only=False, user=None):
+def run(mes, scope, remove='', list_only=False, user=None):
     user = user or fake.FakeUser32(mes)
     L = scope['load'](scope['MES_LAYOUT_SOURCE'], 'probe_layout_for_test')
     api = SimpleNamespace(u=user, target={'handle': 1, 'pid': 1, 'title': 'ROOT MES'}, Input=fake.Input)
@@ -43,7 +47,7 @@ def run(mes, scope, remove='', tool=True, list_only=False, user=None):
         return mes.report(root)
 
     env = SimpleNamespace(L=L, pointer=pointer, read=read, log=lambda text: None,
-                          options={'remove': remove, 'tool': tool, 'list_only': list_only}, clock=user.clock)
+                          options={'remove': remove, 'list_only': list_only}, clock=user.clock)
     lines = scope['experiments'](env)
     return SimpleNamespace(text='\n'.join(lines), reads=reads, user=user, pointer=pointer)
 
@@ -56,7 +60,25 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(scope['WASH_POP_SOURCE'], (ROOT / 'src/host/wash_pop.py').read_text(encoding='utf-8'))
         self.assertEqual(scope['WASH_MES_SOURCE'], (ROOT / 'src/host/wash_mes.py').read_text(encoding='utf-8'))
         self.assertIn('class WashReader', scope['WASH_READER_SOURCE'])
-        self.assertEqual(scope['WASH_POP_SOURCE'].count(scope['NARROW_BOUNDS']), 1)     # 넓게 읽기용 바꿔치기 자리
+        self.assertIn('def mes_layout_reader(module):', scope['WASH_READER_SOURCE'])     # MES 정렬과 같은 판독기 설정
+
+    def test_probe_reads_the_screen_exactly_like_the_product(self):
+        text, scope = probe()
+        made = []
+
+        class Reader:
+            def __init__(self, module):
+                made.append(module)
+        namespace = {'WashReader': Reader}
+        exec(compile(scope['WASH_READER_SOURCE'].split('def mes_layout_reader(module):')[1].join(('def mes_layout_reader(module):', '')),
+                     'reader.py', 'exec'), namespace)
+        P = scope['load'](scope['WASH_POP_SOURCE'], 'probe_wash_pop_for_test')
+        namespace['mes_layout_reader'](P)
+        source = made[0].POWERSHELL
+        self.assertNotEqual(source, P.POWERSHELL)                             # 사본만 바뀌고
+        self.assertIn('if(role!=29 || (CellBoundsMode!=1 && !skipCellBounds)) {', source)      # 모든 종류 항목의 위치
+        self.assertIn('Convert.ToString(row["name"])=="데이터 패널"', source)                   # 행은 읽지 않음
+        self.assertIn("scope['mes_layout_reader'](P)", text)
         self.assertTrue(scope['APP_VERSION'].startswith('2026.'))
 
     def test_probe_never_touches_rows_or_saves(self):
@@ -78,147 +100,186 @@ class ExperimentTests(unittest.TestCase):
     def setUpClass(cls):
         cls.scope = probe()[1]
 
-    def test_it_finds_its_own_way_tries_every_operation_and_puts_everything_back(self):
+    def test_fresh_table_is_described_one_column_is_thrown_away_and_a_far_move_is_undone(self):
         mes = screen()
-        before = mes.snapshot()
+        names = [name for name, _ in mes.work.columns]
+        widths = dict(mes.work.columns)
         outcome = run(mes, self.scope)
         text = outcome.text
         self.assertEqual(mes.bad, [], text)
-        self.assertEqual(mes.snapshot(), before, text)                        # 칸·판·메뉴 칸·탭 모두 처음대로
+        self.assertEqual((mes.grouped, mes.group_hovers), ([], 0), text)       # 그룹화 칸에는 멈추지도 놓지도 않음
+        self.assertEqual(mes.hidden, ['거래처코드'], text)                     # 평소 없애는 칸 하나만 버림
+        self.assertEqual([name for name, _ in mes.work.columns], [name for name in names if name != '거래처코드'])
+        self.assertEqual(dict(mes.work.columns), {name: width for name, width in widths.items() if name != '거래처코드'})
+        self.assertEqual((mes.menu, mes.active, mes.inner, mes.work.scroll), (25, '작업지시관리', '작업지시관리', 0))
         self.assertFalse(outcome.user.down)
         self.assertEqual(outcome.user.cursor, (5, 5))
         self.assertEqual(outcome.user.keys, set())
-        for expected in ('메뉴 칸 너비 25', '경계를 오른쪽으로 끌어 넓힘 → 너비 200',
-                         '묶음 "생산관리"이 접혀 있음 → 이름 줄', '→ 묶음이 펼쳐짐 · "작업지시관리"', '→ 작업지시관리 문서가 앞에 옴 (탭 창201)',
-                         '■ 작업지시관리 탭의 표', '탭 "작업지시관리" (', '칸 제목 34개(표 안 ', '▷LOT-NO 0',
-                         '시험에 쓰는 칸: "품명" 과 그 오른쪽 "지시일"',
-                         '-2◆', '+7·', '그 자리 맨 위 창 이 표',
-                         '칸 끝에서 12 오른쪽에 놓음 → "품명" 너비 130 → 142 (+12)', '되돌린 뒤 너비 130 (처음 130) → 원래대로',
-                         '두 칸이 자리를 바꿈', '원래 순서로 돌아옴', '순서 그대로(Esc로 끌기가 취소됨)',
-                         '가로 휠 3칸: 표가 가로로 120픽셀 움직임', '반대로 굴림 → 원래 자리',
-                         '표가 가로로 90픽셀 움직임', '휠로 원래 자리로 되돌림',
-                         '■ 생산일보관리 탭의 표', '판 6개 · 표 너비', '시험에 쓰는 칸: "P/No." 과 그 오른쪽 "거래처명"',
-                         '칸 끝에서 12 오른쪽에 놓음 → "P/No." 너비 47 → 59 (+12)',
-                         '묶음 "설비관리"이 접혀 있음', '→ 설비별공구관리 문서가 앞에 옴', '→ 작업지시관리 문서가 다시 앞에 옴',
-                         '메뉴 칸 너비를 처음(25)으로 되돌림 → 25', '판독 시간(초):'):
+        for expected in ('■ 작업지시관리 탭의 표', '탭 "작업지시관리"은 이미 선택돼 있음', '칸 제목 34개 · 그중 위치 있는 것 ',
+                         '(표 위쪽 끝에서 34 아래) · 첫 칸은 표 왼쪽 끝에서 51 오른쪽',
+                         '선택@94+35 | PART-NO@129+110', '프로젝트No|T31수정 +2', '겹쳐 읽힌 칸 없음', '가로로 밀린 흔적 없음',
+                         '위치 없는 칸(화면 밖) ', 'LOT-NO',
+                         '기준(남길 칸 52개)에 없는 칸 — 보이는 것: PART-NO, 품명, T31수정, 작업자코드, 좌석번호, 거래처코드 · 화면 밖 것: 없음',
+                         '"거래처코드" 칸 제목 (', '표 위 20픽셀: {}(바뀜)'.format(fake.REMOVING), '표 위 80픽셀: ',
+                         '→ Esc → 놓음', '→ 칸 순서·개수 그대로',
+                         '"거래처코드" · 위로 · 표 위 20픽셀 · 모양 ', '칸이 없어짐 (칸 제목 34 → 33개)', '나머지 칸 순서: 그대로',
+                         '의 왼쪽 1/4에 놓음 · ', '바로 앞으로 옮겨짐', '원래 순서로 돌아옴',
+                         '칸 순서: 처음과 같음 (버린 칸 "거래처코드" 제외)', '칸 너비: 처음과 같음', '가로로 밀린 흔적: 없음',
+                         '판독 시간(초):', '표만 '):
             self.assertIn(expected, text, expected)
         self.assertNotIn('✗', text, text)
-        self.assertEqual(text.count('칸 순서: 처음과 같음'), 2)
-        self.assertEqual(text.count('칸 너비: 처음과 같음'), 2)
-        self.assertEqual(mes.documents, ['작업지시관리', '설비별공구관리'])    # 설비별공구관리는 열어 둔 채
+        self.assertNotIn('메뉴로 작업지시관리 앞에 띄우기', text)              # 이미 앞에 있으면 메뉴는 건드리지 않음
         for secret in ('비밀환자', '홍길동치과', 'O1009'):
             self.assertNotIn(secret, text)
         roots = {root for label, wide, root in outcome.reads}
-        self.assertIn(201, roots)                                             # 문서 아래만 읽기
-        self.assertIn(7, roots)                                               # 메뉴 창만 읽기
+        self.assertIn(1220, roots)                                            # 제품처럼 표 창 아래만 읽음
+        self.assertNotIn(7, roots)                                            # 메뉴는 읽지도 않음
 
-    def test_document_behind_another_one_is_brought_forward_before_anything_is_pressed(self):
-        # 현장 1판 결과: 설비별공구관리가 앞에 있는데 뒤에 가려진 표의 좌표로 시험했다. 이제는 메뉴로 먼저 앞에 띄운다.
+    def test_far_move_goes_a_long_way_inside_the_loose_columns_and_comes_back(self):
         mes = screen()
+        seen = []
+        original = mes.release
+
+        def release(x, y):
+            grab = mes.grab
+            if grab and grab[0] == 'move':
+                seen.append((grab[1].columns[grab[2]][0], grab[3], x, y))
+            return original(x, y)
+        mes.release = release
+        run(mes, self.scope)
+        moves = [item for item in seen if item[3] >= mes.rects[mes.work.grid][1] + fake.WORK_BAND]   # 칸 제목 줄에 놓은 것
+        self.assertEqual(len(moves), 2)
+        name, start, end, _ = moves[0]
+        self.assertNotIn(name, fake.WORK_FROZEN)
+        self.assertGreater(start - end, 500)                                  # 멀리 왼쪽으로
+        self.assertEqual(moves[1][0], name)                                   # 같은 칸을 되돌림
+        self.assertGreater(moves[1][2] - moves[1][1], 500)
+
+    def test_column_that_does_not_go_away_is_reported_after_every_way_was_tried(self):
+        mes = screen(removal_works=False)
+        names = [name for name, _ in mes.work.columns]
+        outcome = run(mes, self.scope)
+        self.assertEqual([way for _, way in mes.drops], ['위', '아래'])       # 위(끝까지) → 아래
+        self.assertIn('"거래처코드" · 위로 · 표 위 80픽셀', outcome.text)
+        self.assertIn('"거래처코드" · 아래로 · 칸 제목 아래 140픽셀', outcome.text)
+        self.assertEqual(outcome.text.count('그대로 있음'), 2)
+        self.assertIn('✗ 어느 방법으로도 없어지지 않음', outcome.text)
+        self.assertIn('원래 순서로 돌아옴', outcome.text)                     # 다음 시험은 계속
+        self.assertEqual([name for name, _ in mes.work.columns], names)
+        self.assertEqual((mes.hidden, mes.grouped, mes.bad), ([], [], []))
+        down = run(screen(removal_works=False, removal_down_works=True), self.scope)
+        self.assertIn('"거래처코드" · 아래로 · 칸 제목 아래 140픽셀', down.text)
+        self.assertIn('칸이 없어짐', down.text)
+
+    def test_named_column_is_used_and_a_missing_one_is_skipped(self):
+        mes = screen()
+        outcome = run(mes, self.scope, remove='T31수정')
+        self.assertEqual(mes.hidden, ['T31수정'])
+        self.assertIn('"T31수정" · 위로 · 표 위 20픽셀', outcome.text)
+        mes = screen()
+        missing = run(mes, self.scope, remove='없는칸')
+        self.assertIn('"없는칸" 칸이 지금 화면에 다 보이지 않아 건너뜀', missing.text)
+        self.assertIn('버려 볼 칸이 없어 건너뜀', missing.text)
+        self.assertIn('원래 순서로 돌아옴', missing.text)                     # 먼 칸 옮기기는 그대로 함
+        self.assertEqual((mes.hidden, mes.bad), ([], []))
+
+    def test_already_arranged_table_has_nothing_to_throw_away(self):
+        mes = screen()
+        mes.work.columns = [item for item in mes.work.columns if item[0] not in fake.WORK_EXTRA]
+        mes.layout()
+        outcome = run(mes, self.scope)
+        self.assertIn('기준에 없는 칸(평소 없애는 칸)이 화면에 보이지 않아 건너뜀', outcome.text)
+        self.assertEqual((mes.hidden, mes.bad), ([], []))
+        self.assertIn('원래 순서로 돌아옴', outcome.text)
+
+    def test_list_only_reads_the_table_without_any_press(self):
+        mes = screen()
+        before = mes.snapshot()
+        outcome = run(mes, self.scope, list_only=True)
+        self.assertEqual(mes.presses, 0)
+        self.assertEqual(mes.snapshot(), before)
+        self.assertIn('선택@94+35 | PART-NO@129+110', outcome.text)
+        self.assertNotIn('칸 버리기', outcome.text)
+
+    def test_document_behind_another_one_is_brought_forward_by_the_menu_first(self):
+        # 현장 1판: 설비별공구관리가 앞에 있는데 뒤에 가려진 표의 좌표로 시험했다. 이제는 메뉴로 먼저 앞에 띄운다.
+        mes = screen(expanded='설비관리')
         mes.documents.append('설비별공구관리')
         mes.active = '설비별공구관리'
         mes.layout()
         tool = [list(item) for item in mes.tool.columns]
-        outcome = run(mes, self.scope, tool=False)
+        outcome = run(mes, self.scope)
         self.assertEqual(mes.bad, [], outcome.text)
         self.assertEqual(mes.active, '작업지시관리')
         self.assertEqual(mes.tool.columns, tool)
-        self.assertIn('→ 작업지시관리 문서가 앞에 옴', outcome.text)
+        for expected in ('■ 메뉴로 작업지시관리 앞에 띄우기', '메뉴 칸 너비 25', '경계를 오른쪽으로 끌어 넓힘 → 너비 200',
+                         '묶음 "생산관리"이 접혀 있음 → 이름 줄', '→ 작업지시관리 문서가 앞에 옴', '칸이 없어짐',
+                         '메뉴 칸 너비를 처음(25)으로 되돌림 → 25'):
+            self.assertIn(expected, outcome.text, expected)
+        self.assertEqual(mes.menu, 25)
         self.assertNotIn('✗', outcome.text, outcome.text)
 
-    def test_optional_column_removal_drops_the_header_into_the_table(self):
-        mes = screen(removal_down_works=True)              # 점검 프로그램의 선택 시험은 표 안쪽(아래)에 놓아 봅니다.
-        outcome = run(mes, self.scope, remove='T31수정', tool=False)
-        self.assertEqual(mes.bad, [], outcome.text)
-        self.assertEqual(mes.hidden, ['T31수정'])
-        self.assertIn('"T31수정" 칸 제목을 아래(표 안쪽)로 140 끌어다 놓음', outcome.text)
-        self.assertIn('→ 칸이 없어짐 · 나머지 순서 그대로', outcome.text)
-        self.assertEqual(outcome.text.count('칸 순서: 처음과 같음'), 2)         # 없앤 칸을 빼고 비교
-        self.assertNotIn('설비별공구관리 문서가 앞에', outcome.text)
-        missing = run(screen(), self.scope, remove='없는칸', tool=False)
-        self.assertIn('"없는칸" 칸이 지금 화면에 다 보이지 않아 건너뜀', missing.text)
-
-    def test_list_only_reads_the_tables_without_any_drag_and_without_touching_the_menu(self):
+    def test_sideways_scrolled_table_gets_no_drag_at_all(self):
         mes = screen()
-        before = mes.snapshot()
-        outcome = run(mes, self.scope, list_only=True)
-        self.assertEqual(mes.bad, [])
-        self.assertEqual(mes.snapshot(), before)
-        self.assertEqual(mes.menu, 25)
-        self.assertLessEqual(mes.presses, 2)                                  # 탭 두 번(작업지시관리로 갔다가 돌아오기)뿐
-        self.assertIn('PART-NO 110 | 품명 130', outcome.text)
-        self.assertIn('거래처명120', outcome.text)
-        self.assertNotIn('칸 너비 끌기', outcome.text)
-        self.assertNotIn('메뉴 칸 넓히기', outcome.text)
-        behind = screen()
-        behind.documents.append('설비별공구관리')
-        behind.active = '설비별공구관리'
-        behind.layout()
-        outcome = run(behind, self.scope, list_only=True)                     # 문서가 뒤에 있으면 메뉴로 앞에 띄운 뒤 읽음
-        self.assertIn('PART-NO 110 | 품명 130', outcome.text)
-        self.assertEqual(behind.bad, [])
+        mes.work.scroll = 300
+        mes.layout()
+        outcome = run(mes, self.scope)
+        self.assertIn('✗ 표가 가로로 밀려 있는 것으로 읽혀 조작 시험은 하지 않습니다', outcome.text)
+        self.assertIn('가로로 밀린 흔적 있음', outcome.text)
+        self.assertEqual((mes.presses, mes.hidden), (0, []))
 
-    def test_escape_that_does_not_cancel_is_noticed_and_the_order_is_restored(self):
-        mes = screen(escape_cancels=False)
-        order = [name for name, _ in mes.work.columns]
-        outcome = run(mes, self.scope, tool=False)
-        self.assertIn('✗ 순서가 바뀜(Esc로 취소되지 않음)', outcome.text)
-        self.assertIn('원래 순서로 되돌림', outcome.text)
-        self.assertIn('Esc로 끌기 취소가 확인되지 않아 건너뜀', outcome.text)
-        self.assertEqual([name for name, _ in mes.work.columns], order)
-        self.assertEqual(mes.bad, [])
-
-    def test_shift_wheel_is_tried_when_the_side_wheel_does_nothing(self):
-        mes = screen(hwheel_works=False)
-        outcome = run(mes, self.scope, tool=False)
-        self.assertIn('가로 휠 3칸: 표가 움직이지 않음', outcome.text)
-        self.assertIn('Shift+세로 휠 3칸: 표가 가로로 120픽셀 움직임', outcome.text)
-        self.assertEqual(mes.work.scroll, 0)
-        self.assertEqual(outcome.user.keys, set())                            # Shift를 눌린 채 두지 않음
-        none = run(screen(hwheel_works=False, shift_wheel_works=False), self.scope, tool=False)
-        self.assertIn('Shift+세로 휠 3칸: 표가 움직이지 않음', none.text)
-        self.assertIn('✗ 표가 가로로 밀린 채입니다', none.text)                     # 자동 스크롤로 밀렸는데 되돌릴 방법이 없음
-
-    def test_frozen_screen_presses_nothing_on_edges_and_says_so(self):
-        mes = screen()
-        outcome = run(mes, self.scope, tool=False, user=fake.FakeUser32(mes, frozen=True))
-        self.assertIn('메뉴 칸 경계에서 크기 조절 모양을 확인하지 못해 누르지 않았습니다', outcome.text)
-        self.assertEqual(mes.presses, 0)                                      # 메뉴 칸을 넓히지 못하면 그 뒤는 하지 않음
-        self.assertEqual(mes.menu, 25)
+    def test_escape_that_does_not_cancel_still_changes_nothing_while_looking(self):
+        mes = screen(escape_cancels=False)                                    # 올려 보기는 제자리로 돌아와서 놓으므로 그대로
+        outcome = run(mes, self.scope)
+        self.assertIn('→ 칸 순서·개수 그대로', outcome.text)
+        self.assertEqual(mes.hidden, ['거래처코드'])
+        self.assertEqual((mes.grouped, mes.bad), ([], []))
 
     def test_f9_stops_and_releases_everything(self):
         mes = screen()
         user = fake.FakeUser32(mes)
-        mes.on_press = lambda model: user.keys.add(0x78) if model.presses == 6 else None
+        mes.on_press = lambda model: user.keys.add(0x78) if model.presses == 2 else None
         outcome = run(mes, self.scope, user=user)
         self.assertIn('F9로 중지했습니다', outcome.text)
         self.assertFalse(user.down)
         self.assertIsNone(mes.grab)
+        self.assertEqual(mes.grouped, [])
 
-    def test_missing_menu_stops_before_any_press(self):
+    def test_unreadable_menu_matters_only_when_the_work_screen_is_not_in_front(self):
+        def without_menu(mes):
+            keep = mes.report
+            mes.report = lambda root=None: {**keep(root), 'records': [r for r in keep(root)['records'] if r.get('role') not in (16, 30, 33)]}
         mes = screen()
-        keep = mes.report
-        mes.report = lambda root=None: {**keep(root), 'records': [r for r in keep(root)['records'] if r.get('role') not in (16, 30, 33)]}
+        without_menu(mes)
         outcome = run(mes, self.scope)
-        self.assertIn('✗ 왼쪽 메뉴를 읽지 못했습니다', outcome.text)
+        self.assertEqual(mes.hidden, ['거래처코드'])                           # 메뉴 없이도 그대로 진행
+        self.assertNotIn('✗', outcome.text, outcome.text)
+        mes = screen()
+        mes.documents.append('설비별공구관리')
+        mes.active = '설비별공구관리'
+        mes.layout()
+        without_menu(mes)
+        outcome = run(mes, self.scope)
+        self.assertIn('왼쪽 메뉴를 읽지 못했습니다', outcome.text)
         self.assertEqual(mes.presses, 0)
 
     def test_one_failing_experiment_does_not_stop_the_others(self):
         mes = screen()
         original = mes.report
         calls = {'count': 0}
+
         def flaky(root=None):
             calls['count'] += 1
-            if calls['count'] == 9:
+            if calls['count'] == 5:                                           # '올려 본 뒤' 읽기가 실패
                 raise RuntimeError('화면을 충분히 읽지 못해')
             return original(root)
         mes.report = flaky
-        outcome = run(mes, self.scope, tool=False)
+        outcome = run(mes, self.scope)
         self.assertIn('✗ 이 시험은 중단: 화면을 충분히 읽지 못해', outcome.text)
-        self.assertIn('■ 생산일보관리 탭의 표', outcome.text)
-        self.assertIn('■ 처음 상태로 되돌리기', outcome.text)
+        self.assertIn('■   칸 버리기 (평소 없애는 칸 하나)', outcome.text)
+        self.assertIn('■   끝난 뒤 확인', outcome.text)
         self.assertFalse(outcome.user.down)
-        self.assertEqual(mes.menu, 25)
+        self.assertEqual((mes.grouped, mes.bad), ([], []))
 
 
 if __name__ == '__main__':

@@ -15,9 +15,11 @@ TEMPLATE = ROOT / 'tools/mes_probe_template.py'
 
 
 def reader_source():
+    """제품의 화면 판독기(WashReader)와, MES 정렬이 쓰는 판독기 설정(mes_layout_reader)을 그대로 가져옵니다."""
     text = (ROOT / 'src/host/jihunius_main.py').read_text(encoding='utf-8')
-    node = next(n for n in ast.parse(text).body if isinstance(n, ast.ClassDef) and n.name == 'WashReader')
-    return ''.join(text.splitlines(True)[node.lineno - 1:node.end_lineno])
+    lines = text.splitlines(True)
+    nodes = {getattr(n, 'name', ''): n for n in ast.parse(text).body}
+    return '\n\n'.join(''.join(lines[nodes[name].lineno - 1:nodes[name].end_lineno]) for name in ('WashReader', 'mes_layout_reader'))
 
 
 def app_version():

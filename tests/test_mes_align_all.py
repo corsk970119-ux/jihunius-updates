@@ -27,7 +27,8 @@ ARRANGED = ORDER + ['직경', '각도', 'LOT-NO']          # 기준 순서 뒤�
 def fresh(plain=False, **changes):
     """MES를 막 켠 상태: 메뉴 칸 200, 작업지시관리 문서의 '작업지시관리' 탭, 표는 기본 순서(없앨 칸 6개 포함).
 
-    작업지시관리 표는 실제 MES처럼 행 번호 칸 51픽셀, 왼쪽 고정 칸 6개(뒤에 2픽셀 구분선), 세로 스크롤 막대가 있습니다.
+    작업지시관리 표는 실제 MES처럼 행 번호 칸 51픽셀, 왼쪽 고정 칸 6개(뒤에 2픽셀 구분선), 세로 스크롤 막대,
+    칸 제목 줄 위의 그룹화 칸(34픽셀)이 있습니다.
     plain=True: 고정 칸·행 번호 칸·스크롤 막대가 없는 단순한 표.
     """
     mes = fake.six(menu=200)
@@ -36,6 +37,7 @@ def fresh(plain=False, **changes):
     mes.movable = {mes.work}                             # 칸 제목을 끌어도 되는 표는 작업지시관리 표뿐
     if not plain:
         mes.work.frozen, mes.work.indent, mes.work.scrollbar = set(fake.WORK_FROZEN), fake.WORK_INDENT, 17
+        mes.work.band = fake.WORK_BAND                   # 칸 제목 줄 위의 그룹화 칸
     for name, value in changes.items():
         setattr(mes, name, value)
     mes.layout()
@@ -227,9 +229,11 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assertFalse(layout.tidy(grid))
         visible = layout.chain(grid)
         self.assertLess(len(visible), len(grid['columns']))                   # 고정 칸과 겹쳐 읽힌 칸은 빼고
+        limit = mes.rects[mes.work.grid][2] - mes.work.scrollbar
         for column in visible:                                                # 남은 칸은 그 자리에 실제로 보이는 칸
-            hit = mes.header_at(mes.work, column['x'] + column['w'] // 2, column['y'] + 5)
-            self.assertEqual(mes.work.columns[hit[0]][0], column['name'])
+            if column['x'] + column['w'] // 2 < limit:                        # (스크롤 막대 밑에 걸친 끝 칸은 빼고)
+                hit = mes.header_at(mes.work, column['x'] + column['w'] // 2, column['y'] + 5)
+                self.assertEqual(mes.work.columns[hit[0]][0], column['name'])
         mes.work.scroll = 0
         self.assertTrue(layout.tidy(layout.grids(mes.report(1220), required=())[0]))
 
@@ -265,13 +269,13 @@ class WorkTableTests(Checks, unittest.TestCase):
         self.assertEqual(mes.bad, [])
 
     def test_header_is_carried_further_up_until_the_pointer_shows_it_will_be_thrown_away(self):
-        mes = fresh(removal_distance=60)                                      # 꽤 멀리 올려야 버려지는 MES
+        mes = fresh(removal_distance=60)                                      # 표에서 꽤 멀리 올려야 버려지는 MES
         outcome = run(mes)
         self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assertEqual({way for _, way in mes.drops}, {'위'})
         self.assertEqual(len(mes.drops), 6)                                   # 헛손질 없이 한 번씩
         first = next(value for kind, value in outcome.notes if kind == 'record' and value.startswith('칸 버리기'))
-        self.assertIn('위로 80픽셀', first)
+        self.assertIn('표 위 80픽셀', first)
         self.assertIn(str(fake.REMOVING), first)                              # 바뀐 포인터 모양도 기록
 
     def test_header_is_dropped_at_the_top_step_when_the_pointer_never_changes(self):
@@ -279,7 +283,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         outcome = run(mes)
         self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
         self.assertEqual(len(mes.drops), 6)
-        self.assertTrue(any('위로 100픽셀' in value for kind, value in outcome.notes if kind == 'record'))
+        self.assertTrue(any('표 위 80픽셀' in value for kind, value in outcome.notes if kind == 'record'))
         self.assert_work(mes)
 
     def test_no_room_above_the_table_means_dropping_inside_it(self):
@@ -303,6 +307,7 @@ class WorkTableTests(Checks, unittest.TestCase):
         left, top = mes.rects[mes.work.grid][0], mes.rects[mes.work.grid][1]
         spots = [point for text, point in outcome.where if text in ('칸 버린 뒤', '칸 옮긴 뒤', '칸 너비 확인')]
         self.assertGreaterEqual(len(spots), 6)
+        top += fake.WORK_BAND                                                 # 칸 제목 줄은 그룹화 칸 아래
         for x, y in spots:
             self.assertTrue(left <= x < left + fake.WORK_INDENT and top <= y < top + fake.HEADER, (x, y))
 
@@ -318,6 +323,77 @@ class WorkTableTests(Checks, unittest.TestCase):
         last = [column for column in layout.chain(grid)][-1]                  # 오른쪽 끝에서 잘린 칸
         self.assertFalse(layout.whole(dict(grid, reach=limit), last))
         self.assertEqual(mes.bad, [])                                         # 스크롤 막대나 그 밑은 누르지 않음
+
+    def test_header_is_never_dropped_on_or_held_over_the_grouping_box(self):
+        # 새로 켠 MES 화면(2026-11-16): 칸 제목 줄 위에 '그룹화 할 열 머리글을 여기로 끌어옵니다' 칸이 있다.
+        # 거기에 놓으면 버려지지 않고 그 칸으로 묶이므로, 버릴 때는 표의 위쪽 끝보다 위에만 놓는다.
+        for changes in ({}, {'removal_cursor': False}, {'removal_distance': 60}, {'removal_works': False},
+                        {'removal_works': False, 'removal_down_works': True}):
+            mes = fresh(**changes)
+            run(mes)
+            self.assertEqual(mes.grouped, [], changes)
+            self.assertEqual(mes.group_hovers, 0, changes)
+            self.assertEqual(mes.bad, [], changes)
+
+    def test_drop_points_for_throwing_away_are_all_outside_the_table(self):
+        mes = fresh(documents=['작업지시관리', '설비별공구관리'], menu=25)
+        outcome = run(mes, call=lambda *arguments: None)                      # 포인터만 만들고 아무것도 하지 않음
+        grid = layout.grids(mes.report(1220), required=())[0]
+        column = next(item for item in grid['columns'] if item['name'] == '거래처코드')
+        points = layout.discard_points(outcome.pointer, grid, layout.grip(column), '위로')
+        self.assertEqual([grid['y'] - y for _, y in points], list(layout.DISCARD_STEPS))
+        self.assertTrue(all(y < grid['y'] for _, y in points))                # 그룹화 칸(표 안)에는 놓을 자리가 없음
+        self.assertTrue(all(layout.outside(outcome.pointer, grid, point) for point in points))
+        down = layout.discard_points(outcome.pointer, grid, layout.grip(column), '아래로')
+        self.assertEqual(len(down), 1)
+        self.assertGreater(down[0][1], column['y'] + column['h'] + 60)        # 행이 있는 곳
+
+    def test_interrupted_drag_is_cancelled_with_escape_instead_of_dropped_somewhere(self):
+        mes = fresh(documents=['작업지시관리', '설비별공구관리'], menu=25)
+        outcome = run(mes, call=lambda *arguments: None)
+        pointer = outcome.pointer
+        grid = layout.grids(mes.report(1220), required=())[0]
+        before = [list(item) for item in mes.work.columns]
+        column = next(item for item in grid['columns'] if item['name'] == '거래처코드')
+        target = next(item for item in grid['columns'] if item['name'] == '작업자')
+        move, count = pointer.move, {'left': 2}
+
+        def failing(point):
+            count['left'] -= 1
+            if count['left'] < 0:
+                raise RuntimeError('끌던 중 문제')
+            return move(point)
+        for action in (lambda: layout.discard(pointer, grid, column, '위로'),
+                       lambda: layout.carry(pointer, grid, column, (target['x'] + 20, target['y'] + 11))):
+            count['left'] = 2
+            pointer.move = failing
+            with self.assertRaises(RuntimeError):
+                action()
+            pointer.move = move
+            self.assertFalse(outcome.user.down)                               # 버튼은 놓였고
+            self.assertEqual(mes.work.columns, before)                        # 칸은 버려지지도 옮겨지지도 않음
+            self.assertEqual((mes.hidden, mes.grouped, mes.bad), ([], [], []))
+
+    def test_narrow_header_is_grabbed_away_from_its_filter_button(self):
+        mes = fresh()
+        mes.work.columns[0], mes.work.columns[3] = mes.work.columns[3], mes.work.columns[0]   # 지시일 … 선택: '선택'(35픽셀)을 끌어야 함
+        run(mes)
+        self.assertEqual(mes.bad, [])                                         # 가운데를 잡았다면 '필터 단추를 누름'
+        self.assert_work(mes)
+        for width in (30, 35, 40, 47, 48, 60, 140):
+            x = layout.grip({'x': 100, 'y': 0, 'w': width, 'h': 22})[0] - 100
+            self.assertTrue(5 <= x <= width // 2, (width, x))
+            self.assertTrue(x < width - fake.FILTER_BUTTON[0] or width < 24, (width, x))
+
+    def test_table_without_a_scrollbar_is_arranged_too(self):
+        mes = fresh()
+        mes.work.scrollbar = 0                                                # 행이 적으면 세로 스크롤 막대가 없음(2026-11-16 화면)
+        mes.layout()
+        outcome = run(mes)
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assert_work(mes)
+        self.assertEqual(mes.bad, [])
+        self.assertTrue(layout.brief_all(outcome.result, 9.0)[0].startswith('MES 정렬 완료'))
 
     def test_columns_off_the_right_edge_are_left_alone(self):
         mes = fresh()

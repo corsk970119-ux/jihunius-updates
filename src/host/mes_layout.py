@@ -967,13 +967,14 @@ class Navigator:
 
 # ── 작업지시관리 표 ─────────────────────────────────────────────────────────────
 
-DISCARD_STEPS = (40, 60, 80, 100)    # 칸 제목을 위로 끌어 올리는 거리 단계(칸 제목 가운데에서부터, 픽셀)
-DISCARD_DOWN = 140                   # 마지막 방법: 표 안쪽(아래)으로 끌어 내리는 거리
+DISCARD_STEPS = (20, 40, 60, 80)     # 칸 제목을 버릴 때 놓는 자리: 표의 위쪽 끝에서 이만큼 위(표 바깥, 픽셀)
+DISCARD_DOWN = 140                   # 마지막 방법: 표 안쪽(아래)으로 끌어 내리는 거리(칸 제목 가운데에서부터)
 DISCARD_WAYS = ('위로', '위로 끝까지', '아래로')
 
 
-def _center(column):
-    return column['x'] + column['w'] // 2, column['y'] + column['h'] // 2
+def grip(column):
+    """칸 제목을 잡는 자리. 좁은 칸은 가운데보다 왼쪽을 잡습니다(칸 제목 오른쪽 끝에는 필터 단추가 있을 수 있음)."""
+    return column['x'] + max(5, min(column['w'] // 2, column['w'] - 24)), column['y'] + column['h'] // 2
 
 
 def spot(pointer, grid, point, patience=0.6):
@@ -995,8 +996,27 @@ def spot(pointer, grid, point, patience=0.6):
 
 
 def grabbable(pointer, grid, column):
-    """칸 제목 가운데를 잡을 수 있는지(spot과 같은 규칙)."""
-    return spot(pointer, grid, _center(column))
+    """칸 제목을 잡을 수 있는지(spot과 같은 규칙)."""
+    return spot(pointer, grid, grip(column))
+
+
+def outside(pointer, grid, point):
+    """그 자리가 이 표의 바깥인지(표 창도, 표에 딸린 창도 아님)."""
+    return grid['handle'] not in pointer.lineage(pointer.window_at(point))
+
+
+def _release(pointer, finished):
+    """끌던 칸 제목을 놓습니다. 도중에 문제가 생겨 끝까지 못 갔으면 Esc로 끌기를 취소한 뒤 놓습니다(엉뚱한 자리에 놓이지 않게).
+
+    현장 확인(2판): 칸 제목을 끄는 중에 Esc를 누르면 끌기가 취소됩니다.
+    """
+    if not finished:
+        try:
+            pointer.key(0x1B)
+            pointer.sleep(0.1)
+        except Exception:
+            pass
+    pointer.drop()
 
 
 def carry(pointer, grid, source, end):
@@ -1004,51 +1024,77 @@ def carry(pointer, grid, source, end):
 
     현장 확인: 다른 칸 제목의 왼쪽 절반에 놓으면 그 칸 앞으로 옮겨집니다.
     """
-    start = _center(source)
+    start = grip(source)
     if not spot(pointer, grid, start, 1.0) or not spot(pointer, grid, end, 1.0):
         return False
     pointer.hold(start)
+    finished = False
     try:
         pointer.sleep(0.08)
-        pointer.move((start[0], start[1] + 8) if end[1] != start[1] else (start[0] + (6 if end[0] >= start[0] else -6), start[1]))
+        pointer.move((start[0] + (6 if end[0] >= start[0] else -6), start[1]))
         pointer.sleep(0.06)
-        pointer.move(((start[0] + end[0]) // 2, (start[1] + end[1]) // 2))
+        pointer.move(((start[0] + end[0]) // 2, start[1]))      # 칸 제목 줄을 따라서만 움직입니다.
         pointer.sleep(0.15)
         pointer.move(end)
         pointer.sleep(0.35)
+        finished = True
     finally:
-        pointer.drop()
+        _release(pointer, finished)
     pointer.sleep(0.4)
     return True
+
+
+def park(pointer, grid):
+    """포인터를 표의 왼쪽 위 모서리(행 번호 칸의 제목 자리)로 치워 둡니다.
+
+    칸 제목 위에 포인터를 둔 채 화면을 읽으면 MES가 설명 풍선을 띄워 칸 제목을 가릴 수 있습니다.
+    """
+    if not grid or not grid['columns']:
+        return
+    margin = min(column['x'] for column in grid['columns']) - grid['x']
+    point = (grid['x'] + min(20, margin // 2), grid['columns'][0]['y'] + grid['columns'][0]['h'] // 2)
+    if margin >= 12 and pointer.window_at(point) == grid['handle']:
+        pointer.move(point)
+        pointer.sleep(0.05)
+
+
+def discard_points(pointer, grid, start, way):
+    """칸 제목을 버릴 때 놓을 자리들(가까운 곳부터).
+
+    현장 화면(2026-11-16 사용자 사진): 작업지시관리 표는 칸 제목 줄 위에 '그룹화 할 열 머리글을 여기로 끌어옵니다' 칸이
+    있습니다. 거기에 놓으면 버려지는 것이 아니라 그 칸으로 묶여 버리므로, 위로 버릴 때는 반드시 **표의 위쪽 끝보다 위**,
+    그 자리의 창이 이 표가 아닌 곳에만 놓습니다.
+    """
+    if way == '아래로':
+        point = (start[0], start[1] + DISCARD_DOWN)
+        return [point] if pointer.window_at(point) == grid['handle'] else []
+    top = max(pointer.rect(pointer.root)[1], pointer.u.GetSystemMetrics(77)) + 4     # MES 창과 화면 안에서만
+    points = [(start[0], grid['y'] - step) for step in DISCARD_STEPS]
+    return [point for point in points if point[1] >= top and outside(pointer, grid, point)]
 
 
 def discard(pointer, grid, source, way):
     """칸 제목 source를 끌어다 버립니다. 반환: (끄는 동안 본 것을 적은 글, 가장 먼 단계까지 갔는지). 놓을 자리가 없으면 (None, True).
 
     사용자 확인(2026-11-13): 필요 없는 칸은 칸 제목을 위로 끌어다 놓으면 없어집니다.
-      '위로'        위로 조금씩 올리다가 포인터 모양이 바뀌면(버리기 표시) 거기서 놓고, 바뀌지 않으면 가장 위 단계에서 놓습니다.
+      '위로'        표 위쪽 바깥으로 조금씩 올리다가 포인터 모양이 바뀌면(버리기 표시) 거기서 놓고, 바뀌지 않으면 가장 위에서 놓습니다.
       '위로 끝까지' 모양과 상관없이 가장 위 단계까지 올려서 놓습니다.
-      '아래로'      표 안쪽(아래)에 놓습니다(위로 버려지지 않을 때의 마지막 방법).
+      '아래로'      표 안쪽(아래, 행이 있는 곳)에 놓습니다(위로 버려지지 않을 때의 마지막 방법).
     끄는 동안에는 이 표가 마우스를 잡고 있으므로 놓는 자리가 표 밖이어도 다른 화면이 눌리지 않습니다.
+    칸 제목 줄과 표 위쪽 끝 사이(그룹화 칸)에는 멈추지도 놓지도 않습니다.
     """
-    start = _center(source)
+    start = grip(source)
     if not spot(pointer, grid, start, 1.0):
         return None, True
-    upward = way != '아래로'
-    if upward:
-        top = max(pointer.rect(pointer.root)[1], pointer.u.GetSystemMetrics(77)) + 4     # MES 창과 화면 안에서만
-        points = [(start[0], start[1] - step) for step in DISCARD_STEPS if start[1] - step >= top]
-    else:
-        points = [(start[0], start[1] + DISCARD_DOWN)]
-        if pointer.window_at(points[0]) != grid['handle']:
-            points = []
+    points = discard_points(pointer, grid, start, way)
     if not points:
         return None, True
     seen = []
     pointer.hold(start)
+    finished = False
     try:
         pointer.sleep(0.08)
-        pointer.move((start[0], start[1] + (-8 if upward else 8)))     # 칸 제목 안에서 조금 움직여 끌기 시작
+        pointer.move((start[0] + 6, start[1]))           # 칸 제목 줄 안에서 옆으로 조금 움직여 끌기 시작
         pointer.sleep(0.08)
         base = pointer.shape()
         for point in points:
@@ -1060,10 +1106,13 @@ def discard(pointer, grid, source, way):
                 if pointer.shape() == seen[-1]:          # 바뀐 모양이 그대로 유지될 때만 '버리기 표시'로 봅니다.
                     break
         pointer.sleep(0.3)
+        finished = True
     finally:
-        pointer.drop()
+        _release(pointer, finished)
     pointer.sleep(0.4)
-    text = '{} {}픽셀 · 모양 {} → {}'.format(way, abs(points[len(seen) - 1][1] - start[1]), base, ' '.join(str(shape) for shape in seen))
+    last = points[len(seen) - 1]
+    where = '표 위 {}픽셀'.format(grid['y'] - last[1]) if way != '아래로' else '칸 제목 아래 {}픽셀'.format(last[1] - start[1])
+    text = '{} · {} · 모양 {} → {}'.format(way, where, base, ' '.join(str(shape) for shape in seen))
     return text, len(seen) == len(points)
 
 
@@ -1079,22 +1128,8 @@ def arrange_work(nav, handle, standard):
               'detail': ''}
     box = {}
 
-    def park():
-        """포인터를 표의 왼쪽 위 모서리(행 번호 칸의 제목 자리)로 치워 둡니다.
-
-        칸 제목 위에 포인터를 둔 채 화면을 읽으면 MES가 설명 풍선을 띄워 칸 제목을 가릴 수 있습니다.
-        """
-        grid = box.get('grid')
-        if not grid or not grid['columns']:
-            return
-        margin = min(column['x'] for column in grid['columns']) - grid['x']
-        point = (grid['x'] + min(20, margin // 2), grid['columns'][0]['y'] + grid['columns'][0]['h'] // 2)
-        if margin >= 12 and pointer.window_at(point) == grid['handle']:
-            pointer.move(point)
-            pointer.sleep(0.05)
-
     def look(text):
-        park()
+        park(pointer, box.get('grid'))
         tables = grids(nav.read(text, handle), required=())
         found = [grid for grid in front(tables, pointer) if grid['handle'] == handle]
         if not found:                    # 잠깐 떴다 사라지는 창(설명 풍선 등)에 가렸을 수 있어 한 번 더 봅니다.
@@ -1134,7 +1169,7 @@ def arrange_work(nav, handle, standard):
             inside = [column for column in chain(grid) if column['name'] and whole(grid, column) and column['x'] > grid['x'] + 40]
             if not inside or not grabbable(pointer, grid, inside[len(inside) // 2]):
                 return False
-            start = _center(inside[len(inside) // 2])
+            start = grip(inside[len(inside) // 2])
             pointer.hold(start)
             try:
                 pointer.sleep(0.08)
@@ -1142,10 +1177,9 @@ def arrange_work(nav, handle, standard):
                 pointer.sleep(0.06)
                 pointer.move((grid['x'] + 30, start[1]))     # 표의 왼쪽 끝(맨 앞 번호 칸 위)
                 pointer.sleep(2.5)
-                pointer.key(0x1B)
-                pointer.sleep(0.2)
             finally:
-                pointer.drop()
+                _release(pointer, False)                     # 옮기려는 것이 아니므로 늘 Esc로 취소하고 놓습니다.
+            pointer.sleep(0.2)
             pointer.sleep(0.4)
             before = [(column['name'], column['x']) for column in grid['columns']]
             if [(column['name'], column['x']) for column in look('가로 스크롤 되돌린 뒤')['columns']] == before:

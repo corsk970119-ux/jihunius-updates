@@ -13,6 +13,9 @@
         맨 앞 몇 칸은 왼쪽에 고정돼 있어 표를 가로로 밀어도 제자리에 남는다(고정 칸 뒤에는 2픽셀 구분선).
         밀린 칸은 고정 칸 밑으로 들어가는데, 표 범위에 걸쳐 있으면 가려져 있어도 판독에는 위치가 나온다.
   사용자 확인(2026-11-13): 필요 없는 칸은 칸 제목을 위로 끌어다 버리면 없어진다.
+  사용자 화면 사진(2026-11-16, 새로 켠 MES): 작업지시관리 표는 칸 제목 줄 위에 '그룹화 할 열 머리글을 여기로 끌어옵니다'
+        칸(약 34픽셀)이 있다. 거기에 칸 제목을 놓으면 버려지지 않고 그 칸으로 묶인다(→ 잘못된 조작으로 기록).
+        고정 칸은 선택·PART-NO·품명·지시일·시간·프로젝트No(뒤에 굵은 선), 몇몇 칸 제목 오른쪽 끝에는 필터 단추가 있다.
 """
 import ctypes
 from collections import OrderedDict
@@ -20,15 +23,19 @@ from collections import OrderedDict
 ARROW, WAIT, BUSY, SIZEWE, VSPLIT, HSPLIT, MOVING, REMOVING = 65539, 65543, 65561, 65555, 70001, 70003, 71001, 72001
 COLUMNS = (('No.', 37), ('선택', 38), ('P/No.', 47), ('거래처명', 120), ('Fixture', 58), ('Size', 54),
            ('환자명', 46), ('치식', 37), ('세척', 40), ('비고', 55), ('영점', 50))
-# MES를 막 켰을 때의 작업지시관리 표(화면 사진으로 본 순서). 사용자는 여기서 6칸을 없애고 특이사항 3칸을 설비명 뒤로 옮긴다.
+# MES를 막 켰을 때의 작업지시관리 표(2026-11-16 사용자 화면 사진의 순서·너비: 선택35 PART-NO110 품명130 지시일90 시간80 프로젝트No100 |
+# T31수정60 작업자…80 작업자100 좌석번호60 설비코드100 설비명150 거래처코드120 거래처명140 지역50 Fixture Name80 Type60 Size60 치과명80 환자명80 치식40 stl…).
+# 사용자는 여기서 6칸을 없애고 특이사항 3칸을 설비명 뒤로 옮긴다. 사진 밖(오른쪽) 칸의 순서·너비는 짐작.
 WORK_COLUMNS = (('선택', 35), ('PART-NO', 110), ('품명', 130), ('지시일', 90), ('시간', 80), ('프로젝트No', 100), ('T31수정', 60),
-                ('작업자코드', 80), ('작업자', 100), ('좌석번호', 60), ('설비코드', 90), ('설비명', 150), ('거래처코드', 120),
+                ('작업자코드', 80), ('작업자', 100), ('좌석번호', 60), ('설비코드', 100), ('설비명', 150), ('거래처코드', 120),
                 ('거래처명', 140), ('지역', 50), ('Fixture Name', 80), ('Type', 60), ('Size', 60), ('치과명', 80), ('환자명', 80),
                 ('치식', 40), ('stl', 40), ('납기일', 90), ('배송업체', 80), ('출하일', 90), ('진행상태', 80), ('특이사항1', 100),
                 ('특이사항2', 100), ('특이사항3', 100), ('세척순서', 60), ('길이', 60), ('직경', 60), ('각도', 60), ('LOT-NO', 100))
 WORK_EXTRA = ('PART-NO', '품명', 'T31수정', '작업자코드', '좌석번호', '거래처코드')     # 사용자가 없애는 칸
 WORK_FROZEN = ('선택', 'PART-NO', '품명', '지시일', '시간', '프로젝트No')              # 왼쪽에 고정된 칸(실제 MES처럼)
 WORK_INDENT = 51             # 작업지시관리 표의 행 번호 칸 너비(표 왼쪽 끝 ~ 첫 칸 제목)
+WORK_BAND = 34               # 작업지시관리 표의 그룹화 칸 높이(표 위쪽 끝 ~ 칸 제목 줄)
+FILTER_BUTTON = (18, 4)      # 칸 제목 오른쪽 끝에서 이만큼 안쪽 ~ 이만큼 안쪽까지가 필터 단추
 FROZEN_GAP = 2               # 고정 칸과 나머지 칸 사이 구분선
 TOOL_COLUMNS = (('선택', 35), ('설비코드', 100), ('설비명', 150), ('공구대', 80), ('공구코드', 110), ('공구명', 130))
 WORK_TABS = ('작업지시관리', '작업지시조회', '생산일보관리')
@@ -49,6 +56,7 @@ class Leaf:
         self.frozen = set()          # 왼쪽에 고정된 칸 이름(가로로 밀어도 제자리)
         self.indent = 0              # 표 왼쪽 끝과 첫 칸 제목 사이(행 번호 칸)
         self.scrollbar = 0           # 표 오른쪽 끝의 세로 스크롤 막대 너비(칸 제목 줄을 덮는 별도 창)
+        self.band = 0                # 표 위쪽 끝과 칸 제목 줄 사이(그룹화 칸) 높이
 
 
 class Split:
@@ -100,9 +108,12 @@ class FakeMes:
         self.escape_cancels = True
         self.removal_works = True    # 칸 제목을 표 위쪽 밖으로 끌어다 놓으면 칸이 없어짐(사용자가 쓰는 방법)
         self.removal_down_works = False   # 칸 제목을 표 안쪽(아래)에 놓아도 칸이 없어지는지
-        self.removal_distance = 25   # 칸 제목 줄에서 이만큼 벗어나야 '버리기'가 됨
+        self.removal_distance = 5    # 표의 위쪽 끝에서 이만큼 더 올라가야 '버리기'가 됨
         self.removal_cursor = True   # 버려지는 자리에서 포인터 모양이 바뀌는지
         self.drops = []              # 칸 제목을 버리려고 놓은 자리: (칸 이름, '위'/'아래')
+        self.grouped = []            # 그룹화 칸에 놓인 칸 이름(잘못된 조작)
+        self.group_hovers = 0        # 칸 제목을 끈 채 그룹화 칸 위에 머문 횟수
+        self.filter_buttons = True   # 칸 제목 오른쪽 끝의 필터 단추(누르면 잘못된 조작으로 기록)
         self.autoscroll_left = True  # 칸 제목을 끈 채 왼쪽 끝에 두면 표가 처음 자리로 돌아감
         self.hwheel_works = True
         self.shift_wheel_works = True
@@ -284,7 +295,21 @@ class FakeMes:
 
     def in_header(self, leaf, x, y):
         left, top, right, _ = self.rects[leaf.grid]
-        return top <= y < top + HEADER and left <= x < right - leaf.scrollbar
+        return top + leaf.band <= y < top + leaf.band + HEADER and left <= x < right - leaf.scrollbar
+
+    def in_band(self, leaf, x, y):
+        """그룹화 칸(표 위쪽 끝 ~ 칸 제목 줄) 안인지."""
+        left, top, right, _ = self.rects[leaf.grid]
+        return top <= y < top + leaf.band and left <= x < right
+
+    def on_filter_button(self, leaf, x, y):
+        """그 자리가 어느 칸 제목의 필터 단추 위인지(칸 이름 또는 None)."""
+        if not self.filter_buttons or not self.in_header(leaf, x, y):
+            return None
+        for _, name, position, width, shown_left, shown_right in self.spread(leaf):
+            if shown_left <= x < shown_right and position + width - FILTER_BUTTON[0] <= x < position + width - FILTER_BUTTON[1]:
+                return name
+        return None
 
     def edge_at(self, leaf, x, y):
         if not self.in_header(leaf, x, y):
@@ -316,6 +341,8 @@ class FakeMes:
     def moved_to(self, x, y, now):
         side = None
         if self.grab and self.grab[0] == 'move':
+            if self.in_band(self.grab[1], x, y):
+                self.group_hovers += 1
             left = self.rects[self.grab[1].grid][0]
             side = 'right' if self.near_right_edge(self.grab[1], x) else ('left' if left <= x < left + 55 else None)
         if side is None:
@@ -368,9 +395,9 @@ class FakeMes:
     def discards(self, leaf, x, y):
         """끌고 있는 칸 제목을 (x, y)에 놓으면 그 칸이 없어지는지: '위' / '아래' / None"""
         left, top, right, bottom = self.rects[leaf.grid]
-        if y < top - self.removal_distance and self.removal_works:
+        if y < top - self.removal_distance and self.removal_works:          # 표의 위쪽 끝보다 위(표 바깥)
             return '위'
-        if left <= x < right and top + HEADER + self.removal_distance <= y < bottom and self.removal_down_works:
+        if left <= x < right and top + leaf.band + HEADER + 10 <= y < bottom and self.removal_down_works:
             return '아래'
         return None
 
@@ -402,6 +429,8 @@ class FakeMes:
                     leaf.columns[edge][1] = 77
                 elif edge is not None:
                     self.grab = ('column', leaf, edge, x)
+                elif header is not None and self.on_filter_button(leaf, x, y):
+                    self.bad.append('필터 단추를 누름: ' + self.on_filter_button(leaf, x, y))
                 elif header is not None and (self.allow_moves or leaf in self.movable):
                     self.grab = ('move', leaf, header[0], x, y)
                 elif hit in (7, 201, 211) and self.allow_clicks:
@@ -426,11 +455,17 @@ class FakeMes:
             target = self.header_at(leaf, x, y)
             top = self.rects[leaf.grid][1]
             if target is None:
-                if not top <= y < top + HEADER:
+                if self.in_band(leaf, x, y):             # 그룹화 칸에 놓음: 버려지지 않고 그 칸으로 묶임
+                    self.grouped.append(leaf.columns[index][0])
+                    self.bad.append('칸 제목을 그룹화 칸에 놓음: ' + leaf.columns[index][0])
+                    return
+                if not top + leaf.band <= y < top + leaf.band + HEADER:
                     self.drops.append((leaf.columns[index][0], '위' if y < top else '아래'))
                 if self.discards(leaf, x, y):
                     self.hidden.append(leaf.columns.pop(index)[0])
                 return
+            if target[0] == index:
+                return                                   # 제자리에 놓으면 아무 일도 없음
             if (leaf.columns[index][0] in leaf.frozen) != (leaf.columns[target[0]][0] in leaf.frozen):
                 return                                   # 고정 칸과 나머지 칸 사이로는 옮겨지지 않음
             item = leaf.columns.pop(index)
@@ -500,16 +535,17 @@ class FakeMes:
                 if x >= right:                                   # 화면 오른쪽 밖: 위치 없음
                     spots[name] = [0, 0, 0, 0]
                 elif x + width <= left:                          # 왼쪽으로 밀려 나감: (고정 칸이 없는 표) 앞의 두 칸은 예전 위치가 남음
-                    spots[name] = [home, top, width, HEADER] if stale > 0 else [0, 0, 0, 0]
+                    spots[name] = [home, top + leaf.band, width, HEADER] if stale > 0 else [0, 0, 0, 0]
                     stale -= 1
                 else:                                            # 표 범위에 걸쳐 있으면 고정 칸 밑에 가려져 있어도 위치가 나옴
-                    spots[name] = [x, top, width, HEADER]
+                    spots[name] = [x, top + leaf.band, width, HEADER]
                 home += width
             for name in leaf.reading + [name for name in spots if name not in leaf.reading]:   # 판독 순서 = 원래 순서(없앤 칸은 빠짐)
                 if name in spots:
                     element(parent=group, role=25, handle=leaf.grid, name=name, bounds=spots[name], offscreen=spots[name][2] == 0)
             data = element(parent=table, role=10, handle=leaf.grid, name='데이터 패널', child_count=1)
-            line = element(parent=data, role=28, handle=leaf.grid, name='행 1', value='O1009;홍길동치과;비밀환자;', bounds=[left, top + HEADER, 500, 20])
+            line = element(parent=data, role=28, handle=leaf.grid, name='행 1', value='O1009;홍길동치과;비밀환자;',
+                           bounds=[left, top + leaf.band + HEADER, 500, 20])
             element(parent=line, role=29, handle=leaf.grid, name='환자명 row 0', value='비밀환자')
         records.append({'kind': 'finish', 'limited': False, 'elements': ident[0]})
         return {'records': records, 'exit_code': 0, 'target': {'handle': root or 1}}
