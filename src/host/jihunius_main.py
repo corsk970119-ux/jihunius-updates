@@ -2514,11 +2514,6 @@ def wash_profile_path():
     return Path(os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'mes_query_button.json'
 
 
-def mes_layout_path():
-    """MES 정렬 기준(칸 너비)을 저장하는 파일. PC마다 따로 둡니다."""
-    return Path(os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'mes_layout.json'
-
-
 def mes_layout_reader(module):
     """MES 정렬용 판독기. 세척완료 판독기와 같은 코드의 사본에서 두 줄만 바꿉니다(세척완료가 쓰는 원본은 그대로).
 
@@ -2785,21 +2780,21 @@ class WashApp:
         self.root.after(80,self.poll)
 
     def build_layout_page(self,parent):
-        """'MES 정렬' 탭: 생산일보관리의 판 크기와 칸 너비 맞춤. 세척완료와 같은 창·같은 중지 키(F9)를 씁니다."""
+        """'MES 정렬' 탭: 버튼 한 번으로 MES 화면을 평소 쓰는 모양으로 정리. 세척완료와 같은 창·같은 중지 키(F9)를 씁니다.
+
+        [기준 저장]·[화면 구조 복사] 버튼은 뺐습니다(사용자 요청 2026-11-16: "없어도 될 것 같음"). 기준은 프로그램에 든 값 하나입니다.
+        """
         import tkinter as tk
         from tkinter import ttk
         body=ttk.Frame(parent,padding=18);body.pack(fill='both',expand=True)
         ttk.Label(body,text='MES 정렬',style='Title.TLabel').pack(anchor='w')
         ttk.Label(body,text='작업지시관리·설비별공구관리 열기 → 메뉴 칸 줄이기 → 작업지시관리 표 → 생산일보관리',font=('맑은 고딕',12,'bold')).pack(anchor='w',pady=(8,6))
         ttk.Label(body,text='누르면 MES를 앞으로 가져와 화면을 열고, 왼쪽 파란 메뉴 칸을 끝까지 줄인 뒤, 작업지시관리 표(칸 없애기·순서·너비)와 생산일보관리(판 크기·칸 너비)를 기준대로 맞춥니다. 중지: F9',wraplength=900,foreground='#93c5fd').pack(anchor='w')
-        ttk.Label(body,text='기준을 바꾸려면 MES에서 두 화면을 원하는 대로 정리한 뒤 [기준 저장]을 누르세요(생산일보는 왼쪽 위 판 기준). 실행 중에는 마우스·키보드 조작을 멈춰 주세요.',wraplength=900).pack(anchor='w',pady=10)
+        ttk.Label(body,text='실행 중에는 마우스·키보드 조작을 멈춰 주세요.',wraplength=900).pack(anchor='w',pady=10)
         actions=ttk.Frame(body);actions.pack(fill='x',pady=18)
-        self.layout_button=ttk.Button(actions,text='MES 정렬',command=lambda:self.launch_layout('align'),style='Accent.TButton');self.layout_button.pack(side='left',padx=10)
-        self.layout_save_button=ttk.Button(actions,text='기준 저장 (지금 화면)',command=lambda:self.launch_layout('save'),style='Secondary.TButton');self.layout_save_button.pack(side='left')
-        ttk.Button(actions,text='중지 (F9)',command=lambda:self.stop.set(),style='Secondary.TButton').pack(side='left',padx=10)
-        # 점검용: 지금 MES 화면의 칸 제목·탭·메뉴 이름과 위치만 읽어 글로 복사합니다(누르지 않음, 행의 값은 담지 않음).
-        self.layout_inspect_button=ttk.Button(actions,text='화면 구조 복사 (읽기만)',command=lambda:self.launch_layout('inspect'),style='Secondary.TButton');self.layout_inspect_button.pack(side='left')
-        self.layout_status=tk.StringVar(value=self.layout_preset_text())
+        self.layout_button=ttk.Button(actions,text='MES 정렬',command=self.launch_layout,style='Accent.TButton');self.layout_button.pack(side='left',padx=10)
+        ttk.Button(actions,text='중지 (F9)',command=lambda:self.stop.set(),style='Secondary.TButton').pack(side='left')
+        self.layout_status=tk.StringVar(value='대기 중')
         ttk.Label(body,textvariable=self.layout_status,wraplength=900,foreground='#93c5fd').pack(anchor='w',pady=(0,10))
 
     def note(self,text):
@@ -2862,7 +2857,7 @@ class WashApp:
             self.events.put((kind,value))
 
     def controls(self):
-        for button in (self.run_button,self.layout_button,self.layout_save_button,self.layout_inspect_button):button.configure(state='disabled' if self.busy else 'normal')
+        for button in (self.run_button,self.layout_button):button.configure(state='disabled' if self.busy else 'normal')
         for i,entry in enumerate(self.entries):entry.configure(state='disabled' if self.busy else ('readonly' if i==2 else 'normal'))
 
     def launch(self,run):
@@ -2989,17 +2984,8 @@ class WashApp:
             if marker is not None:run_bounded(marker.release)
             self.emit('done',{'elapsed':time.monotonic()-self.started,'result':finished_result,'error':failure})
 
-    def layout_preset_text(self):
-        try:
-            standard=self.layout.load_standard(mes_layout_path())
-            if standard['custom']:
-                return '대기 중 · 기준: 저장한 화면{} · 작업지시관리 칸 {}개 순서, 생산일보 칸 {}개'.format(
-                    ' ('+standard['saved_at']+')' if standard['saved_at'] else '',len(standard['work']['order']),len(standard['daily']))
-        except Exception:pass
-        return '대기 중 · 기준: 기본값(2026-11-13에 정리해 둔 화면). 바꾸려면 화면을 정리한 뒤 [기준 저장]을 누르세요.'
-
-    def launch_layout(self,mode):
-        """mode: 'align'=정렬, 'save'=왼쪽 위 판을 기준으로 저장(읽기만), 'inspect'=화면 구조 복사(읽기만)"""
+    def launch_layout(self):
+        """[MES 정렬] 버튼."""
         if self.busy:return
         if os.name!='nt':return self.host.messagebox.showinfo('Windows 전용','MES가 실행 중인 Windows PC에서 사용해 주세요.',parent=self.root)
         if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
@@ -3008,11 +2994,11 @@ class WashApp:
         self.host.suspend_machine_alerts()
         self.capture_stage=None;self.capture_status=None
         self.layout_status.set('MES 창 확인 중…')
-        threading.Thread(target=self.layout_work,args=(mode,),daemon=True).start()
+        threading.Thread(target=self.layout_work,daemon=True).start()
 
-    def layout_work(self,mode):
-        """MES 정렬·기준 저장·화면 구조 복사. 화면 판독·창 준비는 세척완료와 같은 함수를 씁니다."""
-        reader=None;pointer=None;outcome={'title':'','lines':[],'error':None,'stopped':False,'text':None}
+    def layout_work(self):
+        """MES 정렬. 화면 판독·창 준비는 세척완료와 같은 함수를 씁니다."""
+        reader=None;pointer=None;outcome={'title':'','lines':[],'error':None,'stopped':False}
         kept=[]   # 작업지시관리 표 기록(칸 제목 위치·버리기·옮기기 결과). 오류 기록 끝에 따로 붙입니다(행 내용은 없음).
         def emit(kind,value):
             if kind=='log':
@@ -3036,39 +3022,19 @@ class WashApp:
                 except Exception as error:
                     raise RuntimeError('{} · {:.1f}초 경과 · {}'.format(label,time.monotonic()-started,error)) from error
                 finally:emit('reading_done',None)
-            if mode=='inspect':
-                # 읽기만: 창을 앞으로 가져오거나 탭을 누르지 않고, 지금 보이는 화면 그대로 읽습니다.
-                reader=mes_layout_reader(self.pop)
-                report=capture({**mes_target,'mode':'mes_rows'},'MES 화면 구조',self.stop)
-                def rect(handle):
-                    r=ma.rect(handle);return r.left,r.top,r.right,r.bottom
-                def at(point):
-                    from ctypes import wintypes
-                    return int(ma.u.WindowFromPoint(wintypes.POINT(int(point[0]),int(point[1]))) or 0)
-                text=self.layout.describe(report,rect=rect,at=at)
-                outcome['text']='지후니우스 {} · MES 화면 구조 (읽기만 함)\n'.format(SUITE_APP_VERSION)+text
-                outcome['title']='화면 구조를 복사했습니다 · {}줄 · 채팅에 붙여넣어 주세요'.format(text.count('\n')+1)
-                return
             reader=mes_layout_reader(self.pop)
             emit('log','ROOT MES 최대화 상태 확인 중…')
             wash_prepare_window(ma,self.stop)
             ma.activate()
-            path=mes_layout_path()
             pointer=self.layout.Pointer(ma)
-            if mode=='save':
-                # 지금 화면(손으로 정리해 둔 상태)을 기준으로 읽습니다. 탭만 누르고 표는 건드리지 않습니다.
-                found=self.layout.capture_standard(mes_target,pointer,capture,self.stop,emit)
-                self.layout.save_standard(path,found['daily'],found['work'])
-                outcome['title']='기준 저장 완료 · 작업지시관리 칸 {}개 순서·너비(남길 칸 {}개), 생산일보 칸 {}개 너비'.format(
-                    len(found['work']['order']),len(found['work']['keep']),len(found['daily']))
-            else:
-                emit('log','시작합니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.')
-                result=self.layout.align_all(mes_target,pointer,capture,self.stop,emit,self.layout.load_standard(path))
-                outcome['title'],outcome['lines']=self.layout.brief_all(result,time.monotonic()-self.started)
-                if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
-                    SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',
-                                        detail='\n'.join(outcome['lines']+(['','[작업지시관리 표 기록]']+kept if kept else [])),
-                                        work=str(self.started),context='\n'.join(self.trail[-150:]))
+            emit('log','시작합니다. 실행 중에는 마우스·키보드 조작을 멈춰 주세요.')
+            # 기준은 프로그램에 든 값(mes_layout.default_standard)입니다. 예전에 [기준 저장]으로 남긴 파일은 더 읽지 않습니다.
+            result=self.layout.align_all(mes_target,pointer,capture,self.stop,emit,self.layout.default_standard())
+            outcome['title'],outcome['lines']=self.layout.brief_all(result,time.monotonic()-self.started)
+            if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
+                SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',
+                                    detail='\n'.join(outcome['lines']+(['','[작업지시관리 표 기록]']+kept if kept else [])),
+                                    work=str(self.started),context='\n'.join(self.trail[-150:]))
         except Exception as error:
             stopped=self.stop.is_set() or type(error).__name__=='Stopped'
             outcome['stopped']=stopped;outcome['error']=str(error)
@@ -3084,18 +3050,6 @@ class WashApp:
                 try:reader.close()
                 except Exception:pass
             self.events.put(('layout_done',outcome))
-
-    def copy_structure(self,text):
-        """화면 구조 글을 클립보드에 넣고 파일로도 남깁니다(붙여넣기가 안 될 때 파일을 보내면 됨)."""
-        saved=''
-        try:
-            path=mes_layout_path().with_name('mes_structure.txt');path.parent.mkdir(parents=True,exist_ok=True)
-            path.write_text(text,encoding='utf-8');saved=str(path)
-        except OSError:pass
-        try:
-            self.root.clipboard_clear();self.root.clipboard_append(text);self.root.update_idletasks()
-        except Exception:pass
-        return saved
 
     def show_completion(self,title,brief):
         import tkinter as tk
@@ -3138,10 +3092,6 @@ class WashApp:
                     if value['error']:
                         self.layout_status.set(('중지함 · ' if value['stopped'] else '중단: ')+value['error'])
                         if not value['stopped']:completion=('MES 정렬 중단','중단 사유: '+value['error']+'\n\n누르기 전에 확인하는 단계에서 멈췄습니다. MES 화면을 확인한 뒤 다시 눌러 주세요.\n같은 문제가 계속되면 오류 기록 창의 [AI 전달용 복사]로 내용을 전달해 주세요.')
-                    elif value.get('text'):
-                        saved=self.copy_structure(value['text'])
-                        self.layout_status.set(value['title'])
-                        completion=('화면 구조 복사','복사했습니다. 채팅 입력칸에 붙여넣기(Ctrl+V) 해 주세요.'+('\n같은 내용의 파일: '+saved if saved else '')+'\n\n'+value['text'])
                     else:
                         self.layout_status.set(value['title'])
                         if value['lines']:completion=(value['title'].split(' · ')[0],'\n'.join([value['title'],'']+value['lines']))
@@ -3174,6 +3124,29 @@ def _suite_load_support(name, text):
     return module
 
 SuiteWindowState = ...  # build: tools/build_app.py
+
+
+class HandoverAwarePlacement:
+    """창 위치·크기를 기억할 때, 인수인계 칸을 펼쳐 넓어진 만큼은 빼고 기억합니다.
+
+    인수인계 칸을 펼치면 창이 왼쪽으로 넓어집니다(toggle_handover). 그 상태로 끄면 넓어진 크기가 그대로 기억돼,
+    다시 켰을 때(칸은 접힌 채) 창이 맞춰 둔 것보다 커져 있었고 켤 때마다 더 커졌습니다(사용자 보고 2026-11-16).
+    extra(): (지금 넓어져 있는 너비, 왼쪽으로 밀린 거리). 접었을 때와 같은 셈으로 되돌린 크기를 기억합니다.
+    """
+    def __init__(self, backend, extra):
+        self.backend, self.kind, self.extra = backend, backend.kind, extra
+
+    def capture(self):
+        record = self.backend.capture()
+        added, shift = self.extra()
+        if record is None or added <= 0:
+            return record
+        left, top, right, bottom = record['normal']
+        width = max(1000, right - left - added)
+        return dict(record, normal=[left + shift, top, left + shift + width, bottom])
+
+    def restore(self, record):
+        return self.backend.restore(record)
 SuiteCompanionManager = ...  # build: tools/build_app.py
 SuiteWindowsTray = ...  # build: tools/build_app.py
 SUITE_COMPANIONS = ...  # build: tools/build_app.py
@@ -3489,6 +3462,9 @@ class IntegrationApp:
         window.after(200, self.poll_machine_alerts)
         self.initialize_suite()
         self._window_state = SuiteWindowState.CompanionWindowState(window, 'jihunius')
+        if self._window_state.backend is not None:
+            self._window_state.backend = HandoverAwarePlacement(
+                self._window_state.backend, lambda: (self.handover_added_width, self.handover_left_shift))
 
     def make_stable_status_label(self, parent, variable, style, **options):
         """One-line status with fixed requested width and full text on hover."""
@@ -5570,7 +5546,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.16.1'
+SUITE_APP_VERSION = '2026.11.16.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

@@ -43,7 +43,7 @@ class MesLayoutTabTests(unittest.TestCase):
         wash.show_completion = Mock()
         return wash, user, reader
 
-    def finish(self, wash, mode, stop=None):
+    def finish(self, wash, stop=None):
         """실행 버튼을 누른 것과 같은 상태로 만든 뒤 작업을 끝까지 돌리고 화면에 반영합니다."""
         wash.busy = True
         wash.layout_running = True
@@ -51,7 +51,7 @@ class MesLayoutTabTests(unittest.TestCase):
         wash.controls()
         wash.started = self.m.time.monotonic()
         wash.trail = []
-        wash.layout_work(mode)
+        wash.layout_work()
         for _ in range(50):
             wash.poll()
             if not wash.busy:
@@ -74,7 +74,16 @@ class MesLayoutTabTests(unittest.TestCase):
         self.assertEqual(wash.layout_button.cget('text'), 'MES 정렬')
         self.assertTrue(str(wash.layout_button).startswith(str(app.app_pages['mes'])))
         self.assertTrue(str(wash.run_button).startswith(str(app.app_pages['wash'])))      # 세척완료 버튼은 제자리
-        self.assertIn('기준: 기본값', wash.layout_status.get())
+        self.assertEqual(wash.layout_status.get(), '대기 중')
+        # 사용자 요청(2026-11-16): [기준 저장]·[화면 구조 복사] 버튼은 없앰. 탭에는 [MES 정렬]과 [중지 (F9)]만.
+        def texts(widget):
+            found = [widget.cget('text')] if widget.winfo_class() == 'TButton' else []
+            for child in widget.winfo_children():
+                found.extend(texts(child))
+            return found
+        self.assertEqual(texts(app.app_pages['mes']), ['MES 정렬', '중지 (F9)'])
+        for name in ('layout_save_button', 'layout_inspect_button', 'copy_structure', 'layout_preset_text'):
+            self.assertFalse(hasattr(wash, name), name)
         app.tab_buttons['wash'].invoke(); app.window.update()
         self.assertTrue(app.app_pages['wash'].winfo_ismapped())
 
@@ -88,7 +97,7 @@ class MesLayoutTabTests(unittest.TestCase):
     def test_buttons_lock_while_either_job_runs(self):
         app = self.launch()
         wash = app.wash_app
-        buttons = (wash.run_button, wash.layout_button, wash.layout_save_button, wash.layout_inspect_button)
+        buttons = (wash.run_button, wash.layout_button)
         wash.busy = True; wash.controls()
         for button in buttons:
             self.assertEqual(str(button.cget('state')), 'disabled')
@@ -101,7 +110,7 @@ class MesLayoutTabTests(unittest.TestCase):
         wash = app.wash_app
         app.messagebox = Mock()
         wash.layout_work = Mock()
-        wash.launch_layout('align')
+        wash.launch_layout()
         app.messagebox.showinfo.assert_called_once()
         wash.layout_work.assert_not_called()
         self.assertFalse(wash.busy)
@@ -110,7 +119,7 @@ class MesLayoutTabTests(unittest.TestCase):
         app = self.launch()
         mes = flow.fresh()
         wash, user, reader = self.connect(app, mes)
-        self.finish(wash, 'align')
+        self.finish(wash)
         status = wash.layout_status.get()
         self.assertTrue(status.startswith('MES 정렬 완료 · 설비별공구관리 열기 · 작업지시관리 칸 없앰 9·옮김 3'), status)
         self.assertEqual(mes.bad, [])
@@ -128,54 +137,24 @@ class MesLayoutTabTests(unittest.TestCase):
         self.m.SuiteErrors.capture.assert_not_called()
         wash.show_completion.assert_not_called()
 
-    def test_saving_reads_the_arranged_screens_and_later_runs_use_them(self):
-        app = self.launch()
-        arranged = flow.fresh()
-        wash, user, reader = self.connect(app, arranged)
-        self.finish(wash, 'align')
-        widths = dict(arranged.work.columns)
-        arranged.work.columns = [[name, widths[name] + (9 if name == '설비명' else 0)] for name, _ in arranged.work.columns]
-        for leaf in arranged.panels:
-            leaf.columns[4][1] = 70                                          # 생산일보 Fixture를 넓혀 둠
-        presses = arranged.presses
-        self.finish(wash, 'save')
-        self.assertLessEqual(arranged.presses - presses, 2)                 # 탭만 누름
-        self.assertTrue(wash.layout_status.get().startswith('기준 저장 완료 · 작업지시관리 칸 '), wash.layout_status.get())
-        saved = json.loads(self.preset_path().read_text(encoding='utf-8'))
-        self.assertEqual(saved['version'], 2)
-        self.assertEqual(dict(saved['work']['order'])['설비명'], 134)
-        self.assertEqual(dict(saved['columns'])['Fixture'], 70)
-        self.assertNotIn('PART-NO', saved['work']['keep'])
-        self.assertIn('기준: 저장한 화면', wash.layout_preset_text())
-        fresh = flow.fresh()
-        wash, user, reader = self.connect(app, fresh)
-        self.finish(wash, 'align')
-        self.assertEqual(dict(fresh.work.columns)['설비명'], 134)
-        self.assertEqual(fresh.widths()[3]['Fixture'], 70)
-        self.assertEqual(fresh.bad, [])
-        self.assertTrue(wash.layout_status.get().startswith('MES 정렬 완료'), wash.layout_status.get())
-
-    def test_structure_copy_only_reads_and_puts_the_text_on_the_clipboard(self):
+    def test_standard_saved_by_an_older_version_is_no_longer_used(self):
+        # 예전 버전의 [기준 저장]이 남긴 파일이 있어도, 이제는 프로그램에 든 기준 하나만 씁니다.
+        path = self.preset_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'version': 2, 'saved_at': '2026-11-16 09:00', 'columns': [['Fixture', 99], ['거래처명', 150]],
+                                    'work': {'order': [['지시일', 120], ['선택', 35]], 'keep': ['지시일', '선택', 'PART-NO']}}), encoding='utf-8')
+        before = path.read_text(encoding='utf-8')
         app = self.launch()
         mes = flow.fresh()
         wash, user, reader = self.connect(app, mes)
-        prepared = Mock(side_effect=AssertionError('읽기만 해야 함'))
-        with patch.object(self.m, 'wash_prepare_window', prepared):
-            self.finish(wash, 'inspect')
-        self.assertEqual(mes.presses, 0)
-        self.assertEqual(user.cursor, (5, 5))                               # 마우스도 움직이지 않음
-        self.assertEqual(reader.captures, [('mes_rows', 'MES 화면 구조', 1)])
-        text = app.window.clipboard_get()
-        self.assertTrue(text.startswith('지후니우스 {} · MES 화면 구조 (읽기만 함)'.format(self.m.SUITE_APP_VERSION)), text[:80])
-        self.assertIn('PART-NO 110', text)
-        self.assertIn('앞에 보임', text)
-        self.assertIn('[메뉴] 묶음 2개', text)
-        self.assertNotIn('비밀환자', text)
-        self.assertEqual((Path(self.tmp.name) / 'Jihunius' / 'mes_structure.txt').read_text(encoding='utf-8'), text)
-        title, shown = wash.show_completion.call_args.args
-        self.assertEqual(title, '화면 구조 복사')
-        self.assertIn('붙여넣기', shown)
-        self.m.SuiteErrors.capture.assert_not_called()
+        self.assertEqual(wash.layout_status.get(), '대기 중')
+        self.finish(wash)
+        self.assertEqual([name for name, _ in mes.work.columns], flow.ARRANGED)      # 저장 파일의 순서(지시일 먼저)가 아니라 기본 순서
+        self.assertEqual(sorted(mes.hidden), sorted(fake.WORK_EXTRA))
+        self.assertEqual(mes.widths()[3]['Fixture'], dict(wash.layout.DEFAULT_DAILY)['Fixture'])
+        self.assertEqual(mes.bad, [])
+        self.assertEqual(path.read_text(encoding='utf-8'), before)                   # 파일은 건드리지 않음
+        self.assertTrue(wash.layout_status.get().startswith('MES 정렬 완료'), wash.layout_status.get())
 
     def test_layout_reader_changes_only_its_own_copy_of_the_screen_reader(self):
         app = self.launch()
@@ -196,7 +175,7 @@ class MesLayoutTabTests(unittest.TestCase):
     def test_missing_mes_window_is_reported_and_recorded(self):
         app = self.launch()
         wash, user, reader = self.connect(app, flow.fresh(), windows=[])
-        self.finish(wash, 'align')
+        self.finish(wash)
         self.assertEqual(wash.layout_status.get(), '중단: ROOT MES 창을 하나만 실행해 주세요.')
         record = self.m.SuiteErrors.capture.call_args
         self.assertEqual(record.kwargs['feature'], 'MES 정렬')
@@ -210,7 +189,7 @@ class MesLayoutTabTests(unittest.TestCase):
         wash, user, reader = self.connect(app, mes)
         stop = threading.Event()
         stop.set()
-        self.finish(wash, 'align', stop=stop)
+        self.finish(wash, stop=stop)
         self.assertTrue(wash.layout_status.get().startswith('중지함'), wash.layout_status.get())
         self.assertEqual(mes.presses, 0)
         self.m.SuiteErrors.capture.assert_not_called()
@@ -220,7 +199,7 @@ class MesLayoutTabTests(unittest.TestCase):
         app = self.launch()
         mes = flow.fresh(removal_works=False)                               # 칸이 없어지지 않는 MES
         wash, user, reader = self.connect(app, mes)
-        self.finish(wash, 'align')
+        self.finish(wash)
         self.assertIn('일부만', wash.layout_status.get())
         title, text = wash.show_completion.call_args.args
         self.assertEqual(title, 'MES 정렬 일부만 완료')
@@ -240,7 +219,7 @@ class MesLayoutTabTests(unittest.TestCase):
         mes = flow.fresh()
         wash, user, reader = self.connect(app, mes)
         user.foreground = 777                                               # 다른 창이 앞에 있음
-        self.finish(wash, 'align')
+        self.finish(wash)
         self.assertIn('MES 이외의 창이 앞에 있어', wash.layout_status.get())
         record = self.m.SuiteErrors.capture.call_args
         self.assertIn('설비별공구관리 안 열림', record.kwargs['context'])

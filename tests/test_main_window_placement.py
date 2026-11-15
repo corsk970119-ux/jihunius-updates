@@ -58,3 +58,48 @@ class MainWindowPlacementTests(unittest.TestCase):
    other=self.launch();self.assertEqual(other.window.winfo_width(),1120)
    self.assertNotEqual(self.geometry(other),(1260,940,80,70))
    self.close_app(other)
+ def tall(self,app,extra=0):
+  # 글꼴에 따라 최소 높이가 달라지므로, 그보다 조금 큰 높이를 그때그때 정합니다(건너뛰지 않고 항상 확인).
+  return app.minimum_height+30+extra
+ def test_handover_panel_width_is_not_remembered_as_the_window_size(self):
+  # 사용자 보고(2026-11-16): "창 껐다 켜면 창 크기가 원래 설정해둔 것보다 커져 있음".
+  # 인수인계 칸을 펼치면 창이 왼쪽으로 320 넓어지는데, 그 상태로 끄면 넓어진 크기가 기억돼 다시 켤 때마다 커졌다.
+  app=self.launch();h=self.tall(app);app.window.geometry('1180x{}+2100+95'.format(h));app.window.update()
+  app.toggle_handover();app.window.update()
+  self.assertEqual(self.geometry(app),(1500,h,1780,95))                   # 펼친 동안에는 넓어져 있음
+  self.close_app(app)
+  path=Path(self.tmp.name)/'JihuniusSuite/window-state/jihunius.json'
+  self.assertEqual(json.loads(path.read_text())['normal'],[2100,95,3280,95+h])   # 기억되는 것은 접었을 때의 크기
+  again=self.launch()
+  self.assertFalse(again.handover_expanded)
+  self.assertEqual(self.geometry(again),(1180,h,2100,95))
+  for _ in range(3):                                                      # 펼친 채 끄기를 되풀이해도 커지지 않음
+   again.toggle_handover();again.window.update();self.close_app(again)
+   again=self.launch()
+   self.assertEqual(self.geometry(again),(1180,h,2100,95))
+  self.close_app(again)
+ def test_size_changed_while_the_handover_panel_is_open_keeps_only_the_base_part(self):
+  app=self.launch();h=self.tall(app);app.window.geometry('1180x{}+2100+95'.format(h));app.window.update()
+  app.toggle_handover();app.window.update()
+  app.window.geometry('1600x{}+1700+60'.format(h+40));app.window.update()   # 펼친 채로 사용자가 크기를 바꿈
+  app._hide_to_tray()
+  path=Path(self.tmp.name)/'JihuniusSuite/window-state/jihunius.json'
+  self.assertEqual(json.loads(path.read_text())['normal'],[2020,60,3300,60+h+40])   # 1600-320=1280, 왼쪽으로 밀린 320만큼 되돌림
+  app.restore_from_tray();app.window.update()
+  self.assertEqual(self.geometry(app),(1600,h+40,1700,60))                # 보이는 창은 그대로
+  app.toggle_handover();app.window.update()                               # 접으면 그 크기로
+  self.assertEqual(self.geometry(app),(1280,h+40,2020,60))
+  self.close_app(app)
+  again=self.launch();self.assertEqual(self.geometry(again),(1280,h+40,2020,60));self.close_app(again)
+ def test_narrow_window_keeps_at_least_the_minimum_width_as_its_base(self):
+  app=self.launch();h=self.tall(app);app.window.geometry('1000x{}+2100+95'.format(h));app.window.update()
+  app.toggle_handover();app.window.update()
+  self.assertEqual(self.geometry(app)[0],1320)                            # 펼치면 최소 1320
+  self.close_app(app)
+  again=self.launch();self.assertEqual(self.geometry(again),(1000,h,2100,95));self.close_app(again)
+ def test_closed_panel_changes_nothing_about_what_is_remembered(self):
+  app=self.launch();h=self.tall(app);app.window.geometry('1210x{}+140+70'.format(h));app.window.update()
+  app.toggle_handover();app.window.update();app.toggle_handover();app.window.update()   # 펼쳤다 접음
+  self.assertEqual(self.geometry(app),(1210,h,140,70))
+  self.close_app(app)
+  again=self.launch();self.assertEqual(self.geometry(again),(1210,h,140,70));self.close_app(again)

@@ -1188,6 +1188,24 @@ class App(tk.Tk):
                                    bg=YELLOW if unread else BUTTON,fg=YTEXT if unread else TEXT,
                                    activebackground='#ffe6a0' if unread else '#15264a',
                                    activeforeground=YTEXT if unread else '#ffffff')
+        self.blink_note_notice(unread)
+    def blink_note_notice(self,unread=None):
+        # 안 읽은 채팅이 있는 동안 '채팅 펼치기' 버튼을 노란색 ↔ 어두운 색으로 번갈아 칠합니다(사용자 요청 2026-11-16).
+        # 색만 바꿉니다. unread를 주면 refresh_note_notice가 방금 기본 색으로 칠한 직후이고, 없으면 타이머가 부른 것입니다.
+        state=getattr(self,'_note_blink',None)
+        if state is None:state=self._note_blink={'job':None,'dim':False,'unread':0}
+        if unread is not None:state['unread']=unread
+        else:state['job']=None;state['dim']=not state['dim']
+        if not state['unread'] or getattr(self,'closing',False):
+            if state['job'] is not None:
+                try:self.after_cancel(state['job'])
+                except tk.TclError:pass
+            state['job']=None;state['dim']=False;return
+        try:
+            if state['dim']:self.note_notice.configure(bg=BUTTON,fg=YELLOW,activebackground='#15264a',activeforeground=YELLOW)
+            elif unread is None:self.note_notice.configure(bg=YELLOW,fg=YTEXT,activebackground='#ffe6a0',activeforeground=YTEXT)
+            if state['job'] is None:state['job']=self.after(550,self.blink_note_notice)
+        except tk.TclError:state['job']=None
     def mark_notes_read(self):
         if not self.connected or not self.data:return
         seen=self.cfg.setdefault('note_seen_by_store',{})

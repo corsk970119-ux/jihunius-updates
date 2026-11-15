@@ -105,6 +105,10 @@ class PrivatePackageTests(unittest.TestCase):
   class StripDiagnostics(NormalizeColors):
    def visit_Expr(self,node):
     if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=='_diagnostic_error':return None
+    # Approved 2026-11-16 (사용자: "세척일보 미확인 채팅 있을 시 채팅 펼치기 창이 반짝반짝 거렸으면 좋겠음"):
+    # refresh_note_notice 끝에서 깜빡임을 켜고 끄는 호출 한 줄 — self.blink_note_notice(unread). 읽음 처리·전송은 그대로.
+    if (isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Attribute) and node.value.func.attr=='blink_note_notice'
+        and isinstance(node.value.func.value,ast.Name) and node.value.func.value.id=='self'):return None
     return self.generic_visit(node)
    def visit_Try(self,node):
     # Approved N3 visual: shared thin-scrollbar style call only (ttk layout/colors, no behavior).
@@ -127,6 +131,8 @@ class PrivatePackageTests(unittest.TestCase):
    def visit_ClassDef(self,node):
     # Approved 2026-11-12: the helper method itself (IME 확정 후 실행) is new; everything else stays pinned.
     node.body=[item for item in node.body if not (isinstance(item,ast.FunctionDef) and item.name=='after_ime')]
+    # Approved 2026-11-16: the blink helper itself (버튼 색만 번갈아 칠함) is new; everything else stays pinned.
+    node.body=[item for item in node.body if not (isinstance(item,ast.FunctionDef) and item.name=='blink_note_notice')]
     if node.name=='RoundedButton':
      for method in node.body:
       if isinstance(method,ast.FunctionDef) and method.name=='draw':
