@@ -489,7 +489,8 @@ class StandardTests(Checks, unittest.TestCase):
         self.assertNotIn('PART-NO', standard['work']['keep'])
         self.assertEqual(sum(standard['work']['widths'].values()), 1833)
         self.assertEqual(standard['daily']['거래처명'], 119)
-        self.assertEqual(standard['daily']['Fixture'], 72)                    # 사용자 요청(2026-11-16): 글자 하나 더 보이게 61 → 72
+        # 사용자 요청(2026-11-16): 글자 하나 더 보이게 61 → 72, 이어서 "늘린 거의 반만큼만 줄이자" → 66
+        self.assertEqual(standard['daily']['Fixture'], 66)
         self.assertLessEqual(sum(standard['daily'].values()) + 1, 617 - 17)   # 판(617) 안에 세로 스크롤 막대가 있어도 다 보임
         self.assertFalse(standard['custom'])
 
