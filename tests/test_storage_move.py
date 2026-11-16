@@ -482,12 +482,30 @@ class StorageMoveTests(unittest.TestCase):
                 raise error
             return real_rename(source, target)
 
-        with patch.object(mover.os, 'rename', in_use):
+        with patch.object(mover.os, 'rename', in_use), patch.object(mover.time, 'sleep', lambda seconds: None), \
+                patch.object(mover.time, 'monotonic', side_effect=iter(range(0, 100000, 5)).__next__):
             with self.assertRaises(mover.MoveError) as caught:
                 self.move()
         self.assertIn('아직 켜져 있을 수', str(caught.exception))
+        self.assertIn('"세척일보"', str(caught.exception))
         self.assert_old_untouched()
         self.assertFalse(mover.marker_valid(self.new))
+
+    def test_folder_held_only_for_a_moment_is_retried(self):
+        real_rename = os.rename
+        calls = {'n': 0}
+
+        def briefly_in_use(source, target):
+            if Path(source) == self.old / mover.HANDOVER_NAME:
+                calls['n'] += 1
+                if calls['n'] <= 2:
+                    raise PermissionError(13, 'The process cannot access the file', str(source))
+            return real_rename(source, target)
+
+        with patch.object(mover.os, 'rename', briefly_in_use), patch.object(mover.time, 'sleep', lambda seconds: None):
+            self.move()
+        self.assertEqual(calls['n'], 3)
+        self.assertTrue(mover.marker_valid(self.new))
 
     def test_failing_to_write_the_marker_puts_everything_back(self):
         real_write = mover.write_json

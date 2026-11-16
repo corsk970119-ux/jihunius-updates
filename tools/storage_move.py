@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-PROBE_VERSION = '2'
+PROBE_VERSION = '3'
 REQUIRED_APP_VERSION = '2026.11.17.2'   # 새 위치를 아는 첫 지후니우스 버전
 OLD_PARENT = r'\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈'
 NEW_ROOT = r'\\srvc5352374b\생산공유폴더\지후니우스 저장'
@@ -771,17 +771,33 @@ def undo_set_aside(done, setaside):
             pass
 
 
+def rename_patiently(source, target, seconds=8.0):
+    """다른 프로그램이 잠깐 잡고 있을 수 있어, 안 되면 몇 초 동안 다시 해 봅니다."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            os.rename(str(source), str(target))
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.4)
+
+
 def set_aside(plan, old_parent):
     """예전 항목을 한 폴더로 모으고, 그 자리에 '옮겼음' 표시 파일을 둡니다. 하나라도 안 되면 전부 되돌립니다."""
     setaside = Path(old_parent) / SETASIDE_NAME
     done = []
+    current = None
     try:
         setaside.mkdir()
         for source, parts in plan['aside']:
             target = setaside.joinpath(*parts)
             target.parent.mkdir(parents=True, exist_ok=True)
-            os.rename(str(source), str(target))
+            current = source
+            rename_patiently(source, target)
             done.append((source, target))
+        current = None
         for name in TOMBSTONES:
             path = Path(old_parent) / name
             with open(str(path), 'x', encoding='utf-8', newline='') as stream:
@@ -789,8 +805,11 @@ def set_aside(plan, old_parent):
             done.append((None, path))
     except OSError as error:
         undo_set_aside(done, setaside)
-        raise MoveError('예전 위치의 폴더를 옮겨 둘 수 없습니다. 다른 PC에서 지후니우스가 아직 켜져 있을 수 있습니다.\n'
-                        '모든 PC에서 완전 종료한 뒤 다시 해 주세요.\n(' + explain(error) + ')')
+        raise MoveError('예전 위치의 {} 옮겨 둘 수 없습니다. 무언가가 그 폴더를 쓰고 있습니다.\n'
+                        '· 다른 PC에서 지후니우스가 아직 켜져 있을 수 있습니다(트레이에 남아 있는지도 확인).\n'
+                        '· 탐색기에서 그 폴더 안을 열어 두었다면 닫아 주세요.\n'
+                        '확인한 뒤 [② 옮기기]를 다시 누르면 됩니다. 예전 위치는 원래대로입니다.\n(' .format(
+                            '"{}"을(를)'.format(current.name) if current is not None else '폴더를') + explain(error) + ')')
     return done, setaside
 
 
@@ -888,8 +907,8 @@ def move(old_parent=OLD_PARENT, new_root=NEW_ROOT, log=lambda text: None, requir
     pending = list(plan['items'])
     for attempt in range(4):
         for index, item in enumerate(pending, 1):
-            if index == 1 or index % 50 == 0 or index == len(pending):
-                log('복사 중… {} / {}'.format(index, len(pending)))
+            if index == 1 or index % 10 == 0 or index == len(pending):
+                log('복사 중… {} / {} (끝날 때까지 기다려 주세요)'.format(index, len(pending)))
             snapshot[item['source']] = stat_key(item['source'])
             size, digest = copy_file(item['source'], new_root.joinpath(*item['to']))
             copied[item['source']] = dict(item, size=size, sha256=digest)
@@ -1054,7 +1073,8 @@ def main():
             if action == 'probe':
                 output = run(old_path, new_path, log=report)
             elif action == 'move':
-                output = move(old_path, new_path, log=report)
+                # 새 버전 기록이 없는 경우는 위의 확인 창에서 이미 물어봤습니다.
+                output = move(old_path, new_path, log=report, require_version=None)
             else:
                 output = cleanup(old_path, new_path, log=report)
         except MoveError as error:
@@ -1064,13 +1084,26 @@ def main():
         result['events'].append(('done', (action, output)))
 
     def begin(action):
-        if action == 'move' and not messagebox.askokcancel(
-                '저장 위치 옮기기', '모든 PC에서 지후니우스를 완전 종료했나요?\n\n'
-                '· 모든 PC가 {} 이상으로 업데이트돼 있어야 합니다.\n'
-                '· 옮기는 동안(몇 분) 어느 PC에서도 지후니우스를 켜지 마세요.\n'
-                '· 예전 자료는 지우지 않고 개인 폴더 안의 한 폴더로 모아 둡니다.\n\n지금 옮길까요?'.format(REQUIRED_APP_VERSION),
-                parent=root, icon='warning', default='cancel'):
-            return
+        if action == 'move':
+            try:
+                ready = ready_pcs(new_value.get().strip())
+            except Exception:
+                ready = []
+            mine = socket.gethostname()
+            listed = ', '.join('{}({})'.format(pc, version) for pc, version, _at in ready) or '없음'
+            here = any(pc == mine for pc, _version, _at in ready)
+            note = ('새 버전({} 이상)으로 켠 적 있는 PC: {}\n\n'.format(REQUIRED_APP_VERSION, listed)
+                    + ('' if here else
+                       '※ 이 PC는 아직 새 버전으로 켠 기록이 없습니다. 그대로 옮겨도 되지만,\n'
+                       '   옮긴 뒤 각 PC에서 지후니우스를 켜면 자료가 안 보이고 오류가 납니다.\n'
+                       '   그때 [새 버전 있음]을 눌러 업데이트하면 새 위치의 자료가 보입니다.\n'
+                       '   소재 수집 담당 PC는 업데이트할 때까지 집계가 멈춥니다.\n\n'))
+            if not messagebox.askokcancel(
+                    '저장 위치 옮기기', note + '모든 PC에서 지후니우스를 완전 종료했나요?(트레이 포함)\n\n'
+                    '· 옮기는 동안(몇 분) 어느 PC에서도 지후니우스를 켜지 마세요.\n'
+                    '· 예전 자료는 지우지 않고 개인 폴더 안의 한 폴더로 모아 둡니다.\n\n지금 옮길까요?',
+                    parent=root, icon='warning', default='ok'):
+                return
         if action == 'cleanup' and not messagebox.askokcancel(
                 '예전 자료 지우기', '개인 폴더에 모아 둔 지후니우스 예전 자료를 지웁니다. 되돌릴 수 없습니다.\n\n'
                 '지후니우스를 다시 켜서 세척일보·인수인계·돌출량 표가 새 위치에서 그대로 보이는 것을 확인했나요?',
