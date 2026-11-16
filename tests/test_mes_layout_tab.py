@@ -135,7 +135,26 @@ class MesLayoutTabTests(unittest.TestCase):
         self.assertEqual(user.cursor, (5, 5))                               # 마우스를 원래 자리로
         self.assertEqual(str(wash.layout_button.cget('state')), 'normal')
         self.m.SuiteErrors.capture.assert_not_called()
-        wash.show_completion.assert_not_called()
+        # 다 맞췄을 때도 세척완료처럼 끝났음을 알리는 창을 띄웁니다(사용자 요청 2026-11-17).
+        wash.show_completion.assert_called_once()
+        title, text = wash.show_completion.call_args.args
+        self.assertEqual(title, 'MES 정렬 완료')
+        lines = text.split('\n')
+        self.assertRegex(lines[0], r'^소요 시간: \d+\.\d초$')
+        self.assertEqual(lines[1], '')
+        self.assertIn('설비별공구관리 열기', lines)
+        self.assertTrue(any(line.startswith('작업지시관리 칸 없앰 9·옮김 3') for line in lines), lines)
+        self.assertTrue(any(line.startswith('생산일보 판 경계') for line in lines), lines)
+        self.assertNotIn('맞추지 못한 곳', text)
+
+    def test_completion_window_text(self):
+        make = self.m.WashApp.layout_completion
+        done = 'MES 정렬 완료 · 작업지시관리 칸 없앰 0·옮김 0·너비 0 · 생산일보 판 경계 0회·칸 0개 · 12.3초'
+        self.assertEqual(make(done, []), ('MES 정렬 완료', '소요 시간: 12.3초\n\n작업지시관리 칸 없앰 0·옮김 0·너비 0\n생산일보 판 경계 0회·칸 0개'))
+        # 일부만 완료일 때의 창 내용은 종전 그대로입니다.
+        partial = 'MES 정렬 일부만 완료 · 작업지시관리 칸 없앰 1·옮김 0·너비 0 · 생산일보 판 경계 0회·칸 0개 · 3.0초'
+        self.assertEqual(make(partial, ['맞추지 못한 곳:', 'x']), ('MES 정렬 일부만 완료', partial + '\n\n맞추지 못한 곳:\nx'))
+        self.assertEqual(make('MES 정렬 완료', []), ('MES 정렬 완료', ''))
 
     def test_standard_saved_by_an_older_version_is_no_longer_used(self):
         # 예전 버전의 [기준 저장]이 남긴 파일이 있어도, 이제는 프로그램에 든 기준 하나만 씁니다.

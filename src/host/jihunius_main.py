@@ -3051,6 +3051,15 @@ class WashApp:
                 except Exception:pass
             self.events.put(('layout_done',outcome))
 
+    @staticmethod
+    def layout_completion(title,lines):
+        """MES 정렬이 끝났을 때 띄울 창의 (제목, 내용). 다 맞췄을 때도 세척완료처럼 끝났음을 알립니다."""
+        parts=title.split(' · ')
+        if lines:return parts[0],'\n'.join([title,'']+lines)
+        body=parts[1:]
+        if body and body[-1].endswith('초'):body=['소요 시간: '+body[-1],'']+body[:-1]
+        return parts[0],'\n'.join(body)
+
     def show_completion(self,title,brief):
         import tkinter as tk
         from tkinter import ttk
@@ -3094,7 +3103,7 @@ class WashApp:
                         if not value['stopped']:completion=('MES 정렬 중단','중단 사유: '+value['error']+'\n\n누르기 전에 확인하는 단계에서 멈췄습니다. MES 화면을 확인한 뒤 다시 눌러 주세요.\n같은 문제가 계속되면 오류 기록 창의 [AI 전달용 복사]로 내용을 전달해 주세요.')
                     else:
                         self.layout_status.set(value['title'])
-                        if value['lines']:completion=(value['title'].split(' · ')[0],'\n'.join([value['title'],'']+value['lines']))
+                        completion=self.layout_completion(value['title'],value['lines'])
                 elif kind=='done':
                     self.busy=False;self.controls();self.capture_stage=None
                     title,brief=wash_completion_brief(value['result'] or self.result,value['elapsed'],value['error'])
@@ -5546,7 +5555,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.16.4'
+SUITE_APP_VERSION = '2026.11.17.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
