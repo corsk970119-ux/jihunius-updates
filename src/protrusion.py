@@ -55,6 +55,28 @@ MACHINE_NUMBERS = {f"{num}호기": num for num in range(1, 11)}
 SHARED_PARENT = Path(r"\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈")
 SHARED_FOLDER = SHARED_PARENT / "지후니우스_인수인계"
 SHARED_FILENAME = "돌출량_현황표.json"
+
+
+def _storage():
+    """메인 프로그램이 실어 주는 저장 위치 모듈(단독 실행·시험에서는 없음)."""
+    import sys
+    return sys.modules.get("jihunius_storage")
+
+
+def shared_folder():
+    """현황표를 두는 공유 폴더. 저장 위치를 옮긴 PC는 새 위치를 씁니다."""
+    storage = _storage()
+    return Path(storage.folder("protrusion")) if storage is not None else SHARED_FOLDER
+
+
+def previous_shared_path(current):
+    """저장 위치를 옮긴 PC에서 예전 위치의 현황표 경로(미저장 입력 이어받기용). 아니면 None."""
+    storage = _storage()
+    if storage is None or not storage.moved():
+        return None
+    previous = SHARED_FOLDER / SHARED_FILENAME   # 옮기기 전 버전들이 쓰던 바로 그 경로
+    same = os.path.normcase(os.path.abspath(str(previous))) == os.path.normcase(os.path.abspath(str(current)))
+    return None if same else previous
 POLL_MS = 2500
 SAVE_DELAY_MS = 500
 SYNC_TIMEOUT = 10.0
@@ -156,7 +178,7 @@ class SharedStore:
     STAGING_RETRY = 0.5
 
     def __init__(self, folder=None):
-        self.folder = Path(folder) if folder is not None else SHARED_FOLDER
+        self.folder = Path(folder) if folder is not None else shared_folder()
         self.path = self.folder / SHARED_FILENAME
         self.lock_path = self.folder / "돌출량_현황표.lock"
         self._staging_start = 0
@@ -407,7 +429,7 @@ class SharedStoreClient:
     """Reuse one helper for healthy polls; terminate it on timeout or close."""
 
     def __init__(self, folder=None, timeout=SYNC_TIMEOUT, stop=None):
-        self.folder = str(folder if folder is not None else SHARED_FOLDER)
+        self.folder = str(folder if folder is not None else shared_folder())
         self.path = Path(self.folder) / SHARED_FILENAME
         self.timeout = timeout
         self.stop = stop
@@ -482,8 +504,11 @@ class SharedStoreClient:
 class PendingRecovery:
     """A single replaced PC-local snapshot, retaining each edit's original base."""
 
-    def __init__(self, shared_path, path=None):
+    def __init__(self, shared_path, path=None, previous_shared_path=None):
         self.shared_path = os.path.normcase(os.path.abspath(str(shared_path)))
+        # 저장 위치를 옮긴 직후 한 번: 예전 위치 앞으로 보관해 둔 미저장 입력을 이어받습니다.
+        self.previous = (type(self)(previous_shared_path)
+                         if previous_shared_path is not None and path is None else None)
         if path is None:
             local = Path(os.environ.get('LOCALAPPDATA') or
                          (Path.home() / '.local' / 'share'))
@@ -498,7 +523,7 @@ class PendingRecovery:
         try:
             state = json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:
-            return {}
+            return self._adopt_previous()
         if (not isinstance(state, dict) or state.get('version') != 1
                 or state.get('shared_path') != self.shared_path
                 or not isinstance(state.get('operations'), list)):
@@ -513,6 +538,16 @@ class PendingRecovery:
             SharedStore._validate_value(operation['key'], operation['base'])
             SharedStore._validate_value(operation['key'], operation['value'])
             pending[operation['key']] = dict(operation, seq=sequence)
+        return pending
+
+    def _adopt_previous(self):
+        if self.previous is None or self.previous.path == self.path:
+            return {}
+        pending = self.previous.load()
+        if pending:
+            # 새 위치 이름으로 먼저 보관한 뒤에만 예전 보관본을 지웁니다.
+            self.save(pending)
+            self.previous.save({})
         return pending
 
     def save(self, pending):
@@ -742,7 +777,8 @@ class DefectApp:
         self._io = (SharedStoreClient(self.store.folder, stop=self.stop)
                     if type(self.store) is SharedStore else self.store)
         self.recovery = (recovery if recovery is not None
-                         else PendingRecovery(self.store.path))
+                         else PendingRecovery(self.store.path,
+                                              previous_shared_path=previous_shared_path(self.store.path)))
         self.server_values = default_values()
         self.pending = {}
         self.sequence = 0

@@ -540,6 +540,12 @@ class SyncedApplication(core.Application):
             self.root.destroy()
         else:self.root.after(100,self._wait_shutdown)
 
+def shared_folder():
+    """수집 담당 PC 연결 정보를 두는 공유 폴더. 저장 위치를 옮긴 PC는 새 위치를 씁니다."""
+    import sys
+    storage=sys.modules.get('jihunius_storage')
+    return os.environ.get('JIHUNIUS_MATERIAL_SHARED') or (storage.folder('material') if storage is not None else DEFAULT_SHARE)
+
 class MaterialUpdateAdapter:
     def __init__(self,app):self.app=app
     def begin(self):pass
@@ -571,7 +577,7 @@ def boot():
         stage='실행 잠금';target=folder/'sync-ui.lock'
         lock=core.InstanceLock(folder/'sync-ui.lock')
         stage='이 PC 연결 설정';target=folder/'sync-settings.json'
-        shared=os.environ.get('JIHUNIUS_MATERIAL_SHARED',DEFAULT_SHARE)
+        shared=shared_folder()
         session=ClientSession(folder,shared)
         stage='소재 조사 화면';target=folder
         app=SyncedApplication(root,session)

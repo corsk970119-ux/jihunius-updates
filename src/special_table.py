@@ -7,6 +7,24 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 SHARED_FOLDER = Path(r'\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈\지후니우스_인수인계')
+
+def _storage():
+    """메인 프로그램이 실어 주는 저장 위치 모듈(단독 실행·시험에서는 없음)."""
+    import sys
+    return sys.modules.get('jihunius_storage')
+
+def shared_folder():
+    """표를 두는 공유 폴더. 저장 위치를 옮긴 PC는 새 위치를 씁니다."""
+    storage=_storage()
+    return Path(storage.folder('special')) if storage is not None else SHARED_FOLDER
+
+def previous_folder(current):
+    """저장 위치를 옮긴 PC에서 예전 공유 폴더(미저장 입력 이어받기용). 아니면 None."""
+    storage=_storage()
+    if storage is None or not storage.moved():return None
+    previous=SHARED_FOLDER   # 옮기기 전 버전들이 쓰던 바로 그 폴더
+    same=os.path.normcase(str(previous.absolute()))==os.path.normcase(str(Path(current).absolute()))
+    return None if same else previous
 BG, CELL, ALT, HEADER, LINE, TEXT, MUTED, BLUE = '#060b16','#0a1224','#182131','#15264a','#2c3c59','#e6edf5','#afb1b6','#2a66f2'
 SEED_ROWS = [{'id': 'seed-4', 'cells': ['블루다이아RC', '드릴값(위) 9.1(7.88)', '스크류 길이 (1.75~1.8) /']}, {'id': 'seed-5', 'cells': ['블루다이아NC', '드릴값(위) 9.0(7.78)', '스크류 길이 (3.05~3.1)  /']}, {'id': 'seed-6', 'cells': ['스트라우만 RC', '드릴값 8.8', '(구)드릴-드릴값 2.43']}, {'id': 'seed-7', 'cells': ['스트라우만 NC', '드릴값 +0.06', '(구)드릴-드릴값 2.43']}, {'id': 'seed-8', 'cells': ['심플라인', '드릴값 5.4', '심플라인 환봉 스크류로 체크 (2.5)']}, {'id': 'seed-9', 'cells': ['네오 IU', '드릴값 위 5.42 아래 +0.2', '네오 스크류 네오 돌출량']}, {'id': 'seed-10', 'cells': ['성남 리더스', '3X -0.03 헥사 2.475', '성남리더스 전용 랩아나로그 사용(빡빡하게 들어가면 안됨)']}, {'id': 'seed-11', 'cells': ['TSV(짐머)', '드릴값 6.41', '스크류 길이 (2.3)']}, {'id': 'seed-12', 'cells': ['오스템M KS', '드릴값 4.4', '스크류 길이 (2.8~2.85)']}, {'id': 'seed-13', 'cells': ['바이오뎀M', '드릴값 4.2', '오스템M 스크류에 길이 (2.5)']}, {'id': 'seed-14', 'cells': ['오스템KS', '가이드O', '스크류 길이 (1.45~1.5)']}, {'id': 'seed-15', 'cells': ['', '가이드X', '스크류길이 (2.35~2.4)']}, {'id': 'seed-16', 'cells': ['네오ITI', '드릴값 위 5.25 아래 +0.6', '스크류 길이 (2.4~2.45)']}, {'id': 'seed-17', 'cells': ['브라이트', '드릴값 위 -0.3', '스크류 길이 (2.15~2.2)']}, {'id': 'seed-18', 'cells': ['노멀엑티브M', '헥사2.24', '돌출량 2.6']}, {'id': 'seed-19', 'cells': ['노멀엑티브R', '드릴값 위 -0.3', '돌출량 2.6']}, {'id': 'seed-20', 'cells': ['탑플란', '헥사 2.465~2.475', '드릴값  W-0.3  / R +0.5해야함.']}, {'id': 'seed-21', 'cells': ['BLX', '', '돌출량 1.5~1.55']}, {'id': 'seed-22', 'cells': ['탑플란SS', '치수 : R4.8 / W6.0 공구 : T400 탑플란R에서 W -0.053 Z0.51', '돌출량 : R 2.7 / W 3.4 (스크류 오스템SS)']}, {'id': 'seed-23', 'cells': ['', '탑플란W에서 일반W (Z-0.02 T15 -0.12)', '일반R에서 탑플란R (Z+0.045,T15Z-0.36)']}, {'id': 'seed-24', 'cells': ['워렌텍IT', '', '돌출량 3.45~3.5 (네오R 스크류)']}, {'id': 'seed-25', 'cells': ['탑플란M', '드릴값 위 -0.03', '돌출량 3.2~3.25(오스템M 드릴)']}, {'id': 'seed-26', 'cells': ['아름R', '', '오스템스크류 2.8~2.85']}, {'id': 'seed-27', 'cells': ['스트라우만 RC정품', '모스테이퍼 두께로 판별 정품이 더 큼 1.7@ 이상', '스크류 돌출량 짧게 나옴 1.75 이하로 나옴']}, {'id': 'seed-28', 'cells': ['IU', '드릴값 위 -0.19', '']}, {'id': 'seed-29', 'cells': ['아름R', '', '']}]
 SEED_NOTES = '덴티움 탑플란 메가젠스크류로 덴티움 길이값 맞추는것은 위에 수치만 -0.25 했음 잘나오면 이대로하고 아니면 치수조정해야함 \n수정된 사항은 추가 할것'
@@ -174,8 +192,8 @@ def validate_operation(op):
 
 
 class TableStore:
-    def __init__(self,folder=SHARED_FOLDER):
-        self.folder=Path(folder);self.path=self.folder/'특수_돌출량.json'
+    def __init__(self,folder=None):
+        self.folder=Path(shared_folder() if folder is None else folder);self.path=self.folder/'특수_돌출량.json'
     def _read(self):
         try:data=read_json(self.path)
         except FileNotFoundError as exc:
@@ -237,13 +255,21 @@ class TableStore:
 
 
 class PendingDraft:
-    def __init__(self,folder,base=None):
+    def __init__(self,folder,base=None,previous=None):
+        self.previous=type(self)(previous,base) if previous is not None else None
         base=Path(base or os.environ.get('LOCALAPPDATA') or Path.home())/'Jihunius'/'special-table'
         key=hashlib.sha256(os.path.normcase(str(Path(folder).absolute())).encode('utf-8')).hexdigest()[:20]
         self.path=base/(key+'.json')
+    def adopt_previous(self):
+        # 저장 위치를 옮긴 직후 한 번: 예전 위치 앞으로 보관해 둔 미저장 입력을 이어받습니다.
+        if self.previous is None or self.previous.path==self.path:return []
+        operations=self.previous.load()
+        if operations:
+            self.save(operations);self.previous.save([])
+        return operations
     def load(self):
         try:data=read_json(self.path)
-        except FileNotFoundError:return []
+        except FileNotFoundError:return self.adopt_previous()
         if not isinstance(data,dict) or data.get('schema')!=1 or not isinstance(data.get('operations'),list):raise ValueError('이 PC의 미저장 내용 형식을 확인해 주세요: '+str(self.path))
         for op in data['operations']:validate_operation(op)
         return data['operations']
@@ -300,13 +326,14 @@ class TableIO:
 
 
 class SpecialTableApp:
-    def __init__(self,root,folder=SHARED_FOLDER,store=None):
+    def __init__(self,root,folder=None,store=None):
+        folder=shared_folder() if folder is None else folder
         self.root=root;self.folder=Path(folder);self.store=store;self.io=None if store is not None else TableIO(folder)
         self.events=queue.Queue();self.pending={};self.sequence=0;self.busy=False;self.closed=False;self.closing=False
         self.ready=False;self.last_error='';self.draft_error='';self.sync_sequence=0;self.error_sequence=0
         self.state={'rows':[],'notes':''};self.editor=None;self.resolving=False;self.notes_base=''
         self.render_signature=None;self.labels=[];self.timer_ids=set();self.save_timer=None;self.local_timer=None
-        self.draft=PendingDraft(folder)
+        self.draft=PendingDraft(folder,previous=previous_folder(folder))
         try:
             for op in self.draft.load():
                 self.sequence+=1;op['seq']=self.sequence;self.pending[operation_key(op)]=op

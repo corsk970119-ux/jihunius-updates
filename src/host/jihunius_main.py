@@ -623,7 +623,7 @@ class HandoverStore:
     LOCK_TIMEOUT = 4.0
 
     def __init__(self, path=None, legacy_path=None):
-        self.path = Path(path) if path is not None else Path(HANDOVER_SHARED_PARENT) / HANDOVER_FOLDER_NAME
+        self.path = Path(path) if path is not None else Path(SuiteStorage.folder('handover'))
         self.legacy_path = (Path(legacy_path) if legacy_path is not None else
                             APP_DIR / "지후니우스_인수인계.db" if path is None else None)
         self._migration_lock = threading.Lock()
@@ -2890,7 +2890,7 @@ class WashApp:
         try:
             if run is True:
                 # 여러 PC 동시 실행 확인(공유폴더). 닿지 않으면 확인 없이 그대로 진행합니다.
-                marker=WashRunMarker(Path(HANDOVER_SHARED_PARENT)/HANDOVER_FOLDER_NAME)
+                marker=WashRunMarker(Path(SuiteStorage.folder('wash_run')))
                 other=run_bounded(marker.other)
                 if other and not self.host.request_ui(self.confirm_other_pc_run,other):
                     marker=None
@@ -3133,6 +3133,8 @@ def _suite_load_support(name, text):
     return module
 
 SuiteWindowState = ...  # build: tools/build_app.py
+# 공유 저장 위치(예전 개인 폴더 ↔ 생산공유폴더). src/storage_location.py
+SuiteStorage = ...  # build: tools/build_app.py
 
 
 class HandoverAwarePlacement:
@@ -5555,7 +5557,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.17.1'
+SUITE_APP_VERSION = '2026.11.17.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
@@ -5572,10 +5574,19 @@ def main():
         SuiteErrors.install('지후니우스',SUITE_APP_VERSION)
         configure_windows_app_identity()
         import tkinter as tk
+        # 저장 위치가 옮겨졌는지 창을 만들기 전에 한 번 확인합니다(잠깐만 기다리고, 그 뒤로는 1분마다 따로 확인).
+        try:
+            SuiteStorage.startup_check(SUITE_APP_VERSION)
+        except Exception:
+            pass   # 확인 실패가 프로그램 시작을 막지 않게(그때는 지금까지 쓰던 위치)
         window = tk.Tk()
         app = IntegrationApp(window)
         SuiteUpdater.attach(app, context, SUITE_APP_VERSION)
-        SuiteErrors.attach(app,Path(HANDOVER_SHARED_PARENT)/HANDOVER_FOLDER_NAME/'오류기록')
+        SuiteErrors.attach(app,Path(SuiteStorage.folder('errors')))
+        try:
+            SuiteStorage.attach(app)
+        except Exception:
+            pass   # 저장 위치 알림이 프로그램 시작을 막지 않게
         SuiteUpdater.mark_ready(context)
         window.mainloop()
     finally:

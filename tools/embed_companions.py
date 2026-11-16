@@ -8,6 +8,32 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# 세척일보(wash_log.py)는 기준본과 같아야 하므로 본문은 건드리지 않고, 저장 위치를 옮긴 PC에서만
+# 기본 폴더 이름을 새 위치로 바꿔 답니다. 이 PC가 기억하던 폴더가 예전 기본 폴더면 그것도 새 폴더로 고칩니다
+# (사용자가 직접 고른 다른 폴더는 그대로 둡니다).
+WASH_LOG_STORAGE = '''
+if _storage_module.moved():
+    _storage_old_default = DEFAULT_FOLDER
+    DEFAULT_PARENT = _storage_module.NEW_ROOT
+    DEFAULT_FOLDER = _storage_module.folder('wash')
+    def _storage_redirect_saved_folder():
+        import ntpath   # 공유 폴더 경로는 늘 Windows 표기입니다.
+        try:
+            saved = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return
+        current = saved.get('folder') if isinstance(saved, dict) else None
+        if (isinstance(current, str) and ntpath.normcase(ntpath.normpath(current.strip()))
+                == ntpath.normcase(ntpath.normpath(_storage_old_default))):
+            saved['folder'] = DEFAULT_FOLDER
+            atomic_json(CONFIG_FILE, saved)
+    try:
+        _storage_redirect_saved_folder()
+    except Exception:
+        pass
+'''
+
+
 def companion_source(root, key):
     helper = (root / 'src/companion_update.py').read_text(encoding='utf-8')
     helper += '\n' + (root / 'src/window_state.py').read_text(encoding='utf-8')
@@ -55,7 +81,15 @@ def companion_source(root, key):
                     "_scroll_module = _scroll_types.ModuleType('jihunius_scrollbars')\n"
                     "_scroll_sys.modules['jihunius_scrollbars'] = _scroll_module\n"
                     "exec(compile("+repr(scroll)+", '<jihunius_scrollbars>', 'exec'), _scroll_module.__dict__)\n")
-    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + visual_support + '\n\n']
+    # 공유 저장 위치 모듈. 보조창은 이 PC에 기억된 것만 봅니다(네트워크 확인은 메인 프로그램만).
+    storage=(root/'src/storage_location.py').read_text(encoding='utf-8')
+    storage_support=("\nimport types as _storage_types, sys as _storage_sys\n"
+        "_storage_module = _storage_types.ModuleType('jihunius_storage')\n"
+        "_storage_sys.modules['jihunius_storage'] = _storage_module\n"
+        "exec(compile("+repr(storage)+", '<jihunius_storage>', 'exec'), _storage_module.__dict__)\n")
+    if key == 'wash-log':
+        storage_support += WASH_LOG_STORAGE
+    lines[entry.lineno - 1:entry.lineno - 1] = ['\n' + helper + '\n' + adapter + diagnostics + visual_support + storage_support + '\n\n']
     result = ''.join(lines)
     compile(result, key, 'exec')
     return result.encode('utf-8')

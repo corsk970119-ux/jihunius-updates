@@ -74,6 +74,8 @@ def host_lines(root):
         'SuiteWindowsTray': "SuiteWindowsTray = _suite_load_support('jihunius_suite_tray', "
                             + repr(_text(root, 'src/host/windows_tray.py')) + ').WindowsTray\n',
         'SuiteUpdater': updater_line(root),
+        'SuiteStorage': "SuiteStorage = _suite_load_support('jihunius_storage', "
+                        + repr(_text(root, 'src/storage_location.py')) + ')\n',
     }
 
 
