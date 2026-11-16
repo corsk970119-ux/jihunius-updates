@@ -68,20 +68,51 @@ def defer_ime_commit(window, action):
     window.after(20, resume)
     return True
 
+STAGING_SPARES=7
+STAGING_RETRY=.5
+
+def staging_names(staging):
+    staging=Path(staging)
+    return [staging]+[staging.with_name(staging.stem+'.'+str(number)+staging.suffix) for number in range(1,STAGING_SPARES+1)]
+
+
 def atomic_json(path, value, staging=None):
     payload=json.dumps(value,ensure_ascii=False).encode('utf-8')
     if len(payload)>4*1024*1024:raise ValueError('표 내용이 저장 가능한 크기(4MB)를 넘었습니다. 너무 긴 붙여넣기 내용을 줄여 주세요.')
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
-    if staging is None:fd,name=tempfile.mkstemp(prefix='.special-',suffix='.tmp',dir=str(path.parent))
-    else:
-        name=str(staging);fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-    try:
-        with os.fdopen(fd,'wb') as f:
-            f.write(payload);f.flush();os.fsync(f.fileno())
-        os.replace(name,str(path))
-    finally:
-        try:os.unlink(name)
-        except OSError:pass
+    if staging is None:
+        fd,name=tempfile.mkstemp(prefix='.special-',suffix='.tmp',dir=str(path.parent))
+        try:
+            with os.fdopen(fd,'wb') as f:
+                f.write(payload);f.flush();os.fsync(f.fileno())
+            os.replace(name,str(path))
+        finally:
+            try:os.unlink(name)
+            except OSError:pass
+        return
+    # 정해진 임시 파일을 다른 프로세스가 잡고 있으면(멈춘 저장 프로세스, 백신·백업 프로그램 등)
+    # 그 한 파일 때문에 모든 PC의 저장이 막히므로, 정해 둔 예비 이름으로 넘어갑니다.
+    failure=None
+    for candidate in staging_names(staging):
+        name=str(candidate)
+        try:fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        except PermissionError as exc:
+            failure=failure or exc;continue
+        try:
+            with os.fdopen(fd,'wb') as f:
+                f.write(payload);f.flush();os.fsync(f.fileno())
+            end=time.monotonic()+STAGING_RETRY
+            while True:
+                try:os.replace(name,str(path));return
+                except OSError as exc:
+                    if getattr(exc,'winerror',None) not in (32,33):raise
+                    if time.monotonic()>=end:
+                        failure=failure or exc;break
+                    time.sleep(.05)
+        finally:
+            try:os.unlink(name)
+            except OSError:pass
+    raise failure
 
 
 def read_json(path):

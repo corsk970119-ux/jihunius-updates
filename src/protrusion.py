@@ -149,11 +149,18 @@ class SharedStore:
     """공유폴더에서 변경한 칸만 병합하고, 같은 칸의 충돌을 확인합니다."""
 
     LOCK_TIMEOUT = 4.0
+    # 저장할 때 쓰는 임시 파일 이름. 첫 이름을 다른 프로세스가 잡고 있으면
+    # (멈춘 저장 프로세스, 백신·백업 프로그램 등) 다음 이름으로 넘어갑니다.
+    STAGING_NAMES = ('.jihunius_protrusion_stage_v1.tmp',) + tuple(
+        '.jihunius_protrusion_stage_v1.%d.tmp' % number for number in range(1, 8))
+    STAGING_RETRY = 0.5
 
     def __init__(self, folder=None):
         self.folder = Path(folder) if folder is not None else SHARED_FOLDER
         self.path = self.folder / SHARED_FILENAME
         self.lock_path = self.folder / "돌출량_현황표.lock"
+        self._staging_start = 0
+        self._staging_stale = set()
 
     def _ensure_folder(self):
         if not self.folder.parent.is_dir():
@@ -279,34 +286,76 @@ class SharedStore:
             return state, True
         return state, False
 
+    @staticmethod
+    def _discard(temporary):
+        """정리 실패가 저장 결과나 원래 오류를 바꾸지 않게 합니다."""
+        try:
+            temporary.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
     def _write(self, state):
         # sync() holds the same exclusive lock for every PC throughout this write.
-        # A killed SMB helper cannot run finally, so reuse our one staging name
-        # on the next attempt rather than accumulating abandoned snapshots.
-        temporary = self.folder / '.jihunius_protrusion_stage_v1.tmp'
-        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-                json.dump(state, stream, ensure_ascii=False, indent=2)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            deadline = time.monotonic() + self.LOCK_TIMEOUT
-            while True:
-                try:
-                    os.replace(str(temporary), str(self.path))
-                    break
-                except OSError as error:
-                    if getattr(error, "winerror", None) not in (32, 33):
-                        raise
-                    if time.monotonic() >= deadline:
-                        raise
-                    time.sleep(0.05)
-        finally:
+        # A killed SMB helper cannot run finally, so reuse a small fixed set of
+        # staging names rather than accumulating abandoned snapshots.  One name
+        # alone is not enough: a handle left open on it by any process (a hung
+        # helper, a scanner, a backup tool) blocked saving for every PC.
+        payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+        names = self.STAGING_NAMES
+        start = self._staging_start % len(names)
+        order = names[start:] + names[:start]
+        deadline = None
+        failure = None
+        for position, name in enumerate(order):
+            temporary = self.folder / name
             try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+                descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            except PermissionError as error:
+                # 이 이름을 다른 프로세스가 열어 두었거나 지워지는 중입니다.
+                failure = failure or error
+                self._staging_stale.add(name)
+                continue
+            saved = False
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                # 마지막 이름이 아니면 잠깐만 기다리고 다른 이름으로 다시 씁니다.
+                if deadline is None:
+                    deadline = time.monotonic() + self.LOCK_TIMEOUT
+                limit = deadline
+                if position < len(order) - 1:
+                    limit = min(deadline, time.monotonic() + self.STAGING_RETRY)
+                while True:
+                    try:
+                        os.replace(str(temporary), str(self.path))
+                        saved = True
+                        break
+                    except OSError as error:
+                        if getattr(error, "winerror", None) not in (32, 33):
+                            raise
+                        if time.monotonic() >= limit:
+                            failure = failure or error
+                            break
+                        time.sleep(0.05)
+            finally:
+                if not saved and not self._discard(temporary):
+                    self._staging_stale.add(name)
+            if saved:
+                self._staging_start = names.index(name)
+                self._staging_stale.discard(name)
+                # 잠금을 쥔 동안에는 다른 PC가 쓰는 중인 임시 파일이 없습니다.
+                for stale in sorted(self._staging_stale):
+                    if self._discard(self.folder / stale):
+                        self._staging_stale.discard(stale)
+                return
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+        raise failure
 
     def sync(self, operations=()):
         operations = [dict(operation) for operation in operations]
