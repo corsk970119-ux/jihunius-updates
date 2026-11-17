@@ -557,3 +557,4 @@ python tools/run_tests.py storage    # 이름에 storage가 든 테스트 파일
 - 세척일보 창 제목 `'세척일보 · 공유 작업장'` → `'세척일보'`. **`src/wash_log.py`와 `tools/build_app.py`의 `COMPANION_TITLES`를 같이 바꿔야 한다** — 메인이 이 제목으로 세척일보 창을 찾아 앞으로 가져오고 닫는다(`companions._main_window`, 글자 하나까지 같아야 함). 기준본 비교(`test_release_package`)에 승인 항목으로 적음.
 - 테스트 `tests/test_dark_titlebar.py` 10개(가짜 Windows 호출: 메인·여는 창에 한 번씩, 안의 칸 30개는 불리지 않음, 말풍선 제외, 실패해도 창에 영향 없음, 크기·위치 그대로, 세척일보·소재 창에 실리는 함수가 혼자 동작, 제목 일치). 전체 645 통과(Linux Xvfb, Python 3.12 — 이 세션의 기본 `python`에는 tkinter가 없어 `apt-get install python3-tk` 뒤 `python3.12`로 돌림).
 - [미확인 — Windows에서 못 봄] 실제 제목 줄 색. 예/아니오 확인 창·파일 고르기 창은 Windows가 그리는 창이라 그대로다. Windows 10에서는 창을 한 번 다른 창으로 갔다 와야 색이 바뀔 수 있다(세척일보·돌출량과 같은 방식이라 같은 정도).
+- 배포 뒤 Google Drive `일 → CNC 스크립트`의 `지후니우스.pyw`를 2026.11.18.1로 바꿈(새 파일 올리고 설명에 버전·SHA256, 이전 2026.11.17.2 파일은 휴지통). 폴더에는 최신 하나만 있음 [확인됨].
