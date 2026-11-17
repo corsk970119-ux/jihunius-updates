@@ -4,3 +4,4 @@ __pycache__/
 # Files created when the app is run from the repository on Linux/macOS
 .app.pyw.update.lock
 *\\*
+tests/.durations.json

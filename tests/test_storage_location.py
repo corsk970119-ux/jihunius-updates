@@ -355,11 +355,17 @@ class CompanionStorageTests(Sandbox):
         self.assertEqual(module.DEFAULT_PARENT, probe.NEW_ROOT)
         self.assertEqual(saved, {'folder': expected, 'dept': '가공'})       # 다른 설정은 그대로
 
+    def test_wash_log_old_folder_remembered_through_a_drive_letter_also_moves(self):
+        for remembered in (r'Y:\생산관리\일일 업무 보고\최지훈\세척일보', 'y:/생산관리/일일 업무 보고/최지훈/세척일보/',
+                           r'\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈'):      # 개인 폴더를 잘못 골랐던 PC
+            module, saved, probe = self.run_wash_log(True, remembered)
+            self.assertEqual(saved, {'folder': os.path.join(probe.NEW_ROOT, '세척일보'), 'dept': '가공'}, remembered)
+
     def test_wash_log_folder_the_user_chose_is_left_alone(self):
-        chosen = r'D:\다른 폴더\세척일보'
-        module, saved, probe = self.run_wash_log(True, chosen)
-        self.assertEqual(module.DEFAULT_FOLDER, os.path.join(probe.NEW_ROOT, '세척일보'))
-        self.assertEqual(saved, {'folder': chosen, 'dept': '가공'})
+        for chosen in (r'D:\다른 폴더\세척일보', r'\\192.168.0.254\내부공유폴더\다른 사람\세척일보', r'D:\최지훈'):
+            module, saved, probe = self.run_wash_log(True, chosen)
+            self.assertEqual(module.DEFAULT_FOLDER, os.path.join(probe.NEW_ROOT, '세척일보'))
+            self.assertEqual(saved, {'folder': chosen, 'dept': '가공'}, chosen)
 
     def test_wash_log_without_saved_settings_just_uses_the_new_default(self):
         module, saved, probe = self.run_wash_log(True, None)

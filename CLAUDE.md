@@ -7,7 +7,7 @@
 - 배포 = `main`의 `channels/stable.json` 변경이다. 사용자가 "배포해줘"라고 할 때만 `tools/prepare_release.py`로 새 버전을 만들어 main에 올린다. 그 외 작업은 작업 브랜치에서 한다.
 - 이미 올린 `releases/jihunius/<버전>/`은 절대 덮어쓰지 않는다.
 - 배포를 마치면 Google Drive `일 → CNC 스크립트` 폴더(ID `1KP9uERp5XFxvIoSTfcSrsOmURweAGPL7`)의 `지후니우스.pyw`를 방금 배포한 `dist/지후니우스.pyw`로 바꾼다(사용자 요청 2026-11-11). 커넥터가 본문을 덮어쓰지 못하므로 새 파일을 올리고 설명에 버전을 적은 뒤 이전 파일을 휴지통으로 옮겨, 폴더에는 최신 하나만 둔다. 드라이브에 연결할 수 없으면 그 사실을 사용자에게 알린다.
-- 커밋 전: `python tools/build_app.py --check` 와 `python -m unittest discover -s tests -p 'test_*.py'` (Linux는 `xvfb-run -a -s "-screen 0 3840x1200x24"`로 실행).
+- 커밋 전: `python tools/build_app.py --check` 와 `python tools/run_tests.py`(전체 테스트를 파일 단위로 나눠 동시에 돌림, 약 1분. Linux의 가상 화면은 알아서 띄움). 작은 수정은 `python tools/run_tests.py <이름 일부>`로 관련 파일만 먼저 본다. 전체 테스트는 배포 한 번에 한 번이면 된다(배포본을 만든 뒤에는 `build_app.py --check`만). 한 줄로 돌리는 예전 방법 `python -m unittest discover -s tests -p 'test_*.py'`(Linux는 `xvfb-run -a -s "-screen 0 3840x1200x24"`)도 그대로 된다.
 - 회사 PC는 Windows + Python 3.8 이상이다. 3.9 이상 전용 문법·외부 패키지를 쓰지 않는다.
 - 소재 사용량 조사는 대표 보고 자료다. 집계·동기화 코드는 정확도 우선, 변경 시 관련 회귀 테스트를 넓힌다.
 - 실적 DB, 연결 인증 값, 오류 원문은 저장소에 올리지 않는다.

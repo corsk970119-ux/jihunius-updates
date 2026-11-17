@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 세척일보(wash_log.py)는 기준본과 같아야 하므로 본문은 건드리지 않고, 저장 위치를 옮긴 PC에서만
 # 기본 폴더 이름을 새 위치로 바꿔 답니다. 이 PC가 기억하던 폴더가 예전 기본 폴더면 그것도 새 폴더로 고칩니다
-# (사용자가 직접 고른 다른 폴더는 그대로 둡니다).
+# (사용자가 직접 고른 다른 폴더는 그대로 둡니다). 예전 개인 폴더를 드라이브 문자 같은 다른 표기로 기억한 PC도
+# 같은 곳으로 보고 고칩니다 — 그렇지 않으면 그 PC의 세척일보만 옮긴 자료를 찾지 못합니다.
 WASH_LOG_STORAGE = '''
 if _storage_module.moved():
     _storage_old_default = DEFAULT_FOLDER
@@ -23,8 +24,13 @@ if _storage_module.moved():
         except (OSError, ValueError):
             return
         current = saved.get('folder') if isinstance(saved, dict) else None
-        if (isinstance(current, str) and ntpath.normcase(ntpath.normpath(current.strip()))
-                == ntpath.normcase(ntpath.normpath(_storage_old_default))):
+        if not isinstance(current, str):
+            return
+        def tail(path):
+            # 끝의 두 폴더 이름. 드라이브 문자로 연결했든 서버 이름으로 적었든 같은 곳이면 같습니다.
+            return [part for part in ntpath.normcase(ntpath.normpath(path.strip())).split(ntpath.sep) if part][-2:]
+        # 예전 기본 폴더(…/최지훈/세척일보)와, 그 위 개인 폴더를 잘못 골랐던 경우(…/일일 업무 보고/최지훈) 둘 다.
+        if tail(current) in (tail(_storage_old_default), tail(ntpath.dirname(_storage_old_default))):
             saved['folder'] = DEFAULT_FOLDER
             atomic_json(CONFIG_FILE, saved)
     try:
