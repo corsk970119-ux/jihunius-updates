@@ -3,7 +3,7 @@
 """소재관리 — 독립 현장 확인판 0.4.1 / Python 3.8+ / 추가 설치 없음.
 
 Windows에서 이 파일을 더블클릭. 지후니우스와 별도 실행/별도 저장.
-1~9호기 유효 4자리 작업번호 변경 = 가공/양품 +1 (3999, 9012, 9020, 9999 제외).
+1~9호기 유효 4자리 작업번호 변경 = 가공/양품 +1 (3999, 7000, 9012, 9020, 9999 제외).
 9020을 거친 같은 번호 복귀는 +0. 불량 버튼은 양품 -1, 불량 +1.
 소재교체 = 기존 가공/불량 기록 저장, 새 소재 1봉 출고, 가공/불량 모두 0부터 시작.
 중도교체 = 기존 봉을 중도파기 1봉으로 별도 기록. 파기 봉도 소모 1봉이며 봉당 양품·불량 평균에 포함.
@@ -45,7 +45,8 @@ TIMEOUT = 4.0
 FRESH_SECONDS = 9.0
 DISPLAY_STALE_SECONDS = 30.0
 GAP_SECONDS = 15.0
-EXCLUDED_PROGRAMS = frozenset(('3999', '9012', '9020', '9999'))
+# 7000: 사용자 요청 2026-11-18 "소재 사용량 조사에 O7000도 제외". 3999·9012·9999와 같은 제외(9020처럼 투명하지 않음).
+EXCLUDED_PROGRAMS = frozenset(('3999', '7000', '9012', '9020', '9999'))
 MACHINES = tuple(range(1, 10))
 MATERIAL_TYPES = {'10Z': 'Ø10 Z급', '10B': 'Ø10 B급', '12': 'Ø12', '14': 'Ø14'}
 DEFAULT_MATERIAL_TYPE = '10B'
@@ -475,7 +476,7 @@ class Store:
         eligible = countable_program(sample['program'])
         same_return = old['program']=='9020' and sample['program']==old['count_program']
         # Keep the visible program and counting reference separate. Only 9020 is
-        # transparent; 3999/9012/9999 still delimit legitimate same-number rework.
+        # transparent; 3999/7000/9012/9999 still delimit legitimate same-number rework.
         count_program = old['count_program'] if sample['program']=='9020' else sample['program']
         changed = True
         with self.transaction():
@@ -485,7 +486,7 @@ class Store:
             elif old['active_material'] is None:
                 row['active_material'] = self.db.execute('''INSERT INTO materials(machine,started,start_program,partial,material_type)
                   VALUES(?,?,?,1,?)''', (n, at, sample['program'], old['initial_type'])).lastrowid
-                self._event(row, at, 'baseline', note='첫 관측 번호는 기준값입니다. 이후 집계 대상 4자리로 바뀔 때 +1, 3999·9012·9020·9999 및 9020 이후 같은 번호 복귀는 제외합니다.')
+                self._event(row, at, 'baseline', note='첫 관측 번호는 기준값입니다. 이후 집계 대상 4자리로 바뀔 때 +1, 3999·7000·9012·9020·9999 및 9020 이후 같은 번호 복귀는 제외합니다.')
             elif not continuous:
                 self.db.execute('UPDATE materials SET gap=1 WHERE id=?', (old['active_material'],))
                 self._event(row, at, 'resume', previous=old['program'],
@@ -494,7 +495,7 @@ class Store:
                 counted = eligible and not same_return
                 note = ('9020 이후 같은 작업번호 복귀 · 가공 수 유지.' if same_return else
                         '유효 4자리 번호로 변경 +1 · 9020 외 다른 번호를 거친 동일 작업 재가공도 포함.' if counted else
-                        '3999·9012·9020·9999 또는 4자리 이외 번호. 상태와 이력만 갱신합니다.')
+                        '3999·7000·9012·9020·9999 또는 4자리 이외 번호. 상태와 이력만 갱신합니다.')
                 self._event(row, at, 'program' if counted else 'program_skip', previous=old['program'],
                             auto=1 if counted else 0, note=note)
             elif old['state'] != sample['state']:
@@ -1415,7 +1416,7 @@ class Application:
             self.nav_buttons[str(page)]=button
         self.tabs.enable_traversal()
         self.tabs.bind('<<NotebookTabChanged>>',self.tab_changed)
-        self.label(self.current_tab,'4자리 번호 변경: 양품 +1 · 3999 / 9012 / 9020 / 9999 제외 · 불량 버튼: 양품 −1 / 불량 +1',
+        self.label(self.current_tab,'4자리 번호 변경: 양품 +1 · 3999/7000/9012/9020/9999 제외 · 불량 버튼: 양품 −1 / 불량 +1',
                    color=PALETTE['muted'],anchor='w').pack(fill='x',padx=8,pady=(10,8))
         board = self.tk.Frame(self.current_tab,bg=PALETTE['bg'])
         board.pack(fill='both',expand=True,padx=4)
@@ -2313,7 +2314,7 @@ class Application:
         if not path:return
         try:
             payload=dict(version=VERSION,saved_at=date_text(time.time()),host=HOST,
-                         count_rule='observed transition into eligible number: machining/good +1; 1000..9999 except 3999/9012/9020/9999; return after 9020 to the same number +0, a different eligible number +1; return after other numbers counts as rework; repeated same polling +0; manual defect: good -1/defect +1, machining unchanged; early-discard rods count as one consumed rod and enter good/defect averages; completed-cohort averages exclude partial/gap/excess-defect rods; site part_count ignored and not recorded in new events',
+                         count_rule='observed transition into eligible number: machining/good +1; 1000..9999 except 3999/7000/9012/9020/9999; return after 9020 to the same number +0, a different eligible number +1; return after other numbers counts as rework; repeated same polling +0; manual defect: good -1/defect +1, machining unchanged; early-discard rods count as one consumed rod and enter good/defect averages; completed-cohort averages exclude partial/gap/excess-defect rods; site part_count ignored and not recorded in new events',
                          server=self.server_detail,errors=self.errors,source_errors=self.source_errors,
                          machines=[self.store.snapshot(n) for n in MACHINES],
                          materials=self.store.history(),events=self.store.events(limit=1000),
@@ -2337,7 +2338,7 @@ class Application:
           '   이미 기계에 들어 있는 봉은 제외합니다. 추가 입고와 재고 수정도 기록됩니다.\n'
           '2. 현재 집계의 소재명 클릭: 이미 투입된 소재를 지정합니다. 최초 지정은 재고 차감 없음.\n'
           '   지정 후 다시 클릭하면 다음 교체에 넣을 소재를 예약합니다.\n'
-          '3. 4자리 작업번호만 비교해 번호 변경마다 가공 +1. 3999·9012·9020·9999는 제외합니다.\n'
+          '3. 4자리 작업번호만 비교해 번호 변경마다 가공 +1. 3999·7000·9012·9020·9999는 제외합니다.\n'
           '   1061→3999→1061은 재가공 +1. 1061→9020→1061과 같은 번호 반복 조회는 +0입니다.\n'
           '4. 불량 +1: 이미 집계한 양품 1개를 불량으로 변경합니다. 양품 -1, 불량 +1, 전체 가공은 그대로.\n'
           '   양품은 가공 횟수에서 불량을 뺀 수입니다. 양품이 0이면 불량 추가를 막습니다.\n'
