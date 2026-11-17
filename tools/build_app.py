@@ -29,7 +29,8 @@ from embed_companions import companion_lines  # noqa: E402
 TEMPLATE = 'src/host/jihunius_main.py'
 OUTPUT = 'apps/jihunius/app.pyw'
 ICON_SIZES = (256, 64, 48, 32, 24, 16)
-COMPANION_TITLES = {'protrusion': '돌출량 현황표', 'wash-log': '세척일보 · 공유 작업장',
+# 창 제목과 글자 하나까지 같아야 합니다(메인이 이 제목으로 그 창을 찾아 앞으로 가져오고 닫습니다).
+COMPANION_TITLES = {'protrusion': '돌출량 현황표', 'wash-log': '세척일보',
                     'special-table': '특수 돌출량', 'material': '소재 사용량 조사(Beta)'}
 
 

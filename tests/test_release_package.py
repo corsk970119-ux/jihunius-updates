@@ -113,6 +113,8 @@ class PrivatePackageTests(unittest.TestCase):
    def visit_Try(self,node):
     # Approved N3 visual: shared thin-scrollbar style call only (ttk layout/colors, no behavior).
     # Approved 2026-11-12: the same block also installs the shared Korean-input helper (install_korean_input).
+    # Approved 2026-11-18 (사용자: "세척일보처럼 위에가 다 검은색이였으면"): the same block also darkens the title bars of
+    # the windows opened from here (install_dark_titlebars) — window frame color only.
     if any(isinstance(n,ast.alias) and n.name=='install_thin_scrollbars' for n in ast.walk(node)):return None
     return self.generic_visit(node)
    def visit_For(self,node):
@@ -127,6 +129,11 @@ class PrivatePackageTests(unittest.TestCase):
      target=node.args[0]
      if isinstance(target,ast.Attribute) and target.attr=='focus_set':return ast.Call(func=target,args=[],keywords=[])
      node.func.attr='after_idle';node.args=node.args[:1]
+    # Approved 2026-11-18 (사용자: "세척일보 라고만 적혀있고 뒤에 공유작업 어쩌구는 안써있으면 좋겠음"):
+    # 창 제목 글자만 — self.title('세척일보 · 공유 작업장') → self.title('세척일보').
+    if (isinstance(node.func,ast.Attribute) and node.func.attr=='title' and isinstance(node.func.value,ast.Name)
+        and node.func.value.id=='self' and len(node.args)==1 and isinstance(node.args[0],ast.Constant)
+        and node.args[0].value=='세척일보 · 공유 작업장'):node.args[0].value='세척일보'
     return node
    def visit_ClassDef(self,node):
     # Approved 2026-11-12: the helper method itself (IME 확정 후 실행) is new; everything else stays pinned.

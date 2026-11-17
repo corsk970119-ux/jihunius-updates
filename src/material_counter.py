@@ -1309,6 +1309,14 @@ class Application:
             install_korean_input(self.root)
         except Exception:
             pass
+        try:
+            try:
+                from jihunius_scrollbars import install_dark_titlebars
+            except ImportError:
+                from visual_theme import install_dark_titlebars
+            install_dark_titlebars(self.root)   # 창 맨 위 제목 줄을 어둡게(이 창과 여기서 여는 창)
+        except Exception:
+            pass
         style.configure('.', font=(self.font, 10), background=PALETTE['bg'], foreground=PALETTE['text'])
         style.configure('TFrame', background=PALETTE['bg'])
         style.configure('TLabel', background=PALETTE['bg'], foreground=PALETTE['text'])

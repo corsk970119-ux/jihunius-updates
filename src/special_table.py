@@ -369,6 +369,10 @@ class SpecialTableApp:
             from visual_theme import install_korean_input
             install_korean_input(r)   # Enter·칸 이동 때 한글 마지막 글자 유지, 조합 창 글꼴 맞춤
         except Exception:pass
+        try:
+            from visual_theme import install_dark_titlebars
+            install_dark_titlebars(r)   # 창 맨 위 제목 줄을 어둡게(이 창과 여기서 여는 창)
+        except Exception:pass
         toolbar=tk.Frame(r,bg=BG);toolbar.grid(row=0,column=0,sticky='ew',padx=12,pady=10);toolbar.columnconfigure(0,weight=1)
         search_frame=tk.Frame(toolbar,bg=CELL,highlightbackground=LINE,highlightthickness=1)
         search_frame.grid(row=0,column=0,sticky='ew',padx=(0,14));search_frame.columnconfigure(1,weight=1)

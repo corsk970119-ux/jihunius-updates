@@ -633,7 +633,7 @@ class App(tk.Tk):
         super().__init__()
         self.app_icons=[tk.PhotoImage(master=self,data=encoded) for encoded in APP_ICON_PNGS]
         self.iconphoto(True,*self.app_icons)
-        self.title('세척일보 · 공유 작업장'); self.geometry('320x940'); self.minsize(280, 650); self.configure(bg=BG)
+        self.title('세척일보'); self.geometry('320x940'); self.minsize(280, 650); self.configure(bg=BG)
         try: self.cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
         except (OSError, ValueError): self.cfg = {}
         self.data = None; self.cards = {}; self.popups={};self.popup_close_pending=set();self.edit = None; self.busy = 0
@@ -723,11 +723,14 @@ class App(tk.Tk):
             try:
                 from jihunius_scrollbars import install_thin_scrollbars
                 from jihunius_scrollbars import install_korean_input
+                from jihunius_scrollbars import install_dark_titlebars
             except ImportError:
                 from visual_theme import install_thin_scrollbars
                 from visual_theme import install_korean_input
+                from visual_theme import install_dark_titlebars
             install_thin_scrollbars(style)
             install_korean_input(self)
+            install_dark_titlebars(self)   # 여기서 여는 창(관리·삭제 내역 등)의 제목 줄도 어둡게
         except Exception:
             pass
 

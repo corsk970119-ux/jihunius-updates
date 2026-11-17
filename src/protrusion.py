@@ -925,6 +925,11 @@ class DefectApp:
             install_korean_input(self.root)   # Enter·칸 이동 때 한글 마지막 글자 유지, 조합 창 글꼴 맞춤
         except Exception:
             pass
+        try:
+            from visual_theme import install_dark_titlebars
+            install_dark_titlebars(self.root)   # 여기서 여는 창(업데이트 전 저장 등)의 제목 줄도 어둡게
+        except Exception:
+            pass
 
     def _dark_titlebar(self):
         if os.name != "nt":

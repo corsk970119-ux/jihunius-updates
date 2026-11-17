@@ -327,6 +327,58 @@ def install_korean_input(root):
     return True
 
 
+def install_dark_titlebars(root, _paint=None):
+    """창 맨 위 제목 줄을 어둡게(Windows 전용, 실패하면 평소 모양 그대로). 프로그램(인터프리터)마다 한 번만 겁니다.
+
+    이 창과 여기서 여는 창이 화면에 나타날 때(<Map>) Windows에 '어두운 제목 줄'을 요청할 뿐이고,
+    창의 크기·위치·내용은 건드리지 않습니다. 제목 줄이 없는 창(말풍선 등)은 그냥 둡니다.
+    예/아니오를 묻는 확인 창처럼 Windows가 직접 그리는 창은 해당되지 않습니다.
+    """
+    import os
+    paint = _paint
+    if paint is None:
+        if os.name != 'nt':
+            return False
+        try:
+            import ctypes
+            from ctypes import wintypes as W
+            user = ctypes.WinDLL('user32')
+            dwm = ctypes.WinDLL('dwmapi')
+            user.GetAncestor.argtypes = [W.HWND, W.UINT]; user.GetAncestor.restype = W.HWND
+            dwm.DwmSetWindowAttribute.argtypes = [W.HWND, W.DWORD, ctypes.c_void_p, W.DWORD]
+            dwm.DwmSetWindowAttribute.restype = W.LONG
+        except Exception:
+            return False
+
+        def paint(window_id):
+            frame = user.GetAncestor(window_id, 2) or window_id          # 제목 줄이 달린 바깥 창
+            enabled = ctypes.c_int(1)
+            for attribute in (20, 19):                                    # 19: 예전 Windows 10
+                if dwm.DwmSetWindowAttribute(frame, attribute, ctypes.byref(enabled), ctypes.sizeof(enabled)) == 0:
+                    break
+
+    def darken(path):
+        try:
+            if root.tk.getboolean(root.tk.call('wm', 'overrideredirect', path)):
+                return
+            paint(int(root.tk.call('winfo', 'id', path), 0))
+        except Exception:
+            pass
+
+    try:
+        if getattr(root, '_jihunius_dark_titlebars', False):             # 이미 걸려 있음
+            return False
+        # 창 종류 이름에만 겁니다(안의 칸·버튼이 나타날 때는 불리지 않습니다).
+        for name in sorted({str(root.winfo_class()), 'Toplevel'}):
+            root.bind_class(name, '<Map>', lambda event: darken(str(event.widget)), add='+')
+        root._jihunius_dark_titlebars = True
+        if root.winfo_ismapped():                                         # 이미 떠 있는 창
+            darken(str(root))
+    except Exception:
+        return False
+    return True
+
+
 def install_thin_scrollbars(style):
     """N3: 얇은 스크롤바(화살표 없음). 스크롤 명령·연결은 그대로이고 실패해도 기존 모양을 유지합니다."""
     for orient, sticky in (('Vertical', 'ns'), ('Horizontal', 'ew')):

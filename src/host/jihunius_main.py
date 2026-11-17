@@ -4031,6 +4031,10 @@ class IntegrationApp:
             SuiteVisualTheme.install_korean_input(window)   # Enter·칸 이동 때 한글 마지막 글자 유지, 조합 창 글꼴 맞춤
         except Exception:
             pass
+        try:
+            SuiteVisualTheme.install_dark_titlebars(window)   # 창 맨 위 제목 줄을 어둡게(이 창과 여기서 여는 창)
+        except Exception:
+            pass
         self.material_quick.set_icons(visual["images"])
         self.reserve_empty_button_width()
         for button in self._suite_buttons.values():
@@ -5557,7 +5561,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.17.2'
+SUITE_APP_VERSION = '2026.11.18.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
