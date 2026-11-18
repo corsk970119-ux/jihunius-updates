@@ -10,11 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 세척일보(wash_log.py)는 기준본과 같아야 하므로 본문은 건드리지 않고, 저장 위치를 옮긴 PC에서만
 # 기본 폴더 이름을 새 위치로 바꿔 답니다. 이 PC가 기억하던 폴더가 예전 기본 폴더면 그것도 새 폴더로 고칩니다
-# (사용자가 직접 고른 다른 폴더는 그대로 둡니다).
+# (사용자가 직접 고른 다른 폴더는 그대로 둡니다). 저장 위치를 또 옮긴 PC는 그 전 위치의 세척일보 폴더도 예전 기본 폴더로 봅니다.
 WASH_LOG_STORAGE = '''
 if _storage_module.moved():
-    _storage_old_default = DEFAULT_FOLDER
-    DEFAULT_PARENT = _storage_module.NEW_ROOT
+    _storage_old_defaults = [DEFAULT_FOLDER] + list(_storage_module.earlier_folders('wash'))
+    DEFAULT_PARENT = _storage_module.root()
     DEFAULT_FOLDER = _storage_module.folder('wash')
     def _storage_redirect_saved_folder():
         import ntpath   # 공유 폴더 경로는 늘 Windows 표기입니다.
@@ -23,8 +23,10 @@ if _storage_module.moved():
         except (OSError, ValueError):
             return
         current = saved.get('folder') if isinstance(saved, dict) else None
-        if (isinstance(current, str) and ntpath.normcase(ntpath.normpath(current.strip()))
-                == ntpath.normcase(ntpath.normpath(_storage_old_default))):
+        if not isinstance(current, str):
+            return
+        spelled = ntpath.normcase(ntpath.normpath(current.strip()))
+        if any(spelled == ntpath.normcase(ntpath.normpath(old)) for old in _storage_old_defaults):
             saved['folder'] = DEFAULT_FOLDER
             atomic_json(CONFIG_FILE, saved)
     try:
