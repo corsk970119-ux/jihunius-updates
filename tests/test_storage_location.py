@@ -174,18 +174,15 @@ class StorageLocationTests(Sandbox):
     def test_before_the_move_a_started_pc_leaves_its_name_and_version_in_the_new_place(self):
         storage = self.storage()
         self.assertFalse(storage.startup_check('2026.11.17.2', wait=5))
-        storage._startup['worker'].join(5)                               # 이름 남기기는 표시 확인 뒤에 따로 끝남
         ready = list((self.new / storage.READY_NAME).glob('*.json'))
         self.assertEqual(len(ready), 1)
         value = json.loads(ready[0].read_text(encoding='utf-8'))
         self.assertEqual((value['version'], bool(value['pc']), bool(value['at'])), ('2026.11.17.2', True, True))
         self.assertEqual(list((self.new / storage.READY_NAME).glob('*.tmp')), [])
         self.assertFalse(storage.startup_check(None, wait=5))            # 버전을 모르면 남기지 않음(덮어쓰지도 않음)
-        storage._startup['worker'].join(5)
         self.mark_moved(storage)
         ready[0].unlink()
         self.assertTrue(storage.startup_check('2026.11.17.2', wait=5))
-        storage._startup['worker'].join(5)
         self.assertEqual(list((self.new / storage.READY_NAME).glob('*.json')), [])   # 옮긴 뒤에는 남기지 않음
 
     def test_nothing_is_created_when_the_new_place_does_not_exist(self):
@@ -202,12 +199,10 @@ class StorageLocationTests(Sandbox):
         with patch.object(storage, 'announce', side_effect=PermissionError(13, 'denied')):
             self.assertFalse(storage.startup_check('2026.11.17.2', wait=5))
 
-    def test_watcher_does_nothing_on_a_pc_that_reached_the_last_place(self):
-        # 2026-11-18: 생산공유폴더를 쓰는 PC는 대비 위치의 표시를 계속 확인합니다(tests/test_storage_second_move.py).
-        # 확인을 그만두는 것은 대비 위치까지 넘어간 PC뿐입니다.
+    def test_watcher_does_nothing_on_a_pc_that_already_moved(self):
         storage = self.storage()
-        storage.BACK_ROOT = str(self.base / 'personal' / '지후니우스 저장')
-        storage.remember(storage.BACK_ROOT)
+        self.mark_moved(storage)
+        storage.check()
         window = Mock()
         storage.attach(Mock(window=window))
         window.after.assert_not_called()

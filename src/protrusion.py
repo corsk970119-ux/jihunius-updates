@@ -74,9 +74,7 @@ def previous_shared_path(current):
     storage = _storage()
     if storage is None or not storage.moved():
         return None
-    # 저장 위치를 또 옮긴 PC는 바로 전 위치(기능별 폴더), 아니면 옮기기 전 버전들이 쓰던 바로 그 경로
-    earlier = getattr(storage, "previous_folder", lambda feature: None)("protrusion")
-    previous = (Path(earlier) if earlier else SHARED_FOLDER) / SHARED_FILENAME
+    previous = SHARED_FOLDER / SHARED_FILENAME   # 옮기기 전 버전들이 쓰던 바로 그 경로
     same = os.path.normcase(os.path.abspath(str(previous))) == os.path.normcase(os.path.abspath(str(current)))
     return None if same else previous
 POLL_MS = 2500

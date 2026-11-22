@@ -22,9 +22,7 @@ def previous_folder(current):
     """저장 위치를 옮긴 PC에서 예전 공유 폴더(미저장 입력 이어받기용). 아니면 None."""
     storage=_storage()
     if storage is None or not storage.moved():return None
-    # 저장 위치를 또 옮긴 PC는 바로 전 위치(기능별 폴더), 아니면 옮기기 전 버전들이 쓰던 바로 그 폴더
-    earlier=getattr(storage,'previous_folder',lambda feature:None)('special')
-    previous=Path(earlier) if earlier else SHARED_FOLDER
+    previous=SHARED_FOLDER   # 옮기기 전 버전들이 쓰던 바로 그 폴더
     same=os.path.normcase(str(previous.absolute()))==os.path.normcase(str(Path(current).absolute()))
     return None if same else previous
 BG, CELL, ALT, HEADER, LINE, TEXT, MUTED, BLUE = '#060b16','#0a1224','#182131','#15264a','#2c3c59','#e6edf5','#afb1b6','#2a66f2'
