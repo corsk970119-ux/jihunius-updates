@@ -55,9 +55,10 @@ Windows가 관리하는 System Volume Information / $RECYCLE.BIN은 제외합니
 수정은 저장할 복사본에만 적용하고, 선택한 모드의 저장 결과를 검증합니다.
 """
 
+import calendar
 import ctypes
 from contextlib import contextmanager, redirect_stdout
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import errno
 import hashlib
 import http.client
@@ -105,6 +106,9 @@ MODE_DESCRIPTIONS = {
     MODE_LIST: "날짜 폴더 지정 없이 입력한 번호로 {list_name}만 만듭니다.",
     MODE_BOTH: "지정한 날짜 폴더에서 파일을 가져와 수정하고, 모든 입력 번호로 {list_name} 리스트를 만듭니다.",
 }
+# 하나만 가져오기(사용자 요청 2026-11-23): '파일만 가져오기 + 날짜 폴더'와 같은 동작을 따로 여닫는 작은 창에서.
+# 전날 파일을 번호 하나씩 가져올 때 메인 화면의 번호 목록·날짜·작업 모드를 건드리지 않게 합니다.
+SINGLE_IMPORT_LABEL = "하나만 가져오기"
 SYSTEM_FOLDERS = {"system volume information", "$recycle.bin"}
 CARD_MODIFIER_FILENAME = "수정10.30.py"
 # 별도 보조 파일 없이 카드에 배치할 독립 실행 스크립트입니다. 실행하지 않고 복사만 합니다.
@@ -1899,6 +1903,17 @@ def save_program_base_root(value):
             try: temporary.unlink()
             except FileNotFoundError: pass
     return value
+
+
+def single_import_default_date(today=None):
+    """하나만 가져오기 창의 기본 날짜: 하루 전날, 월요일에는 그 전주 금요일."""
+    today = date.today() if today is None else today
+    return today - timedelta(days=3 if today.weekday() == 0 else 1)
+
+
+def single_import_folder_text(day):
+    """달력에서 고른 날짜를 메인 화면의 날짜 폴더 칸과 같은 표기로(예: 11.03)."""
+    return "{}.{:02d}".format(day.month, day.day)
 
 
 def year_search_root(year=PROGRAM_YEAR, base_root=None):
@@ -5141,6 +5156,249 @@ SuiteErrors = _suite_load_support("jihunius_error_history", '"""Bounded, event-o
 
 SuiteMaterialQuick = _suite_load_support("jihunius_material_quick", '"""Main-window material input using the existing companion\'s durable command queue."""\nimport json\nimport os\nfrom pathlib import Path\nimport time\nimport uuid\n\ndef read(path,default=None):\n    try:\n        with Path(path).open(\'rb\') as stream:data=stream.read(131073)\n        if len(data)>131072:raise ValueError(\'소재 빠른 입력 파일이 너무 큽니다.\')\n        return json.loads(data)\n    except FileNotFoundError:return default\n\ndef write(path,value):\n    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)\n    temporary=path.with_name(path.name+\'.\'+uuid.uuid4().hex+\'.tmp\')\n    try:\n        with temporary.open(\'w\',encoding=\'utf8\') as stream:\n            json.dump(value,stream,ensure_ascii=False,allow_nan=False);stream.flush();os.fsync(stream.fileno())\n        os.replace(str(temporary),str(path))\n    finally:\n        try:temporary.unlink()\n        except FileNotFoundError:pass\n\ndef remove(path):\n    try:Path(path).unlink()\n    except FileNotFoundError:pass\n\nclass QuickChannel:\n    def __init__(self,manager,path):\n        self.manager=manager;self.path=Path(path);self.pending=read(path,{})\n        if not isinstance(self.pending,dict) or len(self.pending)>20:\n            raise ValueError(\'소재 빠른 입력의 확인 대기 파일을 확인해주세요.\')\n        for key,item in self.pending.items():\n            if (not isinstance(key,str) or len(key)!=32 or any(c not in \'0123456789abcdef\' for c in key)\n                    or not isinstance(item,dict) or not isinstance(item.get(\'request\'),dict)\n                    or item[\'request\'].get(\'id\')!=key or item[\'request\'].get(\'method\') not in (\'defect\',\'rotate\')\n                    or not isinstance(item[\'request\'].get(\'args\'),list) or not item[\'request\'][\'args\']\n                    or type(item[\'request\'][\'args\'][0]) is not int or not 1<=item[\'request\'][\'args\'][0]<=9):\n                raise ValueError(\'소재 빠른 입력의 확인 대기 파일이 올바르지 않습니다.\')\n        self.state={};self.checked_at=0\n    def rotation_context(self,n):\n        if not self.state.get(\'connected\') or time.monotonic()-self.checked_at>6:\n            raise ValueError(\'소재 사용량 조사 연결을 확인한 뒤 입력해주세요.\')\n        row=next(r for r in self.state[\'rows\'] if r[\'machine\']==n)\n        if row.get(\'busy\') or any(v[\'request\'][\'args\'][0]==n for v in self.pending.values()):\n            raise ValueError(\'이 호기는 저장 확인 중입니다.\')\n        if not row.get(\'can_rotate\'):raise ValueError(\'소재교체가 가능한 상태인지 확인해주세요.\')\n        return (self.state[\'owner\'],self.state[\'epoch\'],\n                *(row[\'expected\'][key] for key in (\'material\',\'next_type\',\'material_type\')),\n                row[\'expected\'].get(\'switch_revision\'))\n    def submit(self,method,n,confirmed=None):\n        if method not in (\'defect\',\'rotate\') or type(n) is not int or not 1<=n<=9:raise ValueError(\'잘못된 소재 입력입니다.\')\n        state=self.state\n        if not state.get(\'connected\') or time.monotonic()-self.checked_at>6:\n            raise ValueError(\'소재 사용량 조사 연결을 확인한 뒤 입력해주세요.\')\n        if any(v[\'request\'][\'args\'][0]==n for v in self.pending.values()):raise ValueError(\'이 호기는 저장 확인 중입니다.\')\n        if confirmed is not None and confirmed!=self.rotation_context(n):\n            raise ValueError(\'확인 중 소재 정보가 변경되었습니다. 최신 내용을 확인한 뒤 다시 눌러주세요.\')\n        row=next(r for r in state[\'rows\'] if r[\'machine\']==n)\n        token=uuid.uuid4().hex\n        request=dict(id=token,client=state[\'client\'],epoch=state[\'epoch\'],method=method,\n                     args=[n] if method==\'defect\' else [n,False],expected=row[\'expected\'],expires=state[\'at\']+30)\n        pending=dict(self.pending);pending[token]=dict(owner=state[\'owner\'],request=request)\n        if len(pending)>20:raise ValueError(\'먼저 저장 확인 대기 중인 입력을 확인해주세요.\')\n        write(self.path,pending);self.pending=pending\n        return token\n    def poll(self):\n        results=[];self.state={}\n        if \'material\' not in self.manager.running_keys():return self.state,results\n        folder,nonce=self.manager.sessions[\'material\']\n        value=read(folder/\'material-status.json\',{})\n        if not isinstance(value,dict):raise ValueError(\'소재 연결 상태 파일을 확인해주세요.\')\n        if value.get(\'nonce\')==nonce and 0<=time.time()-value.get(\'at\',0)<=7:\n            self.state=value.get(\'quick\',{})\n            self.checked_at=time.monotonic()\n        for token,item in list(self.pending.items()):\n            request_path=folder/(\'material-quick-\'+token+\'.json\')\n            response_path=folder/(\'material-result-\'+token+\'.json\')\n            response=read(response_path,{})\n            if response.get(\'nonce\')==nonce and response.get(\'id\')==token and isinstance(response.get(\'result\'),dict):\n                pending=dict(self.pending);del pending[token]\n                write(self.path,pending);self.pending=pending\n                results.append(dict(machine=item[\'request\'][\'args\'][0],method=item[\'request\'][\'method\'],result=response[\'result\']))\n                remove(request_path);remove(response_path)\n            elif not request_path.exists():\n                write(request_path,dict(nonce=nonce,**item))\n        return self.state,results\n\nclass QuickBridge:\n    def __init__(self,app,folder,nonce):\n        self.app=app;self.folder=Path(folder);self.nonce=nonce;self.inflight=set()\n        app.session.quick_active=True\n    def has_pending(self):return bool(self.inflight or next(self.folder.glob(\'material-quick-*.json\'),None))\n    def finish(self,token,result):\n        path=self.folder/(\'material-quick-\'+token+\'.json\')\n        if token not in self.inflight and not path.exists():return\n        try:\n            write(self.folder/(\'material-result-\'+token+\'.json\'),dict(nonce=self.nonce,id=token,result=result))\n            remove(path)\n        finally:self.inflight.discard(token)\n    def poll(self):\n        app=self.app\n        for path in list(self.folder.glob(\'material-quick-*.json\'))[:20]:\n            token=path.stem[len(\'material-quick-\'):]\n            if len(token)!=32 or any(c not in \'0123456789abcdef\' for c in token):continue\n            if token in self.inflight:continue\n            try:\n                item=read(path,{})\n                if item.get(\'nonce\')!=self.nonce:continue\n                r=item.get(\'request\',{})\n                if r.get(\'id\')!=token or r.get(\'method\') not in (\'defect\',\'rotate\'):\n                    raise ValueError(\'메인 화면 소재 입력 형식이 올바르지 않습니다.\')\n                args=r.get(\'args\')\n                if not isinstance(args,list) or not args or type(args[0]) is not int or not 1<=args[0]<=9:\n                    raise ValueError(\'입력 호기가 올바르지 않습니다.\')\n                if (r[\'method\']==\'defect\' and len(args)!=1) or (r[\'method\']==\'rotate\' and (len(args)!=2 or args[1] is not False)):\n                    raise ValueError(\'메인 화면 소재 입력 항목이 올바르지 않습니다.\')\n                if app.resetting or app._shutdown_started or not app.connected:continue\n                app.session.submit_request(item.get(\'owner\'),r)\n                self.inflight.add(token)\n            except (ValueError,TypeError,KeyError) as exc:self.finish(token,dict(ok=False,error=str(exc)))\n    def status(self):\n        app=self.app;session=app.session;state=app.store.state\n        connected=bool(app.connected and not app.failed_storage and not app.resetting and not app._shutdown_started\n                       and state and time.monotonic()-session.received_at<=6)\n        rows=[];busy=session.busy_machines()\n        for n in range(1,10):\n            row=app.store.snapshot(n);actions=app.action_availability(n,row)\n            rows.append(dict(machine=n,good=row[\'good\'],defects=row[\'defects\'],material_type=row[\'material_type\'],\n                next_type=row[\'next_type\'],expected=row[\'expected\'],busy=n in busy,\n                can_defect=connected and n not in busy and actions[\'defect\'],\n                can_rotate=connected and n not in busy and bool(row[\'material_type\'])\n                    and actions[\'rotate\']))\n        return dict(connected=connected,rows=rows,client=session.coordinator.settings[\'pc_id\'],\n                    owner=(session.coordinator.owner or {}).get(\'owner_id\'),epoch=state[\'epoch\'] if state else \'\',\n                    at=state[\'at\'] if state else 0)\n\nclass QuickPanel:\n    def __init__(self,app,parent,cells=None,header=None):\n        self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={};self.confirming=False\n        tk,ttk=app.tk,app.ttk\n        if cells is not None:\n            # 설비 보드형: 호기별 머신 칸 아래 자리에 같은 명령의 버튼만 배치합니다.\n            self.frame=parent;self.message=tk.StringVar(value=\'\')\n            # 저장 결과·오류 문구는 머신 칸 아래 한 줄 전체를 씁니다(width=1: 긴 문구가 배치를 밀지 않음).\n            self.caption=ttk.Label(parent,textvariable=self.message,style=\'Card.TLabel\',font=(\'맑은 고딕\',9),width=1,anchor=\'w\')\n            self.caption.grid(row=3,column=0,columnspan=5,sticky=\'ew\',pady=(8,0))\n            for name in (\'Danger\',\'Secondary\'):\n                app.style.configure(\'QuickMaterial.\'+name+\'.TButton\',padding=(4,6),font=(\'맑은 고딕\',10,\'bold\'))\n            for n in range(1,10):\n                cell=cells[n];cell.columnconfigure((0,1),weight=1,uniform=\'material-quick-\'+str(n))\n                defect=ttk.Button(cell,text=\'불량\',style=\'QuickMaterial.Danger.TButton\',width=4,\n                    command=lambda machine=n:self.submit(\'defect\',machine));defect.grid(row=0,column=0,sticky=\'ew\',padx=(0,3))\n                rotate=ttk.Button(cell,text=\'소재교체\',style=\'QuickMaterial.Secondary.TButton\',width=4,\n                    command=lambda machine=n:self.submit(\'rotate\',machine));rotate.grid(row=0,column=1,sticky=\'ew\',padx=(3,0))\n                defect.configure(state=\'disabled\');rotate.configure(state=\'disabled\')\n                self.rows[n]=dict(cell=cell,name=None,defect=defect,rotate=rotate)\n            return\n        self.frame=ttk.Frame(parent,style=\'RoundedCard.TFrame\',padding=(14,10))\n        title=ttk.Frame(self.frame,style=\'Card.TFrame\',borderwidth=0);title.grid(row=0,column=0,columnspan=9,sticky=\'ew\',pady=(0,6))\n        ttk.Label(title,text=\'소재 사용량 조사\',style=\'Section.TLabel\').pack(side=\'left\')\n        self.message=tk.StringVar(value=\'\')\n        self.caption=ttk.Label(title,textvariable=self.message,style=\'Card.TLabel\',font=(\'맑은 고딕\',9))\n        self.caption.pack(side=\'right\')\n        for name in (\'Danger\',\'Secondary\'):\n            app.style.configure(\'QuickMaterial.\'+name+\'.TButton\',padding=(4,7),font=(\'맑은 고딕\',10,\'bold\'))\n        for n in range(1,10):\n            self.frame.columnconfigure(n-1,weight=1,uniform=\'material-quick\')\n            cell=ttk.Frame(self.frame,style=\'Card.TFrame\',borderwidth=0);cell.grid(row=1,column=n-1,sticky=\'nsew\',padx=3)\n            cell.columnconfigure(0,weight=1)\n            name=ttk.Label(cell,text=str(n)+\'호기\',style=\'Card.TLabel\',font=(\'맑은 고딕\',10,\'bold\'),anchor=\'center\');name.grid(row=0,column=0,sticky=\'ew\',pady=(0,6))\n            defect=ttk.Button(cell,text=\'불량\',style=\'QuickMaterial.Danger.TButton\',width=8,\n                command=lambda machine=n:self.submit(\'defect\',machine));defect.grid(row=1,column=0,sticky=\'ew\',pady=(0,6))\n            rotate=ttk.Button(cell,text=\'소재교체\',style=\'QuickMaterial.Secondary.TButton\',width=8,\n                command=lambda machine=n:self.submit(\'rotate\',machine));rotate.grid(row=2,column=0,sticky=\'ew\')\n            defect.configure(state=\'disabled\');rotate.configure(state=\'disabled\')\n            self.rows[n]=dict(cell=cell,name=name,defect=defect,rotate=rotate)\n    def set_icons(self,images):\n        # Root-owned PNGs stay alive; native ttk retains disabled/invoke behavior.\n        for widgets in self.rows.values():\n            for action in (\'defect\',\'rotate\'):\n                widgets[action].configure(image=(images[action+\'_icon\'],\n                    \'disabled\',images[action+\'_icon_disabled\']),compound=\'left\',width=4 if widgets[\'name\'] is None else 6)\n\n    def connect(self,manager):\n        folder=Path(os.environ.get(\'LOCALAPPDATA\') or str(Path.home()/\'.local\'/\'share\'))/\'MaterialCounter\'\n        try:self.channel=QuickChannel(manager,folder/\'quick-inputs.json\')\n        except (OSError,ValueError) as exc:self.notice(str(exc),True)\n    def notice(self,message,error=False):\n        self.message.set(str(message)[:90]);self.message_until=time.monotonic()+6\n        self.caption.configure(foreground=\'#f08c9a\' if error else \'#91d8b3\')\n    def submit(self,method,n):\n        if self.channel is None or self.confirming:return\n        try:\n            confirmed=None\n            if method==\'rotate\':\n                from tkinter import messagebox\n                self.poll();confirmed=self.channel.rotation_context(n)\n                self.confirming=True\n                try:\n                    accepted=messagebox.askokcancel(\'소재교체 확인\',\n                        \'{}호기 소재를 교체할까요?\\n현재 봉의 기록을 마감하고 새 소재 재고 1봉을 차감합니다.\'.format(n),\n                        parent=self.frame.winfo_toplevel(),default=\'cancel\')\n                finally:self.confirming=False\n                if not accepted:return\n                self.poll()\n            self.channel.submit(method,n,confirmed=confirmed);self.notice(\'{}호기 저장 확인 중…\'.format(n));self.poll()\n        except (OSError,ValueError,KeyError,StopIteration) as exc:self.notice(str(exc),True)\n    def poll(self):\n        if self.channel is None:return\n        try:state,results=self.channel.poll()\n        except (OSError,ValueError,KeyError) as exc:state={};results=[];self.notice(str(exc),True)\n        for item in results:\n            r=item[\'result\'];label=\'양품 −1 / 불량 +1\' if item[\'method\']==\'defect\' else \'소재교체\'\n            self.notice(\'{}호기 {} 저장 완료\'.format(item[\'machine\'],label) if r.get(\'ok\') else \'{}호기: {}\'.format(item[\'machine\'],r.get(\'error\',\'저장 실패\')),not r.get(\'ok\'))\n        pending={v[\'request\'][\'args\'][0] for v in self.channel.pending.values()}\n        available=bool(state.get(\'connected\'))\n        mapping={r[\'machine\']:r for r in state.get(\'rows\',[])}\n        signature=(available,repr(mapping),tuple(sorted(pending)))\n        if signature!=self.signature:\n            self.signature=signature\n            for n,widgets in self.rows.items():\n                row=mapping.get(n,{});busy=n in pending or row.get(\'busy\',False)\n                for action in (\'defect\',\'rotate\'):\n                    widgets[action].configure(state=\'normal\' if available and not busy and row.get(\'can_\'+action,False) else \'disabled\')\n        if time.monotonic()>self.message_until:\n            text=\'저장 확인 대기 {}건\'.format(len(pending)) if pending else \'\'\n            self.message.set(text);self.caption.configure(foreground=\'#9fa2a7\')\n    def has_pending(self):return bool(self.channel and self.channel.pending)\n')
 
+class SingleImportPanel:
+    """하나만 가져오기: 날짜를 누르고 번호를 넣으면 그날 폴더에서 그 파일만 '파일만 가져오기'와 같은 방식으로 가져옵니다.
+
+    버튼으로 여닫는 작은 창입니다. 검색·수정·저장·검증은 run_batch(MODE_FILES)를 그대로 쓰고,
+    리스트 파일과 메인 화면의 입력(번호 목록·날짜 폴더·작업 모드)은 건드리지 않습니다.
+    """
+    BACKGROUND, FIELD, TEXT, MUTED, ACCENT, DAY, LINE = (
+        "#060b16", "#050a14", "#eaf0fc", "#9fb2d6", "#2a66f2", "#0e1a35", "#2e333d")
+    WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
+    HISTORY_LINES = 30
+
+    def __init__(self, app):
+        self.app = app
+        self.window = None
+        self.button = None
+        self.selected = single_import_default_date()
+        self.year, self.month = self.selected.year, self.selected.month
+        self.position = None
+        self.pending = None
+        self.history = []
+
+    def visible(self):
+        try:
+            return self.window is not None and bool(self.window.winfo_exists())
+        except Exception:
+            return False
+
+    def toggle(self):
+        if self.visible():
+            self.close()
+        else:
+            self.open()
+
+    def mark_button(self):
+        if self.button is None:
+            return
+        try:
+            self.button.configure(style="Open.Popup.TButton" if self.visible() else "Popup.TButton")
+        except Exception:
+            pass
+
+    def open(self):
+        if self.visible():
+            self.window.lift()
+            self.number.focus_set()
+            return
+        app, tk, ttk = self.app, self.app.tk, self.app.ttk
+        self.select(single_import_default_date(), redraw=False)      # 열 때마다 전날(월요일은 금요일)로
+        window = self.window = tk.Toplevel(app.window)
+        window.title(SINGLE_IMPORT_LABEL)
+        window.configure(background=self.BACKGROUND)
+        window.transient(app.window)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self.close)
+        frame = ttk.Frame(window, padding=14)
+        frame.pack(fill="both", expand=True)
+        header = ttk.Frame(frame)
+        header.pack(fill="x")
+        ttk.Button(header, text="◀", width=3, style="Secondary.TButton", command=lambda: self.move(-1)).pack(side="left")
+        self.heading = ttk.Label(header, font=("맑은 고딕", 11, "bold"), anchor="center")
+        self.heading.pack(side="left", expand=True, fill="x")
+        ttk.Button(header, text="▶", width=3, style="Secondary.TButton", command=lambda: self.move(1)).pack(side="left")
+        ttk.Button(header, text="전날로", style="Secondary.TButton",
+                   command=lambda: self.select(single_import_default_date())).pack(side="left", padx=(10, 0))
+        self.grid = tk.Frame(frame, background=self.BACKGROUND)
+        self.grid.pack(pady=(8, 6))
+        self.chosen_text = tk.StringVar()
+        ttk.Label(frame, textvariable=self.chosen_text, font=("맑은 고딕", 11, "bold")).pack(anchor="w")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Label(row, text="번호", style="Caption.TLabel").pack(side="left", padx=(0, 10))
+        self.number = ttk.Entry(row, width=10, font=("Consolas", 12))
+        self.number.pack(side="left", fill="x", expand=True)
+        self.fetch = ttk.Button(row, text="가져오기", style="Accent.TButton", command=self.submit)
+        self.fetch.pack(side="left", padx=(8, 0))
+        for sequence in ("<Return>", "<KP_Enter>"):
+            self.number.bind(sequence, self.submit)
+        self.status = tk.StringVar(value="번호를 넣고 Enter · 파일만 가져오고 리스트는 그대로 둡니다")
+        ttk.Label(frame, textvariable=self.status, style="Caption.TLabel").pack(anchor="w", pady=(8, 6))
+        self.listing = tk.Listbox(frame, height=4, activestyle="none", exportselection=False, font=("맑은 고딕", 9),
+                                  background=self.FIELD, foreground="#aebcd8", relief="flat", takefocus=0,
+                                  highlightthickness=1, highlightbackground=self.LINE, highlightcolor=self.LINE)
+        self.listing.pack(fill="x")
+        if self.history:
+            self.listing.insert("end", *self.history)
+        self.draw()
+        self.set_busy(app.busy)
+        self.place()
+        self.mark_button()
+        self.number.focus_set()
+
+    def place(self):
+        """처음에는 작업 기록 칸 위 오른쪽에, 옮긴 적이 있으면 마지막에 둔 자리에 엽니다."""
+        window, app = self.window, self.app
+        try:
+            window.update_idletasks()
+            if self.position is None:
+                anchor = app.log_card
+                x = anchor.winfo_rootx() + anchor.winfo_width() - window.winfo_reqwidth() - 12
+                y = anchor.winfo_rooty() + 12
+            else:
+                x, y = self.position
+            window.geometry("+{}+{}".format(max(0, int(x)), max(0, int(y))))
+        except Exception:
+            pass
+
+    def close(self):
+        if self.visible():
+            try:
+                self.position = (self.window.winfo_x(), self.window.winfo_y())
+            except Exception:
+                pass
+            self.window.destroy()
+        self.window = None
+        self.mark_button()
+
+    def move(self, delta):
+        count = self.year * 12 + self.month - 1 + delta
+        year, month = count // 12, count % 12 + 1
+        if 1 <= year <= 9999:
+            self.year, self.month = year, month
+            self.draw()
+
+    def select(self, day, redraw=True):
+        self.selected = day
+        self.year, self.month = day.year, day.month
+        if redraw and self.visible():
+            self.draw()
+            self.number.focus_set()
+
+    def draw(self):
+        tk = self.app.tk
+        self.heading.configure(text="{}년 {}월".format(self.year, self.month))
+        self.chosen_text.set("가져올 날짜  {} ({})".format(single_import_folder_text(self.selected),
+                                                       self.WEEKDAYS[self.selected.weekday()]))
+        for child in self.grid.winfo_children():
+            child.destroy()
+        for column, name in enumerate(self.WEEKDAYS):
+            tk.Label(self.grid, text=name, background=self.BACKGROUND, foreground=self.MUTED,
+                     font=("맑은 고딕", 9)).grid(row=0, column=column, pady=(0, 2))
+        today = date.today()
+        self.day_buttons = {}
+        for row, week in enumerate(calendar.Calendar(firstweekday=0).monthdayscalendar(self.year, self.month), 1):
+            for column, number in enumerate(week):
+                if not number:
+                    continue
+                day = date(self.year, self.month, number)
+                chosen = day == self.selected
+                button = tk.Button(
+                    self.grid, text=str(number), width=2, padx=4, pady=1, relief="flat", borderwidth=0, cursor="hand2",
+                    font=("맑은 고딕", 10, "bold" if chosen or day == today else "normal"),
+                    background=self.ACCENT if chosen else self.DAY,
+                    foreground="#ffffff" if chosen else "#8db3ff" if day == today else self.TEXT,
+                    activebackground="#3a75ff" if chosen else "#15264a", activeforeground="#ffffff", takefocus=0,
+                    highlightthickness=1, highlightbackground="#8db3ff" if day == today else self.DAY,
+                    command=lambda value=day: self.select(value))
+                button.grid(row=row, column=column, padx=1, pady=1)
+                self.day_buttons[day] = button
+
+    def request(self):
+        """지금 창에 적혀 있는 것(날짜, 번호 글자)."""
+        return self.selected, self.number.get().strip()
+
+    def submit(self, event=None):
+        app = self.app
+        if app.busy:
+            self.status.set("다른 작업이 끝난 뒤 다시 눌러 주세요.")
+            return "break"
+        if defer_ime_commit(self.window, self.submit):
+            return "break"
+        text = self.number.get().strip()
+        if not text:
+            self.status.set("번호를 입력해 주세요. (예: 1482)")
+            return "break"
+        try:
+            numbers = list(dict.fromkeys(parse_numbers(text)))
+        except WorkError as error:
+            app.messagebox.showerror("번호 확인", str(error), parent=self.window)
+            return "break"
+        day = self.selected
+        try:
+            roots = date_search_folders(single_import_folder_text(day), day.year, base_root=app.program_base_root)
+        except WorkError as error:
+            app.messagebox.showerror("날짜 폴더 확인", str(error), parent=self.window)
+            return "break"
+        app.start_single_import(self, day, numbers, roots)
+        return "break"
+
+    def set_busy(self, value):
+        if not self.visible():
+            return
+        try:
+            self.fetch.configure(state="disabled" if value else "normal")
+        except Exception:
+            pass
+
+    def note(self, line):
+        self.history.insert(0, line)
+        del self.history[self.HISTORY_LINES:]
+        if self.visible():
+            self.listing.delete(0, "end")
+            self.listing.insert("end", *self.history)
+
+    def finished(self, result, error):
+        """가져오기가 끝났을 때(메인 창이 부름). 못 찾은 번호는 칸에 남겨 날짜만 바꿔 다시 누를 수 있게 합니다."""
+        pending, self.pending = self.pending, None
+        if pending is None:
+            return
+        day, numbers = pending
+        label = single_import_folder_text(day)
+        if error is not None:
+            self.note("{} · {} · 중단".format(", ".join("O" + number for number in numbers), label))
+            if self.visible():
+                self.status.set("가져오지 못했습니다 · 번호와 날짜를 확인해 주세요.")
+            return
+        missing = set(result["missing_numbers"])
+        for number in numbers:
+            self.note("O{} · {} · {}".format(number, label, "못 찾음" if number in missing else "저장됨"))
+        saved = [number for number in numbers if number not in missing]
+        if self.visible():
+            self.number.delete(0, "end")
+            if missing:
+                self.number.insert(0, " ".join(number for number in numbers if number in missing))
+                self.number.select_range(0, "end")
+            self.status.set(("{} 저장됨".format(", ".join("O" + number for number in saved)) if saved else "")
+                            + (" · " if saved and missing else "")
+                            + ("{} 폴더에 없음".format(label) if missing else ""))
+        warnings = (missing_program_warnings(result["missing_numbers"], result["list_created"], result["list_number"])
+                    + result["alarms"])
+        if warnings:
+            self.app.messagebox.showwarning("프로그램 확인 필요", "\n".join(warnings),
+                                            parent=self.window if self.visible() else self.app.window)
+
+    def focus_number(self):
+        if not self.visible():
+            return False
+        try:
+            self.number.focus_set()
+        except Exception:
+            return False
+        return True
+
+
 class IntegrationApp:
     def __init__(self, window):
         import tkinter as tk
@@ -5344,7 +5602,7 @@ class IntegrationApp:
         inputs.rowconfigure(1, weight=1)
         ttk.Label(inputs, text="프로그램 번호", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 6))
-        self.number_input = tk.Text(inputs, width=12, height=8, font=("Consolas", 12), wrap="word", undo=True,
+        self.number_input = tk.Text(inputs, width=12, height=7, font=("Consolas", 12), wrap="word", undo=True,
                                     background="#050a14", foreground="#eaf0fc", insertbackground="#8db3ff",
                                     selectbackground="#1d3f86", selectforeground="#eaf0fc", relief="flat",
                                     highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2a66f2",
@@ -5362,6 +5620,12 @@ class IntegrationApp:
         self.import_button = ttk.Button(actions, text=MODE_LABELS[MODE_BOTH], command=self.start_import,
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
+        # 하나만 가져오기 창을 여닫는 버튼. 번호 칸의 요청 높이를 한 줄 줄여(8→7) 이 줄이 늘어도 창의 최소 높이는 그대로입니다.
+        self.single_import = SingleImportPanel(self)
+        self.single_import_button = ttk.Button(actions, text=SINGLE_IMPORT_LABEL, style="Popup.TButton",
+                                               command=self.single_import.toggle, takefocus=0)
+        self.single_import_button.pack(fill="x", pady=(4, 0))
+        self.single_import.button = self.single_import_button
 
         self.build_machine_board(frame)
 
@@ -6002,7 +6266,7 @@ class IntegrationApp:
             pass
         self.material_quick.set_icons(visual["images"])
         self.reserve_empty_button_width()
-        for button in self._suite_buttons.values():
+        for button in list(self._suite_buttons.values()) + [self.single_import_button]:
             button.configure(image=visual["popup_icon"], compound="right")
         self.apply_n3_marks(visual["images"])
         # Keep the wash form compact within the same card surface as other pages.
@@ -7122,6 +7386,9 @@ class IntegrationApp:
         self.folder_input.configure(state="disabled" if value or self.mode.get() == MODE_LIST else "normal")
         self.year_input.configure(state="disabled" if value or self.mode.get() == MODE_LIST else "normal")
         self.status.set(label)
+        panel = getattr(self, "single_import", None)
+        if panel is not None:
+            panel.set_busy(value)
 
     def request_ui(self, callback, *args):
         ready = threading.Event()
@@ -7198,6 +7465,40 @@ class IntegrationApp:
     def import_shortcut(self, event):
         self.start_import()
         return "break"
+
+    def start_single_import(self, panel, day, numbers, roots):
+        """하나만 가져오기 창에서: 그날 폴더의 그 번호만 '파일만 가져오기'와 같은 방식으로 가져옵니다.
+
+        리스트 파일은 만들지 않고, 메인 화면의 번호 목록·날짜 폴더·작업 모드는 읽지도 바꾸지도 않습니다.
+        """
+        self.cancel_drive_action()
+        if self.busy:
+            return
+        numbers = list(numbers)
+        list_number = self.list_number.get()
+        chooser = lambda number, paths: self.request_ui(self.choose_candidate, number, paths)
+        requested = panel.request()
+
+        def begin(destination):
+            # 드라이브 확인을 기다리는 사이 창을 닫았거나 날짜·번호를 고쳤으면 예전 요청은 실행하지 않습니다.
+            if not panel.visible() or panel.request() != requested:
+                self.status.set("입력 내용이 바뀌어 작업을 취소했습니다 · 다시 눌러 주세요.")
+                return
+            # 카드에 같은 번호의 파일이 이미 있으면(왼쪽 목록 기준) 바꾸기 전에 한 번 묻습니다.
+            existing = [path.name for path in (self.drive_item_paths or [])
+                        if filename_number(path.name) in numbers]
+            if existing and not self.messagebox.askyesno(
+                    "카드에 같은 번호가 있습니다",
+                    "카드에 이미 있는 파일: {}\n\n{} 폴더의 파일을 가져오면 같은 이름의 파일은 새 파일로 바뀝니다.\n"
+                    "가져올까요?".format(", ".join(existing), single_import_folder_text(day)),
+                    parent=panel.window, default="yes"):
+                self.status.set("가져오기를 취소했습니다.")
+                return
+            panel.pending = (day, tuple(numbers))
+            self.start_job(SINGLE_IMPORT_LABEL, lambda: run_batch(
+                roots, destination, numbers, chooser=chooser, popup=False, mode=MODE_FILES, list_number=list_number))
+
+        self.run_with_current_drive(begin)
 
     def start_empty(self):
         # 번호 처리 함수와 연결하지 않는 별도의 버튼 동작입니다.
@@ -7304,6 +7605,12 @@ class IntegrationApp:
                                 + result["alarms"])
                     if warnings:
                         self.messagebox.showwarning("프로그램 확인 필요", "\n".join(warnings), parent=self.window)
+                panel = getattr(self, "single_import", None)
+                if name == SINGLE_IMPORT_LABEL and panel is not None:
+                    # 하나만 가져오기: 메인 화면의 번호 목록은 그대로 두고, 결과는 그 창에 적습니다.
+                    panel.finished(result, error)
+                    if panel.focus_number():
+                        continue
                 if getattr(self, "active_tab", "cnc") == "cnc":
                     self.number_input.focus_set()
         self.window.after(80, self.drain_events)
@@ -7526,7 +7833,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.18.2'
+SUITE_APP_VERSION = '2026.11.23.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = _suite_load_support("jihunius_inapp_update", '"""Public GitHub update transport and local Python version selection. Python 3.8+."""\nimport ast\nimport ctypes\nfrom datetime import date\nimport hashlib\nimport json\nimport os\nfrom pathlib import Path\nimport queue\nimport re\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\nimport threading\nimport time\nimport urllib.error\nimport urllib.parse\nimport urllib.request\nimport uuid\n\nOWNER = \'corsk970119-ux\'\nREPO = \'jihunius-updates\'\nCHANNEL = \'channels/stable.json\'\nMAX_PAYLOAD = 8 * 1024 * 1024\nMAX_MANIFEST = 128 * 1024\nSHA = re.compile(r\'[0-9a-f]{64}\')\n\nclass UpdateError(Exception):\n    pass\n\ndef version(value):\n    if not isinstance(value,str) or not re.fullmatch(r\'\\d{4}\\.\\d{1,2}\\.\\d{1,2}\\.[1-9]\\d{0,5}\',value):\n        raise UpdateError(\'배포 버전 형식을 확인해 주세요.\')\n    parts=tuple(int(x) for x in value.split(\'.\'))\n    try:date(*parts[:3])\n    except ValueError:raise UpdateError(\'배포 날짜가 올바르지 않습니다.\') from None\n    return parts\n\ndef descriptor(value, require_protocol=True):\n    if not isinstance(value,dict):raise UpdateError(\'배포 정보가 올바르지 않습니다.\')\n    v=value.get(\'version\');version(v)\n    if not SHA.fullmatch(str(value.get(\'sha256\',\'\'))):raise UpdateError(\'배포 검증 값이 올바르지 않습니다.\')\n    size=value.get(\'size\')\n    if type(size) is not int or not 0 < size <= MAX_PAYLOAD:raise UpdateError(\'배포 파일 크기를 확인해 주세요.\')\n    if value.get(\'path\')!=\'releases/jihunius/{}/app.pyw\'.format(v):raise UpdateError(\'지후니우스 배포 경로가 아닙니다.\')\n    minimum=value.get(\'min_python\',[3,8])\n    if not isinstance(minimum,list) or len(minimum)!=2 or any(type(x) is not int or not 0<=x<100 for x in minimum):\n        raise UpdateError(\'실행 환경 정보가 올바르지 않습니다.\')\n    if tuple(sys.version_info[:2])<tuple(minimum):raise UpdateError(\'이 버전은 더 새로운 Python이 필요합니다.\')\n    if require_protocol and value.get(\'update_protocol\')!=1:raise UpdateError(\'현재 실행기에서 지원하지 않는 배포입니다.\')\n    result={k:value[k] for k in (\'version\',\'path\',\'sha256\',\'size\')}\n    result.update(min_python=minimum,update_protocol=value.get(\'update_protocol\',0),notes=str(value.get(\'notes\',\'\'))[:10000])\n    return result\n\ndef verify(data, value):\n    if len(data)!=value[\'size\'] or hashlib.sha256(data).hexdigest()!=value[\'sha256\']:\n        raise UpdateError(\'받은 파일의 크기 또는 검증 값이 맞지 않습니다. 기존 버전을 유지합니다.\')\n    try:compile(data,\'지후니우스.pyw\',\'exec\')\n    except (SyntaxError,ValueError,TypeError):raise UpdateError(\'받은 파일의 Python 문법을 확인하지 못했습니다.\') from None\n\ndef atomic(path, data):\n    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)\n    fd,name=tempfile.mkstemp(prefix=\'.update-\',suffix=\'.tmp\',dir=str(path.parent))\n    try:\n        with os.fdopen(fd,\'wb\') as f:f.write(data);f.flush();os.fsync(f.fileno())\n        os.replace(name,str(path))\n    finally:\n        try:os.unlink(name)\n        except FileNotFoundError:pass\n\ndef read_json(path):\n    try:\n        p=Path(path)\n        if p.stat().st_size>MAX_MANIFEST:return {}\n        value=json.loads(p.read_text(encoding=\'utf-8\'))\n        return value if isinstance(value,dict) else {}\n    except (OSError,ValueError):return {}\n\ndef write_json(path,value):\n    atomic(path,json.dumps(value,ensure_ascii=False,indent=2).encode(\'utf-8\'))\n\nclass FileLock:\n    def __init__(self,path):self.path=Path(path);self.stream=None\n    def acquire(self):\n        self.path.parent.mkdir(parents=True,exist_ok=True)\n        self.stream=self.path.open(\'a+b\');self.stream.seek(0,2)\n        if not self.stream.tell():self.stream.write(b\'0\');self.stream.flush()\n        self.stream.seek(0)\n        try:\n            if os.name==\'nt\':\n                import msvcrt\n                msvcrt.locking(self.stream.fileno(),msvcrt.LK_NBLCK,1)\n            else:\n                import fcntl\n                fcntl.flock(self.stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\n            return True\n        except OSError:self.stream.close();self.stream=None;return False\n    def release(self):\n        if self.stream is None:return\n        try:\n            self.stream.seek(0)\n            if os.name==\'nt\':\n                import msvcrt\n                msvcrt.locking(self.stream.fileno(),msvcrt.LK_UNLCK,1)\n            else:\n                import fcntl\n                fcntl.flock(self.stream.fileno(),fcntl.LOCK_UN)\n        finally:self.stream.close();self.stream=None\n\nclass NoRedirect(urllib.request.HTTPRedirectHandler):\n    def redirect_request(self,*args,**kwargs):raise UpdateError(\'배포 응답 경로가 달라 확인을 보류했습니다.\')\n\ndef public_fetch(path,maximum,seconds):\n    if not isinstance(path,str) or \'\\\\\' in path or any(x in (\'\',\'..\',\'.\') for x in path.split(\'/\')):\n        raise UpdateError(\'잘못된 배포 경로입니다.\')\n    # Public raw content avoids per-PC authentication and API rate limits.\n    url=\'https://raw.githubusercontent.com/{}/{}/main/{}\'.format(OWNER,REPO,urllib.parse.quote(path,safe=\'/\'))\n    def read():\n        request=urllib.request.Request(url,headers={\'User-Agent\':\'Jihunius-Updater/1\',\'Cache-Control\':\'no-cache\'})\n        with urllib.request.build_opener(NoRedirect()).open(request,timeout=seconds) as response:\n            if response.geturl()!=url:raise UpdateError(\'예상하지 못한 배포 응답입니다.\')\n            data=response.read(maximum+1)\n            if len(data)>maximum:raise UpdateError(\'배포 파일이 허용 크기를 초과했습니다.\')\n            return data\n    # Limit total wall time as well as socket read time. At most one fetch is in flight per UI.\n    result=queue.Queue(maxsize=1)\n    def worker():\n        try:result.put((True,read()))\n        except Exception as exc:result.put((False,exc))\n    threading.Thread(target=worker,daemon=True).start()\n    try:ok,value=result.get(timeout=seconds)\n    except queue.Empty:raise UpdateError(\'업데이트 확인 시간이 초과됐습니다. 현재 버전은 계속 사용할 수 있습니다.\') from None\n    if not ok:\n        if isinstance(value,UpdateError):raise value\n        if isinstance(value,urllib.error.HTTPError) and value.code==404:\n            raise UpdateError(\'공개 배포 정보를 아직 찾을 수 없습니다. 현재 버전은 계속 사용할 수 있습니다.\') from None\n        raise UpdateError(\'GitHub에 연결하지 못했습니다. 현재 버전은 계속 사용할 수 있습니다.\') from None\n    return value\n\ndef check_offer(current,fetch=public_fetch,rejected_sha=None):\n    try:manifest=json.loads(fetch(CHANNEL,MAX_MANIFEST,12).decode(\'utf-8-sig\'))\n    except (ValueError,UnicodeError):raise UpdateError(\'배포 목록을 읽지 못했습니다.\') from None\n    if not isinstance(manifest,dict) or manifest.get(\'schema\')!=1 or not isinstance(manifest.get(\'apps\'),dict):\n        raise UpdateError(\'배포 목록 형식을 확인해 주세요.\')\n    offered=descriptor(manifest[\'apps\'].get(\'jihunius\'),require_protocol=False)\n    if version(offered[\'version\'])<version(current[\'version\']):return {\'kind\':\'current\'}\n    if version(offered[\'version\'])==version(current[\'version\']):\n        if offered[\'sha256\']!=current[\'sha256\']:raise UpdateError(\'같은 버전의 내용이 달라 업데이트를 보류했습니다.\')\n        return {\'kind\':\'current\'}\n    offered=descriptor(offered)\n    if offered[\'sha256\']==rejected_sha:return {\'kind\':\'rejected\',\'offered\':offered}\n    return {\'kind\':\'available\',\'offered\':offered}\n\ndef embedded_version(data, fallback):\n    """A shared origin may change after the launcher was loaded by Python."""\n    values=[]\n    try:\n        for node in ast.parse(data).body:\n            if (isinstance(node,ast.Assign) and len(node.targets)==1\n                    and isinstance(node.targets[0],ast.Name) and node.targets[0].id==\'SUITE_APP_VERSION\'):\n                values.append(ast.literal_eval(node.value))\n        if len(values)>1:raise ValueError(\'duplicate version\')\n        result=values[0] if values else fallback\n        version(result)\n        return result\n    except (SyntaxError,ValueError,TypeError,UpdateError):\n        raise UpdateError(\'실행 파일에 기록된 버전을 확인하지 못했습니다.\') from None\n\nclass Store:\n    def __init__(self,root,origin,base_version):\n        self.root=Path(root);self.origin=Path(origin).resolve();self.base_version=base_version\n    def state(self):return read_json(self.root/\'state.json\')\n    def save(self,state):write_json(self.root/\'state.json\',state)\n    def path(self,value):\n        if not isinstance(value,dict) or not SHA.fullmatch(str(value.get(\'sha256\',\'\'))):raise UpdateError(\'캐시 정보가 올바르지 않습니다.\')\n        return self.root/\'versions\'/value[\'sha256\']/\'app.pyw\'\n    def valid(self,value):\n        try:\n            value=descriptor(value);p=self.path(value)\n            if p.is_symlink() or p.parent.is_symlink() or p.stat().st_size!=value[\'size\']:return None\n            verify(p.read_bytes(),value);return value\n        except (OSError,ValueError,TypeError,KeyError,UpdateError):return None\n    def prepare(self):\n        data=self.origin.read_bytes()\n        self.base_version=embedded_version(data,self.base_version)\n        base=descriptor({\'version\':self.base_version,\'path\':\'releases/jihunius/{}/app.pyw\'.format(self.base_version),\n                         \'sha256\':hashlib.sha256(data).hexdigest(),\'size\':len(data),\'min_python\':[3,8],\'update_protocol\':1})\n        verify(data,base)\n        if not self.valid(base):atomic(self.path(base),data)\n        state=self.state();current=self.valid(state.get(\'current\'));previous=self.valid(state.get(\'previous\'))\n        if current is None:current=previous\n        if current is None or version(current[\'version\'])<version(base[\'version\']):current=base\n        state.update(current=current,previous=previous,base=base)\n        self.save(state);self.cancel_request();self.prune(state)\n        return current\n    def stage(self,value,data):\n        value=descriptor(value);verify(data,value)\n        atomic(self.path(value),data)\n        return value\n    def request(self,value,nonce):\n        value=self.valid(value)\n        if value is None:raise UpdateError(\'준비된 업데이트 파일을 확인하지 못했습니다.\')\n        current=self.state().get(\'current\')\n        if version(value[\'version\'])<=version(current[\'version\']):raise UpdateError(\'더 새로운 버전만 적용할 수 있습니다.\')\n        write_json(self.root/\'request.json\',{\'nonce\':nonce,\'offered\':value})\n    def cancel_request(self):\n        try:(self.root/\'request.json\').unlink()\n        except FileNotFoundError:pass\n    def consume_request(self,nonce,returncode):\n        request=read_json(self.root/\'request.json\');self.cancel_request()\n        if returncode!=0 or request.get(\'nonce\')!=nonce:return False\n        offered=self.valid(request.get(\'offered\'));state=self.state();current=self.valid(state.get(\'current\'))\n        if offered is None or current is None or version(offered[\'version\'])<=version(current[\'version\']):return False\n        state.update(previous=current,current=offered,rejected_sha=None,trial=offered[\'sha256\'])\n        self.save(state);return True\n    def restore_failed(self,current):\n        state=self.state()\n        if state.get(\'trial\')!=current[\'sha256\']:return False\n        previous=self.valid(state.get(\'previous\'))\n        if previous is None:return False\n        state.update(current=previous,previous=None,trial=None,rejected_sha=current[\'sha256\'])\n        self.save(state);return True\n    def confirm(self,current):\n        state=self.state()\n        if state.get(\'trial\')==current[\'sha256\']:state[\'trial\']=None;self.save(state)\n    def prune(self,state):\n        keep={x[\'sha256\'] for x in (state.get(\'base\'),state.get(\'current\'),state.get(\'previous\')) if isinstance(x,dict) and SHA.fullmatch(str(x.get(\'sha256\',\'\')))}\n        for p in (self.root/\'versions\').glob(\'*\'):\n            if SHA.fullmatch(p.name) and p.name not in keep and p.is_dir() and not p.is_symlink():shutil.rmtree(p,ignore_errors=True)\n\ndef root_for(origin):\n    key=hashlib.sha256(os.path.normcase(str(Path(origin).resolve())).encode(\'utf-8\')).hexdigest()[:24]\n    return Path(os.environ.get(\'LOCALAPPDATA\') or Path.home())/\'JihuniusTools\'/\'desktop-v1\'/key\n\ndef show_message(text):\n    if os.name==\'nt\':ctypes.windll.user32.MessageBoxW(0,text,\'지후니우스 업데이트\',0x40)\n    else:print(text,file=sys.stderr)\n\ndef focus_process(pid):\n    if os.name!=\'nt\' or type(pid) is not int or pid<=0:return False\n    from ctypes import wintypes as w\n    u=ctypes.WinDLL(\'user32\',use_last_error=True);cb=ctypes.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)\n    u.EnumWindows.argtypes=[cb,w.LPARAM];u.EnumWindows.restype=w.BOOL\n    u.GetWindowThreadProcessId.argtypes=[w.HWND,ctypes.POINTER(w.DWORD)];u.GetWindowThreadProcessId.restype=w.DWORD\n    u.GetWindowTextW.argtypes=[w.HWND,w.LPWSTR,ctypes.c_int];u.GetWindowTextW.restype=ctypes.c_int\n    u.ShowWindow.argtypes=[w.HWND,ctypes.c_int];u.ShowWindow.restype=w.BOOL\n    u.SetForegroundWindow.argtypes=[w.HWND];u.SetForegroundWindow.restype=w.BOOL\n    found=[]\n    def visit(hwnd,lparam):\n        actual=w.DWORD();u.GetWindowThreadProcessId(hwnd,ctypes.byref(actual))\n        if actual.value==pid:\n            title=ctypes.create_unicode_buffer(128);u.GetWindowTextW(hwnd,title,128)\n            if title.value==\'지후니우스\':found.append(hwnd)\n        return True\n    u.EnumWindows(cb(visit),0)\n    if not found:return False\n    u.ShowWindow(found[0],9);u.SetForegroundWindow(found[0]);return True\n\ndef managed_context(app_version=None):\n    if os.environ.get(\'JIHUNIUS_UPDATE_CHILD\')!=\'1\':return None\n    origin=os.environ.get(\'JIHUNIUS_UPDATE_ORIGIN\',\'\');nonce=os.environ.get(\'JIHUNIUS_UPDATE_NONCE\',\'\')\n    if not origin or not re.fullmatch(r\'[0-9a-f]{32}\',nonce):return None\n    root=root_for(origin);session=read_json(root/\'session.json\')\n    if session.get(\'nonce\')!=nonce or session.get(\'pid\') not in (None,os.getpid()):return None\n    value=descriptor(session.get(\'current\'))\n    if Path(sys.argv[0]).resolve()!=root/\'versions\'/value[\'sha256\']/\'app.pyw\':return None\n    if app_version is not None and app_version!=value[\'version\']:\n        # Old installed launchers could pair freshly replaced shared bytes with\n        # their already-loaded version constant. Correct metadata only for these\n        # exact verified bytes, before the UI announces a version or copies origin.\n        data=Path(sys.argv[0]).read_bytes();verify(data,value)\n        if embedded_version(data,None)!=app_version:raise UpdateError(\'실행 중인 버전 정보를 확인하지 못했습니다.\')\n        state=read_json(root/\'state.json\')\n        if state.get(\'current\',{}).get(\'sha256\')!=value[\'sha256\']:\n            raise UpdateError(\'적용 버전이 변경됐습니다. 프로그램을 다시 실행해 주세요.\')\n        corrected=dict(value,version=app_version,path=\'releases/jihunius/\'+app_version+\'/app.pyw\')\n        descriptor(corrected)\n        for key in (\'current\',\'base\',\'previous\'):\n            if isinstance(state.get(key),dict) and state[key].get(\'sha256\')==value[\'sha256\']:\n                state[key]=dict(state[key],version=app_version,path=corrected[\'path\'])\n        write_json(root/\'state.json\',state)\n        session[\'current\']=corrected\n        if isinstance(state.get(\'base\'),dict):session[\'base_version\']=state[\'base\'][\'version\']\n        write_json(root/\'session.json\',session);value=corrected\n    return {\'origin\':origin,\'nonce\':nonce,\'root\':root,\'current\':value,\'base_version\':session[\'base_version\'],\n            \'supervisor_pid\':session.get(\'supervisor_pid\')}\n\ndef process_alive(pid):\n    if type(pid) is not int or pid<=0:return False\n    if os.name==\'nt\':\n        from ctypes import wintypes as w\n        kernel=ctypes.WinDLL(\'kernel32\',use_last_error=True)\n        kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE\n        kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD];kernel.WaitForSingleObject.restype=w.DWORD\n        kernel.CloseHandle.argtypes=[w.HANDLE];kernel.CloseHandle.restype=w.BOOL\n        handle=kernel.OpenProcess(0x00100000,False,pid)\n        if not handle:return False\n        try:return kernel.WaitForSingleObject(handle,0)==258\n        finally:kernel.CloseHandle(handle)\n    try:os.kill(pid,0);return True\n    except OSError:return False\n\ndef managed_lease(context):\n    lease=FileLock(context[\'root\']/\'active-app.lock\')\n    if not lease.acquire():raise UpdateError(\'이미 실행 중인 지후니우스 창을 먼저 확인해 주세요.\')\n    return lease\n\ndef native_dialog_open(root, allowed_grab=None):\n    try:\n        grabbed=root.grab_current()\n        if grabbed is not None and grabbed is not allowed_grab:return True\n        if os.name!=\'nt\':return False\n        from ctypes import wintypes as w\n        u=ctypes.WinDLL(\'user32\',use_last_error=True)\n        u.GetAncestor.argtypes=[w.HWND,w.UINT];u.GetAncestor.restype=w.HWND\n        u.IsWindowEnabled.argtypes=[w.HWND];u.IsWindowEnabled.restype=w.BOOL\n        owner=u.GetAncestor(root.winfo_id(),2)\n        return bool(owner) and not bool(u.IsWindowEnabled(owner))\n    except Exception:\n        # If the native state cannot be checked, do not assume it is safe to exit.\n        return True\n\ndef mark_ready(context):\n    if context:\n        # Older installed launchers check this marker before creating a shortcut.\n        # Keep them disabled when they start a newer cached version.\n        atomic(context[\'root\']/\'shortcut-created\',b\'disabled\')\n        write_json(context[\'root\']/\'ready.json\',{\'nonce\':context[\'nonce\']})\n\ndef launch(origin,base_version,argv=None,icon_bytes=None):\n    origin=Path(origin).resolve();store=Store(root_for(origin),origin,base_version)\n    lock=FileLock(store.root/\'instance.lock\')\n    if not lock.acquire():\n        if not focus_process(read_json(store.root/\'session.json\').get(\'pid\')):\n            show_message(\'지후니우스가 이미 실행 중입니다. 트레이 아이콘에서 열어 주세요.\')\n        return 0\n    try:\n        active=FileLock(store.root/\'active-app.lock\')\n        if not active.acquire():\n            if not focus_process(read_json(store.root/\'session.json\').get(\'pid\')):\n                show_message(\'지후니우스가 실행 중입니다. 트레이에서 열거나 완전 종료한 뒤 다시 실행하세요.\')\n            return 0\n        active.release()\n        current=store.prepare()\n        while True:\n            nonce=uuid.uuid4().hex\n            session={\'nonce\':nonce,\'current\':current,\'base_version\':store.base_version,\'supervisor_pid\':os.getpid()}\n            write_json(store.root/\'session.json\',session)\n            try:(store.root/\'ready.json\').unlink()\n            except FileNotFoundError:pass\n            environment=os.environ.copy()\n            environment.update(JIHUNIUS_UPDATE_CHILD=\'1\',JIHUNIUS_UPDATE_ORIGIN=str(origin),JIHUNIUS_UPDATE_NONCE=nonce,\n                               JIHUNIUS_LAUNCH_DIR=str(origin.parent))\n            executable=Path(sys.executable)\n            if os.name==\'nt\' and executable.with_name(\'pythonw.exe\').is_file():executable=executable.with_name(\'pythonw.exe\')\n            try:\n                process=subprocess.Popen([str(executable),str(store.path(current))]+list(argv or []),cwd=str(origin.parent),env=environment)\n            except OSError:\n                store.restore_failed(current)\n                raise UpdateError(\'프로그램을 시작하지 못했습니다. 기존 버전과 Python 설치를 확인해 주세요.\') from None\n            session[\'pid\']=process.pid;write_json(store.root/\'session.json\',session)\n            code=process.wait()\n            ready=read_json(store.root/\'ready.json\').get(\'nonce\')==nonce\n            if not ready:\n                if store.restore_failed(current):\n                    show_message(\'새 버전이 시작되지 않아 이전 버전으로 복구했습니다. 같은 파일을 다시 실행해 주세요.\')\n                else:show_message(\'지후니우스가 시작을 완료하지 못했습니다. 표시된 실행 오류를 확인해 주세요.\')\n                store.cancel_request();return code or 1\n            store.confirm(current)\n            if not store.consume_request(nonce,code):return code\n            current=store.state()[\'current\']\n    except (OSError,ValueError,UpdateError) as exc:\n        show_message(str(exc) if isinstance(exc,UpdateError) else \'업데이트 저장 공간을 확인해 주세요. 업무 파일은 변경하지 않았습니다.\')\n        return 1\n    finally:lock.release()\n\n"""Update the launch file after a managed version has reached its ready marker.\n\nConcatenated after update_engine.py. Shared-folder work runs in a bounded child\nprocess, never in Tk or the automatic GitHub check thread\'s network timeout.\n"""\nimport ast\n\nORIGIN_SYNC_SECONDS = 10\n\ndef source_version(data):\n    try:\n        values = {}\n        for node in ast.parse(data).body:\n            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):\n                name = node.targets[0].id\n                if name in (\'SUITE_APP_VERSION\', \'SUITE_UPDATE_PROTOCOL\'):\n                    if name in values: raise ValueError(\'duplicate\')\n                    values[name] = ast.literal_eval(node.value)\n        if values.get(\'SUITE_UPDATE_PROTOCOL\') != 1: raise ValueError(\'protocol\')\n        value = values[\'SUITE_APP_VERSION\']; version(value)\n        return value\n    except (SyntaxError, ValueError, TypeError, KeyError, UpdateError):\n        raise UpdateError(\'실행 파일의 버전을 확인하지 못해 교체를 보류했습니다.\') from None\n\ndef _origin_bytes(path):\n    if path.is_symlink() or not path.is_file():\n        raise UpdateError(\'실행 파일이 이동되었거나 경로가 달라 교체를 보류했습니다.\')\n    with path.open(\'rb\') as stream: data = stream.read(MAX_PAYLOAD + 1)\n    if len(data) > MAX_PAYLOAD: raise UpdateError(\'실행 파일 크기가 달라 교체를 보류했습니다.\')\n    return data\n\ndef _origin_atomic(path, data, temporary, before_replace=None):\n    if temporary.is_symlink() or (temporary.exists() and not temporary.is_file()):\n        raise UpdateError(\'실행 파일의 임시 저장 경로를 확인해 주세요.\')\n    try:\n        with temporary.open(\'wb\') as stream:\n            stream.write(data); stream.flush(); os.fsync(stream.fileno())\n        if os.name != \'nt\' and path.exists(): os.chmod(temporary, path.stat().st_mode & 0o777)\n        if temporary.read_bytes() != data: raise UpdateError(\'실행 파일 복사 검증에 실패했습니다.\')\n        if before_replace is not None: before_replace()\n        os.replace(str(temporary), str(path))\n    finally:\n        try: temporary.unlink()\n        except FileNotFoundError: pass\n\ndef replace_origin(origin, candidate, payload, known_hashes):\n    candidate = descriptor(candidate); verify(payload, candidate)\n    if source_version(payload) != candidate[\'version\']:\n        raise UpdateError(\'실행 파일과 배포 버전이 달라 교체를 보류했습니다.\')\n    origin = Path(origin)\n    if not origin.is_absolute(): raise UpdateError(\'실행 파일의 전체 경로를 확인해 주세요.\')\n    if origin.is_symlink() or not origin.is_file():\n        raise UpdateError(\'실행 파일이 이동되어 원본 교체를 보류했습니다.\')\n    lock = FileLock(origin.with_name(\'.\' + origin.name + \'.update.lock\'))\n    if not lock.acquire():\n        return {\'kind\': \'busy\', \'message\': \'원본 교체 대기: 다른 PC에서 교체 중입니다. 다시 확인을 눌러 주세요.\'}\n    try:\n        old = _origin_bytes(origin); old_version = source_version(old)\n        if old == payload:\n            return {\'kind\': \'current\', \'message\': \'실행 경로의 원본 파일도 최신 버전입니다.\'}\n        if version(old_version) > version(candidate[\'version\']):\n            return {\'kind\': \'newer\', \'message\': \'공유 원본은 더 새 버전입니다. 다시 실행하면 적용됩니다.\'}\n        if version(old_version) == version(candidate[\'version\']) or hashlib.sha256(old).hexdigest() not in known_hashes:\n            raise UpdateError(\'원본 파일이 다른 내용으로 변경되어 교체를 보류했습니다. 완전 종료 후 다시 실행해 주세요.\')\n        backup = origin.with_name(\'.\' + origin.name + \'.previous\')\n        if backup.exists() or backup.is_symlink(): source_version(_origin_bytes(backup))\n        _origin_atomic(backup, old, backup.with_name(backup.name + \'.tmp\'))\n        def unchanged():\n            if _origin_bytes(origin) != old:\n                raise UpdateError(\'교체 중 원본이 변경되어 기존 파일을 보존했습니다.\')\n        _origin_atomic(origin, payload, origin.with_name(\'.\' + origin.name + \'.update.tmp\'), unchanged)\n        verify(_origin_bytes(origin), candidate)\n        return {\'kind\': \'updated\', \'message\': \'실행 경로의 원본 파일도 최신 버전으로 교체했습니다.\'}\n    finally:\n        lock.release()\n\ndef origin_worker(source):\n    try:\n        request = json.loads(sys.stdin.buffer.read(MAX_MANIFEST + 1))\n        context = request[\'context\']; current = descriptor(context[\'current\'])\n        root = Path(context[\'root\']); origin = Path(context[\'origin\'])\n        if root != root_for(origin): raise UpdateError(\'원본 교체의 실행 경로를 확인하지 못했습니다.\')\n        session = read_json(root/\'session.json\'); ready = read_json(root/\'ready.json\')\n        if (session.get(\'nonce\') != context[\'nonce\'] or ready.get(\'nonce\') != context[\'nonce\']\n                or session.get(\'pid\') != request[\'pid\'] or not process_alive(request[\'pid\'])\n                or session.get(\'current\', {}).get(\'sha256\') != current[\'sha256\']):\n            raise UpdateError(\'새 버전 시작 확인이 끝나지 않아 원본 교체를 보류했습니다.\')\n        expected = root/\'versions\'/current[\'sha256\']/\'app.pyw\'\n        if Path(source).resolve() != expected.resolve(): raise UpdateError(\'원본 교체용 실행 파일 경로가 다릅니다.\')\n        state = read_json(root/\'state.json\')\n        if state.get(\'current\', {}).get(\'sha256\') != current[\'sha256\']:\n            raise UpdateError(\'적용된 버전이 달라 원본 교체를 보류했습니다.\')\n        known = [v.get(\'sha256\') for v in (state.get(\'base\'), state.get(\'previous\'), state.get(\'current\')) if isinstance(v, dict)]\n        result = replace_origin(origin, current, _origin_bytes(expected), known)\n    except Exception as exc:\n        result = {\'kind\': \'failed\', \'message\': \'원본 교체 보류: \' + (str(exc) if isinstance(exc, UpdateError)\n                  else \'공유폴더 연결·쓰기 권한을 확인하고 다시 확인을 눌러 주세요. 이 PC의 적용 버전은 유지됩니다.\')}\n    print(json.dumps(result, ensure_ascii=True), flush=True)\n\n_ORIGIN_BOOTSTRAP = \'\'\'import ast,sys\nfrom pathlib import Path\ndata=Path(sys.argv[1]).read_bytes()\nif len(data)>8*1024*1024:raise ValueError(\'size\')\nfor n in ast.parse(data).body:\n if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and n.targets[0].id==\'SuiteUpdater\':\n  source=ast.literal_eval(n.value.args[1]);break\nelse:raise ValueError(\'updater missing\')\nscope={\'__name__\':\'jihunius_origin_worker\'}\nexec(compile(source,\'jihunius_origin_worker\',\'exec\'),scope)\nscope[\'origin_worker\'](sys.argv[1])\n\'\'\'\n\ndef sync_origin_bounded(context):\n    process = None\n    try:\n        current = descriptor(context[\'current\']); root = Path(context[\'root\'])\n        source = root/\'versions\'/current[\'sha256\']/\'app.pyw\'\n        verify(source.read_bytes(), current)\n        executable = Path(sys.executable)\n        if os.name == \'nt\' and executable.with_name(\'python.exe\').is_file(): executable = executable.with_name(\'python.exe\')\n        request = {\'context\': {key: str(context[key]) if key in (\'root\', \'origin\') else context[key]\n                              for key in (\'root\', \'origin\', \'nonce\', \'current\')}, \'pid\': os.getpid()}\n        options = {\'creationflags\': 0x08000000} if os.name == \'nt\' else {}\n        process = subprocess.Popen([str(executable), \'-c\', _ORIGIN_BOOTSTRAP, str(source)],\n            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(root), **options)\n        output, error = process.communicate(json.dumps(request).encode(\'utf-8\'), timeout=ORIGIN_SYNC_SECONDS)\n        if process.returncode or len(output) > 16384: raise ValueError(\'worker failed\')\n        result = json.loads(output)\n        if not isinstance(result, dict) or result.get(\'kind\') not in (\'current\',\'updated\',\'newer\',\'busy\',\'failed\'):\n            raise ValueError(\'worker response\')\n        return result\n    except subprocess.TimeoutExpired:\n        process.kill()\n        try: process.communicate(timeout=1)\n        except subprocess.TimeoutExpired: pass\n        return {\'kind\': \'failed\', \'message\': \'원본 교체 확인 시간이 초과됐습니다. 이 PC의 적용 버전은 유지됩니다. 다시 확인을 눌러 주세요.\'}\n    except Exception:\n        return {\'kind\': \'failed\', \'message\': \'원본 교체를 확인하지 못했습니다. 이 PC의 적용 버전은 유지됩니다. 다시 확인을 눌러 주세요.\'}\n\n"""In-app controls. Concatenated with engine.py by the distribution builder."""\nimport queue\nimport threading\nimport time\n\nAUTO_CHECK_SECONDS = 60\n\ndef block_reason(app, update_window=None, allow_companions=False):\n    if \'native_dialog_open\' in globals() and native_dialog_open(app.window,update_window):\n        return \'파일 선택 또는 확인 창을 먼저 닫은 뒤 다시 눌러 주세요.\'\n    if getattr(getattr(app,\'wash_app\',None),\'busy\',False):\n        return \'세척완료 작업 중입니다. 작업이 끝난 뒤 다시 눌러 주세요.\'\n    if getattr(app,\'busy\',False) or getattr(app,\'card_modifier_pending\',False):\n        return \'파일 작업 중입니다. 작업이 끝난 뒤 다시 눌러 주세요.\'\n    if getattr(app,\'handover_writing\',False) or getattr(app,\'handover_dialog\',None) is not None:\n        return \'인수인계 내용을 저장하고 창을 닫은 뒤 다시 눌러 주세요.\'\n    stl=getattr(app,\'stl_app\',None)\n    worker=getattr(stl,\'worker\',None)\n    if getattr(stl,\'busy\',False) is True or (worker is not None and worker.is_alive()):\n        return \'STL 검색 중입니다. 검색이 끝난 뒤 다시 눌러 주세요.\'\n    if not allow_companions and app._suite_children.running_keys():\n        return \'보조창을 저장하고 닫은 뒤 다시 눌러 주세요.\'\n    if getattr(app,\'_suite_exit_pending\',False):return \'종료 처리가 진행 중입니다.\'\n    if app.number_input.get(\'1.0\',\'end-1c\').strip():\n        return \'프로그램 번호 입력 내용이 남아 있습니다. 필요한 내용을 보관하고 입력칸을 비운 뒤 다시 눌러 주세요.\'\n    stl_input=getattr(stl,\'input\',None)\n    if stl_input is not None and stl_input.get(\'1.0\',\'end-1c\').strip():\n        return \'STL 주문 입력 내용이 남아 있습니다. 내용을 보관하고 입력칸을 비운 뒤 다시 눌러 주세요.\'\n    for window in app.window.winfo_children():\n        if window is not update_window and window.winfo_class()==\'Toplevel\' and window.winfo_exists():\n            return \'열린 설정·입력 창을 먼저 닫아 주세요.\'\n    return \'\'\n\nclass Controller:\n    def __init__(self,app,context,app_version):\n        self.app=app;self.root=app.window;self.context=context;self.app_version=app_version\n        self.current=context[\'current\'] if context else None\n        self.store=Store(context[\'root\'],context[\'origin\'],context[\'base_version\']) if context else None\n        self.events=queue.Queue(maxsize=4);self.busy=False;self.closed=False;self.last_check=None\n        self.last_check_completed=None;self.last_check_succeeded=None\n        self.dialog=None;self.offered=None;self.staged=None;self.applying=False;self.timer=None;self.check_timer=None\n        self.save_timer=None\n        self.origin_checked=False;self.origin_result=None\n        self._download_apply=False\n        self.message=\'시작할 때와 실행 중 1분마다 새 버전을 자동 확인합니다.\'\n        if self.current is None:\n            self.message=\'자동 업데이트 실행기 연결을 확인하지 못했습니다. 트레이 메뉴에서 완전 종료한 뒤 원래 지후니우스.pyw 파일을 다시 실행해 주세요.\'\n        self.label=app.tk.StringVar(value=\'업데이트\' if self.current is not None else \'자동 확인 꺼짐\')\n        self.button=app.ttk.Button(getattr(app,\'header_actions\',app.title_label.master),textvariable=self.label,style=\'Popup.TButton\',command=self.open)\n        self.button.pack(side=\'right\',padx=(12,0))\n        self._restore=app.restore_from_tray\n        def restore(cancel_exit=True):\n            self._restore(cancel_exit=cancel_exit)\n            self.check()\n        app.restore_from_tray=restore\n        self._exit=app.request_complete_exit\n        def complete_exit():\n            if self.applying:\n                self.message=\'업데이트 전 저장 중입니다. 업데이트 창을 닫아 취소한 뒤 종료해 주세요.\'\n                self.open();self.refresh();return\n            self._exit()\n        app.request_complete_exit=complete_exit\n        self._finish=app._finish_suite_shutdown\n        def finish():\n            if self.applying:\n                reason=block_reason(app,self.dialog)\n                if reason:self.abort_apply(reason);return\n                try:self.store.request(self.staged,self.context[\'nonce\'])\n                except Exception:\n                    self.abort_apply(\'업데이트 적용 요청을 저장하지 못했습니다. 현재 프로그램을 유지합니다.\');return\n            try:self._finish()\n            except Exception:\n                if self.applying:\n                    self.store.cancel_request();self.abort_apply(\'종료하지 못했습니다. 현재 프로그램을 유지합니다.\')\n                raise\n            if app._suite_stopped:\n                self.closed=True\n                for name in (\'timer\',\'check_timer\',\'save_timer\'):\n                    timer=getattr(self,name)\n                    if timer is not None:\n                        try:self.root.after_cancel(timer)\n                        except app.tk.TclError:pass\n                        setattr(self,name,None)\n            elif self.applying:\n                self.store.cancel_request();self.abort_apply(\'종료 조건이 바뀌어 업데이트를 보류했습니다.\')\n        app._finish_suite_shutdown=finish\n        self.schedule_check(500)\n\n    def schedule_check(self,delay_ms=AUTO_CHECK_SECONDS*1000):\n        if self.check_timer is not None:\n            try:self.root.after_cancel(self.check_timer)\n            except self.app.tk.TclError:pass\n            self.check_timer=None\n        if not self.closed and self.current is not None:\n            self.check_timer=self.root.after(delay_ms,self.auto_check)\n\n    def auto_check(self):\n        self.check_timer=None\n        if self.closed:return\n        if not self.check():self.schedule_check()\n\n    def task(self,kind,action):\n        if self.busy or self.closed:return False\n        self.busy=True;self.refresh()\n        def worker():\n            try:self.events.put((kind,True,action()))\n            except Exception as exc:\n                import sys\n                diagnostics=sys.modules.get(\'jihunius_error_history\')\n                if diagnostics is not None:diagnostics.capture(exc,feature=\'업데이트\',stage=kind)\n                msg=str(exc) if isinstance(exc,UpdateError) else \'업데이트 처리에 실패했습니다. 기존 버전은 계속 사용할 수 있습니다.\'\n                self.events.put((kind,False,msg))\n        threading.Thread(target=worker,daemon=True).start()\n        self.timer=self.root.after(100,self.poll)\n        return True\n\n    def check(self,force=False):\n        if self.closed or self.busy or self.applying or self.current is None:return False\n        if not force and self.last_check is not None and time.monotonic()-self.last_check<AUTO_CHECK_SECONDS:return False\n        if force:self.origin_checked=False\n        self.last_check=time.monotonic();self.message=\'새 버전을 확인하고 있습니다…\'\n        if not self.offered:self.label.set(\'업데이트 확인 중\')\n        started=self.task(\'check\',lambda:check_offer(self.current,rejected_sha=self.store.state().get(\'rejected_sha\')))\n        if started:self.schedule_check()\n        return started\n\n    def sync_origin(self):\n        action=globals().get(\'sync_origin_bounded\')\n        if self.origin_checked or self.current is None or self.context is None or not callable(action):return\n        if self.closed or self.busy or self.applying:return\n        self.origin_checked=True\n        self.task(\'origin\',lambda:action(self.context))\n\n    def poll(self):\n        self.timer=None\n        if self.closed:return\n        try:kind,ok,value=self.events.get_nowait()\n        except queue.Empty:\n            if self.busy:self.timer=self.root.after(100,self.poll)\n            return\n        self.busy=False\n        if kind==\'check\':\n            self.last_check_completed=time.strftime(\'%m-%d %H:%M:%S\')\n            self.last_check_succeeded=ok\n        if not ok:\n            self.message=value\n            self.label.set(\'새 버전 있음\' if self.offered else \'확인 실패\')\n        elif kind==\'check\':\n            if value[\'kind\']==\'available\':\n                self.offered=value[\'offered\'];self.label.set(\'새 버전 있음\')\n                self.message=\'새 버전이 있습니다. 변경 내용을 확인하고 적용해 주세요.\'\n            elif value[\'kind\']==\'rejected\':\n                self.offered=None;self.label.set(\'업데이트\')\n                self.message=\'시작에 실패해 복구한 버전입니다. 수정된 새 배포를 기다립니다.\'\n            else:\n                self.offered=None;self.label.set(\'업데이트\');self.message=\'현재 사용할 수 있는 최신 버전입니다.\'\n        elif kind==\'origin\':\n            self.origin_result=value\n            if not self.offered:self.label.set(\'업데이트\')\n        elif kind==\'download\':\n            self.staged=value;self.message=\'새 버전 검증을 마쳤습니다.\'\n            resume=self._download_apply;self._download_apply=False\n            self.refresh()\n            if resume:self.apply()\n            return\n        self.refresh()\n        if kind==\'check\':self.sync_origin()\n\n    def open(self):\n        if self.closed:return\n        if self.dialog is not None and self.dialog.winfo_exists():\n            self.dialog.deiconify();self.dialog.lift();return\n        tk,ttk=self.app.tk,self.app.ttk\n        dialog=tk.Toplevel(self.root);self.dialog=dialog\n        dialog.title(\'지후니우스 업데이트\');dialog.configure(bg=\'#060b16\')\n        dialog.geometry(\'640x460\');dialog.minsize(560,430)\n        dialog.transient(self.root);dialog.protocol(\'WM_DELETE_WINDOW\',self.close_dialog)\n        frame=ttk.Frame(dialog,padding=22);frame.pack(fill=\'both\',expand=True)\n        frame.columnconfigure(0,weight=1);frame.rowconfigure(2,weight=1)\n        ttk.Label(frame,text=\'지후니우스 업데이트\',style=\'Title.TLabel\').grid(row=0,column=0,sticky=\'w\',pady=(0,12))\n        self.versions=tk.StringVar();ttk.Label(frame,textvariable=self.versions).grid(row=1,column=0,sticky=\'w\',pady=(0,10))\n        self.notes=tk.Text(frame,height=8,wrap=\'word\',bg=\'#0a1224\',fg=\'#e6edf5\',relief=\'flat\',padx=12,pady=12,\n                           font=(\'맑은 고딕\',10),highlightthickness=0)\n        self.notes.grid(row=2,column=0,sticky=\'nsew\')\n        self.status=tk.StringVar();ttk.Label(frame,textvariable=self.status,wraplength=585,justify=\'left\').grid(row=3,column=0,sticky=\'ew\',pady=(12,10))\n        controls=ttk.Frame(frame);controls.grid(row=4,column=0,sticky=\'ew\')\n        self.check_button=ttk.Button(controls,text=\'다시 확인\',style=\'Popup.TButton\',command=lambda:self.check(force=True));self.check_button.pack(side=\'left\')\n        self.apply_button=ttk.Button(controls,text=\'업데이트 후 다시 시작\',style=\'Selected.Mode.TButton\',command=self.apply);self.apply_button.pack(side=\'right\')\n        dialog.bind(\'<Configure>\',lambda event:self.status_label_wrap(frame),add=\'+\')\n        self.refresh()\n\n    def status_label_wrap(self,frame):\n        # Fixed initial size is ample; resize only the line wrapping, never poll layout.\n        for widget in frame.grid_slaves(row=3,column=0):widget.configure(wraplength=max(300,frame.winfo_width()-44))\n\n    def close_dialog(self):\n        self._download_apply=False\n        if self.applying:\n            self.abort_apply(\'업데이트를 취소했습니다. 현재 버전을 계속 사용할 수 있습니다.\')\n            return\n        if self.dialog is not None:self.dialog.destroy();self.dialog=None\n\n    def refresh(self):\n        if self.closed:return\n        origin_pending=self.origin_result is not None and self.origin_result.get(\'kind\') in (\'failed\',\'busy\',\'newer\')\n        self.button.configure(style=\'HandoverNotice.TButton\' if self.offered or origin_pending else \'Popup.TButton\')\n        if self.offered:self.label.set(\'새 버전 있음\')\n        elif origin_pending:self.label.set(\'원본 교체 확인\')\n        if self.dialog is None or not self.dialog.winfo_exists():return\n        current=self.current[\'version\'] if self.current else self.app_version\n        if self.current is None:\n            checked=\'자동 확인 꺼짐 · 원래 실행 파일로 다시 실행해 주세요.\'\n        elif self.last_check_completed is None:\n            checked=\'첫 확인 대기 중 · 실행 중 1분마다 자동 확인\'\n        else:\n            checked=\'마지막 확인 \'+self.last_check_completed+(\' · 성공\' if self.last_check_succeeded else \' · 실패\')+\' · 1분마다 자동 확인\'\n        self.versions.set(\'현재 \'+current+(\'   →   새 버전 \'+self.offered[\'version\'] if self.offered else \'\')+\'\\n\'+checked)\n        notes=self.offered.get(\'notes\',\'\') if self.offered else \'\'\n        text=notes or (\'변경 내용이 등록되지 않았습니다.\' if self.offered else \'새 버전이 있으면 변경 내용과 사용 안내가 여기에 표시됩니다.\')\n        if self.notes.get(\'1.0\',\'end-1c\')!=text:\n            self.notes.configure(state=\'normal\');self.notes.delete(\'1.0\',\'end\');self.notes.insert(\'1.0\',text);self.notes.configure(state=\'disabled\')\n        origin_note=self.origin_result.get(\'message\',\'\') if self.origin_result else \'\'\n        self.status.set(self.message+(\'\\n\'+origin_note if origin_note else \'\'))\n        self.check_button.configure(state=\'disabled\' if self.busy or self.applying or self.current is None else \'normal\')\n        self.apply_button.configure(state=\'normal\' if self.offered and not self.busy and not self.applying else \'disabled\')\n\n    def apply(self):\n        if self.closed or self.busy or self.applying or not self.offered or self.context is None:return\n        if not process_alive(self.context.get(\'supervisor_pid\')):\n            self.message=\'재시작 실행기 연결이 종료됐습니다. 지후니우스를 완전 종료하고 기존 실행 파일을 다시 열어 주세요.\'\n            self.refresh();return\n        reason=block_reason(self.app,self.dialog,allow_companions=True)\n        if reason:self.message=reason;self.refresh();return\n        if self.staged is None or self.staged[\'sha256\']!=self.offered[\'sha256\']:\n            offered=dict(self.offered);self.message=\'새 버전을 내려받고 검증하고 있습니다…\'\n            self._download_apply=True\n            self.task(\'download\',lambda:self.store.stage(offered,public_fetch(offered[\'path\'],offered[\'size\'],20)))\n            return\n        self.open()\n        self.applying=True;self.message=\'열린 보조창을 저장하고 있습니다…\';self.refresh()\n        self.dialog.grab_set()\n        try:self.app._suite_children.begin_update_save()\n        except Exception as exc:self.abort_apply(str(exc));return\n        self.save_timer=self.root.after(100,self.poll_companion_save)\n\n    def abort_apply(self,message):\n        import sys\n        diagnostics=sys.modules.get(\'jihunius_error_history\')\n        if diagnostics is not None:diagnostics.capture(message,feature=\'업데이트\',stage=\'적용 전 저장/종료\')\n        self._download_apply=False\n        self.app._suite_children.cancel_update_save()\n        if self.save_timer is not None:\n            try:self.root.after_cancel(self.save_timer)\n            except self.app.tk.TclError:pass\n            self.save_timer=None\n        if self.dialog is not None and self.dialog.winfo_exists():self.dialog.grab_release()\n        self.applying=False;self.message=message;self.refresh()\n\n    def poll_companion_save(self):\n        self.save_timer=None\n        if self.closed or not self.applying:return\n        reason=block_reason(self.app,self.dialog,allow_companions=True)\n        if reason:self.abort_apply(reason);return\n        try:done=self.app._suite_children.poll_update_save()\n        except Exception as exc:self.abort_apply(str(exc));return\n        if done:\n            self.message=\'저장을 확인했습니다. 업데이트 후 다시 시작합니다…\';self.refresh()\n            self.app._finish_suite_shutdown()\n        else:self.save_timer=self.root.after(100,self.poll_companion_save)\n\ndef attach(app,context,app_version,icon_bytes=None):\n    controller=Controller(app,context,app_version)\n    app.updates=controller\n    return controller\n')
 def main():

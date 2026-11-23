@@ -55,9 +55,10 @@ Windows가 관리하는 System Volume Information / $RECYCLE.BIN은 제외합니
 수정은 저장할 복사본에만 적용하고, 선택한 모드의 저장 결과를 검증합니다.
 """
 
+import calendar
 import ctypes
 from contextlib import contextmanager, redirect_stdout
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import errno
 import hashlib
 import http.client
@@ -105,6 +106,9 @@ MODE_DESCRIPTIONS = {
     MODE_LIST: "날짜 폴더 지정 없이 입력한 번호로 {list_name}만 만듭니다.",
     MODE_BOTH: "지정한 날짜 폴더에서 파일을 가져와 수정하고, 모든 입력 번호로 {list_name} 리스트를 만듭니다.",
 }
+# 하나만 가져오기(사용자 요청 2026-11-23): '파일만 가져오기 + 날짜 폴더'와 같은 동작을 따로 여닫는 작은 창에서.
+# 전날 파일을 번호 하나씩 가져올 때 메인 화면의 번호 목록·날짜·작업 모드를 건드리지 않게 합니다.
+SINGLE_IMPORT_LABEL = "하나만 가져오기"
 SYSTEM_FOLDERS = {"system volume information", "$recycle.bin"}
 CARD_MODIFIER_FILENAME = "수정10.30.py"
 # 별도 보조 파일 없이 카드에 배치할 독립 실행 스크립트입니다. 실행하지 않고 복사만 합니다.
@@ -1213,6 +1217,17 @@ def save_program_base_root(value):
             try: temporary.unlink()
             except FileNotFoundError: pass
     return value
+
+
+def single_import_default_date(today=None):
+    """하나만 가져오기 창의 기본 날짜: 하루 전날, 월요일에는 그 전주 금요일."""
+    today = date.today() if today is None else today
+    return today - timedelta(days=3 if today.weekday() == 0 else 1)
+
+
+def single_import_folder_text(day):
+    """달력에서 고른 날짜를 메인 화면의 날짜 폴더 칸과 같은 표기로(예: 11.03)."""
+    return "{}.{:02d}".format(day.month, day.day)
 
 
 def year_search_root(year=PROGRAM_YEAR, base_root=None):
@@ -3176,6 +3191,249 @@ SuiteErrors = ...  # build: tools/build_app.py
 
 SuiteMaterialQuick = ...  # build: tools/build_app.py
 
+class SingleImportPanel:
+    """하나만 가져오기: 날짜를 누르고 번호를 넣으면 그날 폴더에서 그 파일만 '파일만 가져오기'와 같은 방식으로 가져옵니다.
+
+    버튼으로 여닫는 작은 창입니다. 검색·수정·저장·검증은 run_batch(MODE_FILES)를 그대로 쓰고,
+    리스트 파일과 메인 화면의 입력(번호 목록·날짜 폴더·작업 모드)은 건드리지 않습니다.
+    """
+    BACKGROUND, FIELD, TEXT, MUTED, ACCENT, DAY, LINE = (
+        "#060b16", "#050a14", "#eaf0fc", "#9fb2d6", "#2a66f2", "#0e1a35", "#2e333d")
+    WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
+    HISTORY_LINES = 30
+
+    def __init__(self, app):
+        self.app = app
+        self.window = None
+        self.button = None
+        self.selected = single_import_default_date()
+        self.year, self.month = self.selected.year, self.selected.month
+        self.position = None
+        self.pending = None
+        self.history = []
+
+    def visible(self):
+        try:
+            return self.window is not None and bool(self.window.winfo_exists())
+        except Exception:
+            return False
+
+    def toggle(self):
+        if self.visible():
+            self.close()
+        else:
+            self.open()
+
+    def mark_button(self):
+        if self.button is None:
+            return
+        try:
+            self.button.configure(style="Open.Popup.TButton" if self.visible() else "Popup.TButton")
+        except Exception:
+            pass
+
+    def open(self):
+        if self.visible():
+            self.window.lift()
+            self.number.focus_set()
+            return
+        app, tk, ttk = self.app, self.app.tk, self.app.ttk
+        self.select(single_import_default_date(), redraw=False)      # 열 때마다 전날(월요일은 금요일)로
+        window = self.window = tk.Toplevel(app.window)
+        window.title(SINGLE_IMPORT_LABEL)
+        window.configure(background=self.BACKGROUND)
+        window.transient(app.window)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self.close)
+        frame = ttk.Frame(window, padding=14)
+        frame.pack(fill="both", expand=True)
+        header = ttk.Frame(frame)
+        header.pack(fill="x")
+        ttk.Button(header, text="◀", width=3, style="Secondary.TButton", command=lambda: self.move(-1)).pack(side="left")
+        self.heading = ttk.Label(header, font=("맑은 고딕", 11, "bold"), anchor="center")
+        self.heading.pack(side="left", expand=True, fill="x")
+        ttk.Button(header, text="▶", width=3, style="Secondary.TButton", command=lambda: self.move(1)).pack(side="left")
+        ttk.Button(header, text="전날로", style="Secondary.TButton",
+                   command=lambda: self.select(single_import_default_date())).pack(side="left", padx=(10, 0))
+        self.grid = tk.Frame(frame, background=self.BACKGROUND)
+        self.grid.pack(pady=(8, 6))
+        self.chosen_text = tk.StringVar()
+        ttk.Label(frame, textvariable=self.chosen_text, font=("맑은 고딕", 11, "bold")).pack(anchor="w")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Label(row, text="번호", style="Caption.TLabel").pack(side="left", padx=(0, 10))
+        self.number = ttk.Entry(row, width=10, font=("Consolas", 12))
+        self.number.pack(side="left", fill="x", expand=True)
+        self.fetch = ttk.Button(row, text="가져오기", style="Accent.TButton", command=self.submit)
+        self.fetch.pack(side="left", padx=(8, 0))
+        for sequence in ("<Return>", "<KP_Enter>"):
+            self.number.bind(sequence, self.submit)
+        self.status = tk.StringVar(value="번호를 넣고 Enter · 파일만 가져오고 리스트는 그대로 둡니다")
+        ttk.Label(frame, textvariable=self.status, style="Caption.TLabel").pack(anchor="w", pady=(8, 6))
+        self.listing = tk.Listbox(frame, height=4, activestyle="none", exportselection=False, font=("맑은 고딕", 9),
+                                  background=self.FIELD, foreground="#aebcd8", relief="flat", takefocus=0,
+                                  highlightthickness=1, highlightbackground=self.LINE, highlightcolor=self.LINE)
+        self.listing.pack(fill="x")
+        if self.history:
+            self.listing.insert("end", *self.history)
+        self.draw()
+        self.set_busy(app.busy)
+        self.place()
+        self.mark_button()
+        self.number.focus_set()
+
+    def place(self):
+        """처음에는 작업 기록 칸 위 오른쪽에, 옮긴 적이 있으면 마지막에 둔 자리에 엽니다."""
+        window, app = self.window, self.app
+        try:
+            window.update_idletasks()
+            if self.position is None:
+                anchor = app.log_card
+                x = anchor.winfo_rootx() + anchor.winfo_width() - window.winfo_reqwidth() - 12
+                y = anchor.winfo_rooty() + 12
+            else:
+                x, y = self.position
+            window.geometry("+{}+{}".format(max(0, int(x)), max(0, int(y))))
+        except Exception:
+            pass
+
+    def close(self):
+        if self.visible():
+            try:
+                self.position = (self.window.winfo_x(), self.window.winfo_y())
+            except Exception:
+                pass
+            self.window.destroy()
+        self.window = None
+        self.mark_button()
+
+    def move(self, delta):
+        count = self.year * 12 + self.month - 1 + delta
+        year, month = count // 12, count % 12 + 1
+        if 1 <= year <= 9999:
+            self.year, self.month = year, month
+            self.draw()
+
+    def select(self, day, redraw=True):
+        self.selected = day
+        self.year, self.month = day.year, day.month
+        if redraw and self.visible():
+            self.draw()
+            self.number.focus_set()
+
+    def draw(self):
+        tk = self.app.tk
+        self.heading.configure(text="{}년 {}월".format(self.year, self.month))
+        self.chosen_text.set("가져올 날짜  {} ({})".format(single_import_folder_text(self.selected),
+                                                       self.WEEKDAYS[self.selected.weekday()]))
+        for child in self.grid.winfo_children():
+            child.destroy()
+        for column, name in enumerate(self.WEEKDAYS):
+            tk.Label(self.grid, text=name, background=self.BACKGROUND, foreground=self.MUTED,
+                     font=("맑은 고딕", 9)).grid(row=0, column=column, pady=(0, 2))
+        today = date.today()
+        self.day_buttons = {}
+        for row, week in enumerate(calendar.Calendar(firstweekday=0).monthdayscalendar(self.year, self.month), 1):
+            for column, number in enumerate(week):
+                if not number:
+                    continue
+                day = date(self.year, self.month, number)
+                chosen = day == self.selected
+                button = tk.Button(
+                    self.grid, text=str(number), width=2, padx=4, pady=1, relief="flat", borderwidth=0, cursor="hand2",
+                    font=("맑은 고딕", 10, "bold" if chosen or day == today else "normal"),
+                    background=self.ACCENT if chosen else self.DAY,
+                    foreground="#ffffff" if chosen else "#8db3ff" if day == today else self.TEXT,
+                    activebackground="#3a75ff" if chosen else "#15264a", activeforeground="#ffffff", takefocus=0,
+                    highlightthickness=1, highlightbackground="#8db3ff" if day == today else self.DAY,
+                    command=lambda value=day: self.select(value))
+                button.grid(row=row, column=column, padx=1, pady=1)
+                self.day_buttons[day] = button
+
+    def request(self):
+        """지금 창에 적혀 있는 것(날짜, 번호 글자)."""
+        return self.selected, self.number.get().strip()
+
+    def submit(self, event=None):
+        app = self.app
+        if app.busy:
+            self.status.set("다른 작업이 끝난 뒤 다시 눌러 주세요.")
+            return "break"
+        if defer_ime_commit(self.window, self.submit):
+            return "break"
+        text = self.number.get().strip()
+        if not text:
+            self.status.set("번호를 입력해 주세요. (예: 1482)")
+            return "break"
+        try:
+            numbers = list(dict.fromkeys(parse_numbers(text)))
+        except WorkError as error:
+            app.messagebox.showerror("번호 확인", str(error), parent=self.window)
+            return "break"
+        day = self.selected
+        try:
+            roots = date_search_folders(single_import_folder_text(day), day.year, base_root=app.program_base_root)
+        except WorkError as error:
+            app.messagebox.showerror("날짜 폴더 확인", str(error), parent=self.window)
+            return "break"
+        app.start_single_import(self, day, numbers, roots)
+        return "break"
+
+    def set_busy(self, value):
+        if not self.visible():
+            return
+        try:
+            self.fetch.configure(state="disabled" if value else "normal")
+        except Exception:
+            pass
+
+    def note(self, line):
+        self.history.insert(0, line)
+        del self.history[self.HISTORY_LINES:]
+        if self.visible():
+            self.listing.delete(0, "end")
+            self.listing.insert("end", *self.history)
+
+    def finished(self, result, error):
+        """가져오기가 끝났을 때(메인 창이 부름). 못 찾은 번호는 칸에 남겨 날짜만 바꿔 다시 누를 수 있게 합니다."""
+        pending, self.pending = self.pending, None
+        if pending is None:
+            return
+        day, numbers = pending
+        label = single_import_folder_text(day)
+        if error is not None:
+            self.note("{} · {} · 중단".format(", ".join("O" + number for number in numbers), label))
+            if self.visible():
+                self.status.set("가져오지 못했습니다 · 번호와 날짜를 확인해 주세요.")
+            return
+        missing = set(result["missing_numbers"])
+        for number in numbers:
+            self.note("O{} · {} · {}".format(number, label, "못 찾음" if number in missing else "저장됨"))
+        saved = [number for number in numbers if number not in missing]
+        if self.visible():
+            self.number.delete(0, "end")
+            if missing:
+                self.number.insert(0, " ".join(number for number in numbers if number in missing))
+                self.number.select_range(0, "end")
+            self.status.set(("{} 저장됨".format(", ".join("O" + number for number in saved)) if saved else "")
+                            + (" · " if saved and missing else "")
+                            + ("{} 폴더에 없음".format(label) if missing else ""))
+        warnings = (missing_program_warnings(result["missing_numbers"], result["list_created"], result["list_number"])
+                    + result["alarms"])
+        if warnings:
+            self.app.messagebox.showwarning("프로그램 확인 필요", "\n".join(warnings),
+                                            parent=self.window if self.visible() else self.app.window)
+
+    def focus_number(self):
+        if not self.visible():
+            return False
+        try:
+            self.number.focus_set()
+        except Exception:
+            return False
+        return True
+
+
 class IntegrationApp:
     def __init__(self, window):
         import tkinter as tk
@@ -3379,7 +3637,7 @@ class IntegrationApp:
         inputs.rowconfigure(1, weight=1)
         ttk.Label(inputs, text="프로그램 번호", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 6))
-        self.number_input = tk.Text(inputs, width=12, height=8, font=("Consolas", 12), wrap="word", undo=True,
+        self.number_input = tk.Text(inputs, width=12, height=7, font=("Consolas", 12), wrap="word", undo=True,
                                     background="#050a14", foreground="#eaf0fc", insertbackground="#8db3ff",
                                     selectbackground="#1d3f86", selectforeground="#eaf0fc", relief="flat",
                                     highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2a66f2",
@@ -3397,6 +3655,12 @@ class IntegrationApp:
         self.import_button = ttk.Button(actions, text=MODE_LABELS[MODE_BOTH], command=self.start_import,
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
+        # 하나만 가져오기 창을 여닫는 버튼. 번호 칸의 요청 높이를 한 줄 줄여(8→7) 이 줄이 늘어도 창의 최소 높이는 그대로입니다.
+        self.single_import = SingleImportPanel(self)
+        self.single_import_button = ttk.Button(actions, text=SINGLE_IMPORT_LABEL, style="Popup.TButton",
+                                               command=self.single_import.toggle, takefocus=0)
+        self.single_import_button.pack(fill="x", pady=(4, 0))
+        self.single_import.button = self.single_import_button
 
         self.build_machine_board(frame)
 
@@ -4037,7 +4301,7 @@ class IntegrationApp:
             pass
         self.material_quick.set_icons(visual["images"])
         self.reserve_empty_button_width()
-        for button in self._suite_buttons.values():
+        for button in list(self._suite_buttons.values()) + [self.single_import_button]:
             button.configure(image=visual["popup_icon"], compound="right")
         self.apply_n3_marks(visual["images"])
         # Keep the wash form compact within the same card surface as other pages.
@@ -5157,6 +5421,9 @@ class IntegrationApp:
         self.folder_input.configure(state="disabled" if value or self.mode.get() == MODE_LIST else "normal")
         self.year_input.configure(state="disabled" if value or self.mode.get() == MODE_LIST else "normal")
         self.status.set(label)
+        panel = getattr(self, "single_import", None)
+        if panel is not None:
+            panel.set_busy(value)
 
     def request_ui(self, callback, *args):
         ready = threading.Event()
@@ -5233,6 +5500,40 @@ class IntegrationApp:
     def import_shortcut(self, event):
         self.start_import()
         return "break"
+
+    def start_single_import(self, panel, day, numbers, roots):
+        """하나만 가져오기 창에서: 그날 폴더의 그 번호만 '파일만 가져오기'와 같은 방식으로 가져옵니다.
+
+        리스트 파일은 만들지 않고, 메인 화면의 번호 목록·날짜 폴더·작업 모드는 읽지도 바꾸지도 않습니다.
+        """
+        self.cancel_drive_action()
+        if self.busy:
+            return
+        numbers = list(numbers)
+        list_number = self.list_number.get()
+        chooser = lambda number, paths: self.request_ui(self.choose_candidate, number, paths)
+        requested = panel.request()
+
+        def begin(destination):
+            # 드라이브 확인을 기다리는 사이 창을 닫았거나 날짜·번호를 고쳤으면 예전 요청은 실행하지 않습니다.
+            if not panel.visible() or panel.request() != requested:
+                self.status.set("입력 내용이 바뀌어 작업을 취소했습니다 · 다시 눌러 주세요.")
+                return
+            # 카드에 같은 번호의 파일이 이미 있으면(왼쪽 목록 기준) 바꾸기 전에 한 번 묻습니다.
+            existing = [path.name for path in (self.drive_item_paths or [])
+                        if filename_number(path.name) in numbers]
+            if existing and not self.messagebox.askyesno(
+                    "카드에 같은 번호가 있습니다",
+                    "카드에 이미 있는 파일: {}\n\n{} 폴더의 파일을 가져오면 같은 이름의 파일은 새 파일로 바뀝니다.\n"
+                    "가져올까요?".format(", ".join(existing), single_import_folder_text(day)),
+                    parent=panel.window, default="yes"):
+                self.status.set("가져오기를 취소했습니다.")
+                return
+            panel.pending = (day, tuple(numbers))
+            self.start_job(SINGLE_IMPORT_LABEL, lambda: run_batch(
+                roots, destination, numbers, chooser=chooser, popup=False, mode=MODE_FILES, list_number=list_number))
+
+        self.run_with_current_drive(begin)
 
     def start_empty(self):
         # 번호 처리 함수와 연결하지 않는 별도의 버튼 동작입니다.
@@ -5339,6 +5640,12 @@ class IntegrationApp:
                                 + result["alarms"])
                     if warnings:
                         self.messagebox.showwarning("프로그램 확인 필요", "\n".join(warnings), parent=self.window)
+                panel = getattr(self, "single_import", None)
+                if name == SINGLE_IMPORT_LABEL and panel is not None:
+                    # 하나만 가져오기: 메인 화면의 번호 목록은 그대로 두고, 결과는 그 창에 적습니다.
+                    panel.finished(result, error)
+                    if panel.focus_number():
+                        continue
                 if getattr(self, "active_tab", "cnc") == "cnc":
                     self.number_input.focus_set()
         self.window.after(80, self.drain_events)
@@ -5561,7 +5868,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.18.2'
+SUITE_APP_VERSION = '2026.11.23.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
