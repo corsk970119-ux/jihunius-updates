@@ -388,13 +388,12 @@ class HostStabilityTests(unittest.TestCase):
              patch.object(self.module, 'run_batch', side_effect=lambda *a, **k: calls.append(a)):
             app.start_import()
             self.assertIsNotNone(app.drive_action_pending)
-            app.number_input.text = 'O9999'; app.list_number.set('3998')
+            app.number_input.text = 'O9999'
             self.deliver(app)
             self.assertIsNone(app.drive_action_pending)
             self.assertFalse(app.busy)
             self.assertEqual(calls, [])
             self.assertEqual(app.number_input.get('1.0', 'end'), 'O9999')
-            self.assertEqual(app.list_number.get(), '3998')
             self.assertIn('입력', app.status.get())
 
     def test_expired_scan_cannot_trigger_delayed_empty_even_before_timeout_callback(self):

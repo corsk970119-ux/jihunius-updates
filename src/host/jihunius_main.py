@@ -12,8 +12,8 @@ Windows / Python 3.8 이상. 추가 패키지 설치 없이 실행합니다.
 지정한 날짜 폴더와 그 안의 하위폴더만 검색하며, 다른 날짜 폴더는 제외합니다.
 기준 경로는 PC별로 설정합니다. 저장은 연결된 이동식 F:\를 우선 사용하고, 없으면 G:\를 사용합니다.
 기본 모드는 '파일 + 리스트 만들기'입니다.
-리스트 파일명은 O3999 / O3998 탭에서 선택하며, 기본값은 O3999입니다.
-선택한 이름의 리스트만 갱신하고 다른 이름의 리스트 파일은 유지합니다.
+리스트 파일 이름은 O3999입니다(O3998로 만드는 선택은 2026-11-23에 없앰).
+O3999만 갱신하고 다른 이름의 파일은 유지합니다.
 파일을 가져오는 두 모드에서는 날짜 폴더와 번호를 입력합니다.
 파일만 가져오기는 기존 수정 규칙을 적용한 복사본만 저장하고 리스트 파일은 변경하지 않습니다.
 리스트만 만들기는 날짜 폴더나 공유폴더 검색 없이 입력한 번호로 선택한 리스트만 저장합니다.
@@ -91,7 +91,8 @@ LEGACY_PROGRAM_BASE_ROOT = r"\\192.168.0.254\내부공유폴더\★NC프로그�
 HANDOVER_SHARED_PARENT = r"\\192.168.0.254\내부공유폴더\생산관리\일일 업무 보고\최지훈"
 HANDOVER_FOLDER_NAME = "지후니우스_인수인계"
 DESTINATION_CANDIDATES = ("F:/", "G:/")
-LIST_NUMBERS = ("3999", "3998")
+# 리스트 파일 이름은 O3999 하나입니다. O3998로 만드는 선택은 없앴습니다(사용자 요청 2026-11-23).
+LIST_NUMBERS = ("3999",)
 DEFAULT_LIST_NUMBER = "3999"
 MODE_FILES = "files"
 MODE_LIST = "list"
@@ -1282,7 +1283,8 @@ def resolve_date_search_folders(roots):
 
 def selected_list_name(list_number):
     if list_number not in LIST_NUMBERS:
-        raise WorkError("리스트 파일명은 O3999 또는 O3998 중에서 선택해 주세요.")
+        raise WorkError("리스트 파일 이름은 {}만 사용할 수 있습니다.".format(
+            ", ".join("O" + number for number in LIST_NUMBERS)))
     return "O" + list_number
 
 
@@ -1296,7 +1298,7 @@ def parse_numbers(line):
             raise WorkError("잘못된 번호: {} (예: O1234 또는 1234)".format(token))
         number = match.group(1).zfill(4)
         if number in LIST_NUMBERS:
-            raise WorkError("O3999와 O3998은 리스트 파일 이름이므로 가져올 번호로 사용할 수 없습니다.")
+            raise WorkError("O{}는 리스트 파일 이름이므로 가져올 번호로 사용할 수 없습니다.".format(number))
         numbers.append(number)
     if not numbers:
         raise WorkError("프로그램 번호를 입력해 주세요.")
@@ -2064,16 +2066,7 @@ def main_console():
         if mode is None:
             print("작업 모드는 1, 2, 3 중에서 선택해 주세요.")
             continue
-        list_number = DEFAULT_LIST_NUMBER
-        if mode != MODE_FILES:
-            list_text = input("리스트 파일명: 3999 또는 3998 (Enter: 3999) / Q: 종료\n> ").strip()
-            if list_text.lower() == "q":
-                return
-            match = re.fullmatch(r"[oO]?(3999|3998)", list_text or DEFAULT_LIST_NUMBER)
-            if match is None:
-                print("리스트 파일명은 O3999 또는 O3998 중에서 선택해 주세요.")
-                continue
-            list_number = match.group(1)
+        list_number = DEFAULT_LIST_NUMBER   # 리스트 파일 이름은 O3999 하나
         roots = []
         if mode != MODE_LIST:
             year_text = input("연도 (예: 2026 / Enter: 2026) / Q: 종료\n> ").strip()
@@ -3581,15 +3574,15 @@ class IntegrationApp:
         list_choices.grid(row=0, column=0, sticky="w")
         date_options = ttk.Frame(list_options, style="Card.TFrame", borderwidth=0)
         date_options.grid(row=0, column=1, sticky="w", padx=(18, 0))
-        ttk.Label(list_choices, text="리스트 파일명", style="Caption.TLabel").grid(
-            row=0, column=0, sticky="w", padx=(0, 14))
+        # 리스트 파일 이름은 O3999 하나라 고르는 버튼이 없습니다(값은 그대로 두어 나머지 코드가 예전처럼 읽습니다).
         self.list_number = tk.StringVar(value=DEFAULT_LIST_NUMBER)
         self.list_buttons = []
-        for column, number in enumerate(LIST_NUMBERS, 1):
-            button = ttk.Radiobutton(list_choices, text="O" + number, variable=self.list_number, value=number,
-                                     command=self.update_mode, style="Mode.TRadiobutton", width=7)
-            button.grid(row=0, column=column, padx=(0, 8))
-            self.list_buttons.append(button)
+        # 그 자리에 하나만 가져오기 창을 여닫는 버튼을 둡니다(사용자 요청 2026-11-23).
+        self.single_import = SingleImportPanel(self)
+        self.single_import_button = ttk.Button(list_choices, text=SINGLE_IMPORT_LABEL, style="Popup.TButton",
+                                               command=self.single_import.toggle, takefocus=0)
+        self.single_import_button.grid(row=0, column=0, sticky="w")
+        self.single_import.button = self.single_import_button
         ttk.Label(date_options, text="연도", style="Caption.TLabel").grid(
             row=0, column=0, sticky="w", padx=(0, 10))
         self.saved_program_year = load_program_year()
@@ -3637,7 +3630,7 @@ class IntegrationApp:
         inputs.rowconfigure(1, weight=1)
         ttk.Label(inputs, text="프로그램 번호", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 6))
-        self.number_input = tk.Text(inputs, width=12, height=7, font=("Consolas", 12), wrap="word", undo=True,
+        self.number_input = tk.Text(inputs, width=12, height=8, font=("Consolas", 12), wrap="word", undo=True,
                                     background="#050a14", foreground="#eaf0fc", insertbackground="#8db3ff",
                                     selectbackground="#1d3f86", selectforeground="#eaf0fc", relief="flat",
                                     highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2a66f2",
@@ -3655,12 +3648,6 @@ class IntegrationApp:
         self.import_button = ttk.Button(actions, text=MODE_LABELS[MODE_BOTH], command=self.start_import,
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
-        # 하나만 가져오기 창을 여닫는 버튼. 번호 칸의 요청 높이를 한 줄 줄여(8→7) 이 줄이 늘어도 창의 최소 높이는 그대로입니다.
-        self.single_import = SingleImportPanel(self)
-        self.single_import_button = ttk.Button(actions, text=SINGLE_IMPORT_LABEL, style="Popup.TButton",
-                                               command=self.single_import.toggle, takefocus=0)
-        self.single_import_button.pack(fill="x", pady=(4, 0))
-        self.single_import.button = self.single_import_button
 
         self.build_machine_board(frame)
 
@@ -5868,7 +5855,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.23.1'
+SUITE_APP_VERSION = '2026.11.23.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

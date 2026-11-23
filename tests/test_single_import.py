@@ -159,6 +159,64 @@ class SingleImportTests(unittest.TestCase):
         panel.select(self.m.single_import_default_date()); root.update()  # [전날로]
         self.assertEqual((panel.selected, panel.heading.cget('text')), (self.FRIDAY, '2026년 11월'))
 
+    def test_button_sits_where_the_list_name_choice_was_and_o3998_can_no_longer_be_made(self):
+        # 사용자 요청 2026-11-23: "버튼 위치를 … 리스트 파일명 3999 3998 선택하는 쪽으로 옮기고 3998만드는 기능을 없애버리자"
+        app = self.launch(); root = app.window
+        m = self.m
+
+        def widgets(widget):
+            yield widget
+            for child in widget.winfo_children():
+                yield from widgets(child)
+
+        texts = [str(widget.cget('text')) for widget in widgets(root)
+                 if widget.winfo_class() in ('TRadiobutton', 'TLabel', 'TButton')]
+        self.assertNotIn('O3998', texts)
+        self.assertNotIn('O3999', texts)                                  # 고를 것이 하나뿐이라 선택 버튼이 없음
+        self.assertNotIn('리스트 파일명', texts)
+        self.assertEqual(app.list_buttons, [])
+        self.assertEqual(app.list_number.get(), '3999')
+        button, year = app.single_import_button, app.year_input
+        self.assertEqual(button.winfo_toplevel(), root)
+        self.assertEqual(abs((button.winfo_rooty() + button.winfo_height() // 2)
+                             - (year.winfo_rooty() + year.winfo_height() // 2)) <= 3, True)   # 연도·날짜 폴더와 같은 줄
+        self.assertLess(button.winfo_rootx() + button.winfo_width(), year.winfo_rootx())       # 그 줄의 맨 왼쪽
+        self.assertLess(button.winfo_rooty(), app.number_input.winfo_rooty())                  # 번호 칸 위
+        self.assertEqual(int(app.number_input.cget('height')), 8)                              # 번호 칸은 원래 크기
+        self.assertEqual([child.winfo_class() for child in app.import_button.master.winfo_children()], ['TButton'])
+        # 리스트 파일 이름은 O3999 하나
+        self.assertEqual((m.LIST_NUMBERS, m.DEFAULT_LIST_NUMBER), (('3999',), '3999'))
+        self.assertEqual(m.selected_list_name('3999'), 'O3999')
+        with self.assertRaises(m.WorkError):
+            m.selected_list_name('3998')
+        with self.assertRaises(m.WorkError):
+            m.parse_numbers('3999')                                       # 리스트 이름은 여전히 가져올 번호로 못 씀
+        self.assertEqual(m.parse_numbers('3998 O1482'), ['3998', '1482'])  # 3998은 이제 보통 번호
+        # 리스트를 만드는 두 모드는 O3999를 만든다
+        calls = self.fake_batch()
+        for mode in (m.MODE_BOTH, m.MODE_LIST):
+            app.number_input.delete('1.0', 'end'); app.number_input.insert('1.0', '1061')
+            app.mode.set(mode); app.update_mode()
+            app.start_import()
+            self.wait(app, lambda: not app.busy and len(calls) == (1 if mode == m.MODE_BOTH else 2))
+        self.assertEqual([call['list_number'] for call in calls], ['3999', '3999'])
+        self.assertEqual(app.import_button.cget('text'), m.MODE_LABELS[m.MODE_LIST])
+
+    def test_real_list_modes_write_o3999_and_leave_an_old_o3998_file_alone(self):
+        m = self.m
+        self.stack.enter_context(patch.object(m, 'validate_fixed_destination'))
+        card = Path(self.tmp.name) / 'card-list'
+        card.mkdir()
+        (card / 'O3998').write_bytes(b'OLD-3998-LIST')                   # 예전에 만들어 둔 O3998
+        with patch.object(m, 'print', create=True, new=lambda *args, **kwargs: None):
+            m.run_batch([], card, ['1061', '1482'], popup=False, mode=m.MODE_LIST)
+            with self.assertRaises(m.WorkError):
+                m.run_batch([], card, ['1061'], popup=False, mode=m.MODE_LIST, list_number='3998')
+        self.assertEqual(sorted(path.name for path in card.iterdir()), ['O3998', 'O3999'])
+        self.assertEqual((card / 'O3998').read_bytes(), b'OLD-3998-LIST')
+        self.assertEqual((card / 'O3999').read_bytes(), m.generate_o3999(['1061', '1482']))
+        self.assertIn(b'P1061M198', (card / 'O3999').read_bytes())
+
     # ── 가져오기 ──
     def test_enter_fetches_that_number_from_that_day_as_files_only_and_leaves_the_main_inputs(self):
         app = self.launch(); root = app.window; panel = app.single_import
