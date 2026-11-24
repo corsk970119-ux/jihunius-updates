@@ -56,7 +56,7 @@
 | `src/host/wash_mes.py`, `src/host/wash_pop.py` | MES/POP 세척완료 자동화 |
 | `src/host/card_modifier_10_30.py` | 카드에 복사되는 수정10.30 스크립트 |
 | `src/host/windows_tray.py` | 시스템 트레이 |
-| `src/*.py` | 돌출량·세척일보·특수 돌출량·소재 사용량 조사·오류 기록·업데이트 |
+| `src/*.py` | 돌출량·세척일보·특수 돌출량·소재 사용량 조사·업데이트 |
 | `assets/` | 앱 아이콘, 알림 스위치 이미지, 알림음 |
 
 ```sh

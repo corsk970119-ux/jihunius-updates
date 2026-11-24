@@ -2755,7 +2755,7 @@ class WashApp:
         from tkinter import ttk
         from datetime import date
         self.host=host;self.root=host.window;self.busy=False;self.stop=threading.Event();self.events=queue.Queue()
-        self.trail=[];self.reads=[];self.progress={};self.last_result=None;self.started=time.monotonic()
+        self.started=time.monotonic()
         self.result=None;self.started=0;self.mes_binding=None;self.mes_target=None
         self.capture_stage=None;self.capture_status=None
         self.mes=load_wash_module(WASH_MES_SOURCE,'jihuni_wash_mes')
@@ -2805,62 +2805,7 @@ class WashApp:
         self.layout_status=tk.StringVar(value='대기 중')
         ttk.Label(body,textvariable=self.layout_status,wraplength=900,foreground='#93c5fd').pack(anchor='w',pady=(0,10))
 
-    def note(self,text):
-        """오류가 났을 때 함께 남길 진행 기록. 자동 작업에는 영향을 주지 않습니다."""
-        try:
-            trail=self.trail
-            trail.append('{:7.1f}초  {}'.format(time.monotonic()-self.started,str(text).replace('\n',' ')[:160]))
-            del trail[8:-400]    # 처음 8줄과 최근 400줄만 보관
-        except Exception:pass
-
-    def diagnostics(self):
-        """세척완료가 멈춘 순간의 상황 요약. 오류 기록의 [진단] 자리에 들어갑니다."""
-        try:
-            lines=['경과 {:.1f}초 · 세척순번 {}'.format(time.monotonic()-self.started,getattr(self,'run_sequence','?'))]
-            result=getattr(self,'last_result',None) or {}
-            coverage=result.get('coverage') or {}
-            if coverage:
-                raw=coverage.get('raw') or []
-                lines.append('POP 표: 한 줄 {}칸 · 화면에 보이는 줄 {}'.format(
-                    len(raw[0]) if raw else '?',len((coverage.get('current_view') or {}).get('visible',()))))
-                lines.append('POP 목록 {}줄 · 행 요약값 {} · 맨 위 확인 {} · 맨 아래 확인 {} · 아래로 이동 {}회'.format(
-                    coverage.get('declared_rows','?'),'사용' if coverage.get('summary_supported') else '미사용',
-                    '예' if coverage.get('top_verified') else '아니오','예' if coverage.get('bottom_verified') else '아니오',
-                    sum(1 for item in self.reads if str(item[0]).startswith('POP 아래로 확인'))))
-                lines.append('판독 방식: '+str(coverage.get('basis','?')))
-            matching=result.get('matching') or {}
-            if matching:
-                lines.append('매칭 대상 {}개 · 이미 선택 {}개'.format(len(matching.get('matched',())),len(matching.get('already_selected',()))))
-            lines.append('체크 클릭 {}회 · 체크 확인 {}개'.format(self.progress.get('attempt',0),self.progress.get('verified',0)))
-            if self.reads:
-                label,mode,seconds,elements=max(self.reads,key=lambda item:item[2])
-                lines.append('화면 판독 {}회 · 합계 {:.1f}초 · 가장 오래: {} ({} · {:.1f}초 · 항목 {}개)'.format(
-                    len(self.reads),sum(item[2] for item in self.reads),label,mode,seconds,elements))
-                lines.append('마지막 판독: '+' → '.join('{} ({} · {:.1f}초)'.format(item[0],item[1],item[2]) for item in self.reads[-3:]))
-            if os.name=='nt':
-                try:
-                    user=ctypes.windll.user32;front=user.GetForegroundWindow();title=ctypes.create_unicode_buffer(200)
-                    user.GetWindowTextW(front,title,200)
-                    lines.append('멈춘 순간 맨 앞 창: '+(title.value.strip()[:80] or '(제목 없음)'))
-                except Exception:pass
-            trail=list(self.trail)
-            if len(trail)>40:trail=trail[:8]+['   … {}줄 생략 …'.format(len(trail)-40)]+trail[-32:]
-            lines.append('[진행 기록 · 처음 8줄 + 최근 32줄]' if len(self.trail)>40 else '[진행 기록 · {}줄]'.format(len(trail)))
-            return '\n'.join(lines+trail)
-        except Exception as error:return '진단 정보를 만들지 못했습니다: '+str(error)
-
     def emit(self,kind,value):
-        if kind=='log':self._error_stage=str(value)[:300];self.note(value)
-        elif kind=='reading':self._error_stage=str(value[0])[:300]
-        elif kind=='check':
-            try:self.progress[value.get('status')]=self.progress.get(value.get('status'),0)+1
-            except Exception:pass
-        elif kind=='result':self.last_result=value
-        elif kind=='error' and not self.stop.is_set():
-            import traceback
-            self.note('중단: '+str(value))
-            SuiteErrors.capture(value,feature='세척완료',stage=getattr(self,'_error_stage','처리'),
-                                detail=traceback.format_exc(),work=str(self.started),context=self.diagnostics())
         if kind in ('log','error','result','reading','reading_done','done','binding'):
             self.events.put((kind,value))
 
@@ -2880,7 +2825,6 @@ class WashApp:
         except Exception as e:return self.host.messagebox.showerror('조건 확인',str(e),parent=self.root)
         if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
         self.busy=True;self.stop=threading.Event();self.result=None;self.controls();self.started=time.monotonic()
-        self.trail=[];self.reads=[];self.progress={};self.last_result=None;self.run_sequence=expected['sequence']
         self.host.suspend_machine_alerts()
         self.capture_stage=None;self.capture_status=None
         self.status.set('창과 조건 확인 중…')
@@ -2923,15 +2867,9 @@ class WashApp:
                 self.emit('reading',(label,started))
                 try:
                     report=reader.capture(t,label,stop)
-                    try:
-                        finish=[r for r in report.get('records',()) if isinstance(r,dict) and r.get('kind')=='finish']
-                        self.reads.append((label,t.get('mode','full'),time.monotonic()-started,finish[-1].get('elements','?') if finish else '?'))
-                        if time.monotonic()-started>=5:self.note('판독 {:.1f}초 · {} · {}'.format(time.monotonic()-started,label,t.get('mode','full')))
-                    except Exception:pass
                     return report
                 except Exception as error:
                     elapsed=time.monotonic()-started
-                    self.note('판독 실패 {:.1f}초 · {} · {}'.format(elapsed,label,t.get('mode','full')))
                     raise RuntimeError(f'{label} · {elapsed:.1f}초 경과 · {error}') from error
                 finally:
                     self.emit('reading_done',None)
@@ -2998,7 +2936,6 @@ class WashApp:
         if os.name!='nt':return self.host.messagebox.showinfo('Windows 전용','MES가 실행 중인 Windows PC에서 사용해 주세요.',parent=self.root)
         if self.host.busy:return self.host.messagebox.showinfo('작업 중','현재 파일 작업이 끝난 뒤 실행해 주세요.',parent=self.root)
         self.busy=True;self.layout_running=True;self.stop=threading.Event();self.controls();self.started=time.monotonic()
-        self.trail=[];self.reads=[];self.progress={};self.last_result=None
         self.host.suspend_machine_alerts()
         self.capture_stage=None;self.capture_status=None
         self.layout_status.set('MES 창 확인 중…')
@@ -3007,14 +2944,9 @@ class WashApp:
     def layout_work(self):
         """MES 정렬. 화면 판독·창 준비는 세척완료와 같은 함수를 씁니다."""
         reader=None;pointer=None;outcome={'title':'','lines':[],'error':None,'stopped':False}
-        kept=[]   # 작업지시관리 표 기록(칸 제목 위치·버리기·옮기기 결과). 오류 기록 끝에 따로 붙입니다(행 내용은 없음).
         def emit(kind,value):
-            if kind=='log':
-                self._error_stage=str(value)[:300];self.note(value);self.events.put(('layout_log',value))
-            elif kind=='note':self.note(value)
-            elif kind=='record':
-                self.note(value)
-                if len(kept)<90:kept.append(str(value).replace('\n',' ')[:200])
+            # 정렬 쪽이 'note'·'record'로 보내는 진행 기록은 받는 곳이 없습니다(오류 기록 기능을 없앰, 2026-11-24).
+            if kind=='log':self.events.put(('layout_log',value))
             elif kind in ('reading','reading_done'):self.events.put((kind,value))
         try:
             windows=self.pop.visible_windows()
@@ -3025,7 +2957,6 @@ class WashApp:
                 started=time.monotonic();emit('reading',(label,started))
                 try:
                     report=reader.capture(t,label,stop)
-                    self.note('판독 {:.1f}초 · {}'.format(time.monotonic()-started,label))
                     return report
                 except Exception as error:
                     raise RuntimeError('{} · {:.1f}초 경과 · {}'.format(label,time.monotonic()-started,error)) from error
@@ -3039,19 +2970,9 @@ class WashApp:
             # 기준은 프로그램에 든 값(mes_layout.default_standard)입니다. 예전에 [기준 저장]으로 남긴 파일은 더 읽지 않습니다.
             result=self.layout.align_all(mes_target,pointer,capture,self.stop,emit,self.layout.default_standard())
             outcome['title'],outcome['lines']=self.layout.brief_all(result,time.monotonic()-self.started)
-            if outcome['lines']:   # 다 맞추지 못한 경우: 원인을 알 수 있게 진행 기록과 함께 오류 기록에 남깁니다.
-                SuiteErrors.capture(outcome['title'],feature='MES 정렬',stage='일부만 완료',
-                                    detail='\n'.join(outcome['lines']+(['','[작업지시관리 표 기록]']+kept if kept else [])),
-                                    work=str(self.started),context='\n'.join(self.trail[-150:]))
         except Exception as error:
             stopped=self.stop.is_set() or type(error).__name__=='Stopped'
             outcome['stopped']=stopped;outcome['error']=str(error)
-            self.note('중단: '+str(error))
-            if not stopped:
-                import traceback
-                SuiteErrors.capture(str(error),feature='MES 정렬',stage=getattr(self,'_error_stage','처리'),
-                                    detail=traceback.format_exc()+('\n[작업지시관리 표 기록]\n'+'\n'.join(kept) if kept else ''),
-                                    work=str(self.started),context='\n'.join(self.trail[-150:]))
         finally:
             if pointer is not None and not outcome['stopped']:pointer.restore()
             if reader:
@@ -3108,7 +3029,7 @@ class WashApp:
                     self.busy=False;self.layout_running=False;self.controls();self.capture_stage=None
                     if value['error']:
                         self.layout_status.set(('중지함 · ' if value['stopped'] else '중단: ')+value['error'])
-                        if not value['stopped']:completion=('MES 정렬 중단','중단 사유: '+value['error']+'\n\n누르기 전에 확인하는 단계에서 멈췄습니다. MES 화면을 확인한 뒤 다시 눌러 주세요.\n같은 문제가 계속되면 오류 기록 창의 [AI 전달용 복사]로 내용을 전달해 주세요.')
+                        if not value['stopped']:completion=('MES 정렬 중단','중단 사유: '+value['error']+'\n\n누르기 전에 확인하는 단계에서 멈췄습니다. MES 화면을 확인한 뒤 다시 눌러 주세요.')
                     else:
                         self.layout_status.set(value['title'])
                         completion=self.layout_completion(value['title'],value['lines'])
@@ -3179,8 +3100,6 @@ def suite_companion_payloads():
 
 
 SuiteVisualTheme = ...  # build: tools/build_app.py
-
-SuiteErrors = ...  # build: tools/build_app.py
 
 SuiteMaterialQuick = ...  # build: tools/build_app.py
 
@@ -3501,7 +3420,7 @@ class IntegrationApp:
         self.title_label.pack(side="left")
         ttk.Separator(title_row, orient="vertical").pack(side="left", fill="y", padx=14, pady=4)
         self._suite_buttons = {}
-        for key, label in (("wash-log", "세척일보"), ("protrusion", "돌출량"), ("special-table", "특수 돌출량"), ("material", "소재 사용량 조사(Beta)")):
+        for key, label in (("wash-log", "세척일보"), ("protrusion", "돌출량"), ("special-table", "특수 돌출량"), ("material", "소재 사용량 조사")):
             button = ttk.Button(title_row, text=label, style="Popup.TButton",
                                 command=lambda selected=key: self.open_companion(selected))
             button.pack(side="left", padx=(0, 2))
@@ -3526,7 +3445,7 @@ class IntegrationApp:
         self.handover_toggle = ttk.Button(navigation_row, text="인수인계 ▸", command=self.toggle_handover,
                                           style="HandoverToggle.TButton")
         self.handover_toggle.place(relx=0.7, rely=0.5, anchor="center")
-        # 오류 기록·업데이트 알림 버튼은 제목 줄 오른쪽. before=로 왼쪽 버튼들보다 먼저 자리를 받아
+        # 업데이트 알림 버튼은 제목 줄 오른쪽. before=로 왼쪽 버튼들보다 먼저 자리를 받아
         # 창이 좁아도 잘리지 않습니다. 상태 표시는 탭 줄 오른쪽에 둡니다.
         self.header_actions = ttk.Frame(title_row)
         self.header_actions.pack(side="right", before=self.logo_label)
@@ -4560,7 +4479,6 @@ class IntegrationApp:
             self.refresh_handover()
             return
         if error is not None:
-            SuiteErrors.capture(error,feature='인수인계',stage='공유 목록 읽기')
             self.handover_status.set("공유폴더 연결을 확인해 주세요.\n마지막으로 불러온 {}건 표시 중".format(len(self.handover_notes)))
             self.handover_signature = None
             self.handover_read_error = True
@@ -4906,7 +4824,6 @@ class IntegrationApp:
                 self.refresh_destination()
             return
         if error is not None:
-            SuiteErrors.capture(error,feature='드라이브 정리',stage='드라이브 읽기')
             self.drive_contents_status.set("목록을 읽지 못했습니다 · 마지막 목록 표시 중")
             self.finish_drive_action(generation, error)
             return
@@ -5584,7 +5501,6 @@ class IntegrationApp:
                 error = event[1]
                 if error != self.machine_monitor_error:
                     if error:
-                        SuiteErrors.capture(error,feature='설비 모니터링',stage='연결')
                         self.append_log('가공현황 연결 오류: '+error+'\n')
                     self.machine_monitor_error = error
             elif event[0] == "drive_drop":
@@ -5666,7 +5582,7 @@ class IntegrationApp:
         try:self._suite_children.start_material_client()
         except Exception as error:
             self.status.set('소재 수집 시작 확인 필요')
-            self.messagebox.showerror('소재 사용량 조사(Beta)',str(error),parent=self.window)
+            self.messagebox.showerror('소재 사용량 조사',str(error),parent=self.window)
 
     def open_companion(self, key):
         if defer_ime_commit(self.window, lambda: self.open_companion(key)): return
@@ -5701,7 +5617,7 @@ class IntegrationApp:
         material_error=self._suite_children.pop_material_error()
         if isinstance(material_error,str) and material_error:
             self.status.set('소재 조사 연결 확인 필요')
-            self.messagebox.showerror('소재 사용량 조사(Beta)',material_error,parent=self.window)
+            self.messagebox.showerror('소재 사용량 조사',material_error,parent=self.window)
         for key, button in self._suite_buttons.items():
             opened = self._suite_children.material_visible() if key == 'material' else key in running
             if self._suite_states.get(key) != opened:
@@ -5855,7 +5771,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.23.2'
+SUITE_APP_VERSION = '2026.11.24.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
@@ -5869,7 +5785,6 @@ def main():
         return
     lease = SuiteUpdater.managed_lease(context)
     try:
-        SuiteErrors.install('지후니우스',SUITE_APP_VERSION)
         configure_windows_app_identity()
         import tkinter as tk
         # 저장 위치가 옮겨졌는지 창을 만들기 전에 한 번 확인합니다(잠깐만 기다리고, 그 뒤로는 1분마다 따로 확인).
@@ -5880,7 +5795,6 @@ def main():
         window = tk.Tk()
         app = IntegrationApp(window)
         SuiteUpdater.attach(app, context, SUITE_APP_VERSION)
-        SuiteErrors.attach(app,Path(SuiteStorage.folder('errors')))
         try:
             SuiteStorage.attach(app)
         except Exception:

@@ -237,7 +237,6 @@ class HostStorageTests(Sandbox):
         with patch.object(m.SuiteUpdater, 'managed_context', return_value={'test': True}), \
                 patch.object(m.SuiteUpdater, 'managed_lease', return_value=Mock()), \
                 patch.object(m.SuiteUpdater, 'attach'), patch.object(m.SuiteUpdater, 'mark_ready'), \
-                patch.object(m.SuiteErrors, 'install'), patch.object(m.SuiteErrors, 'attach') as errors, \
                 patch.object(m, 'configure_windows_app_identity'), \
                 patch.object(m.SuiteStorage, 'startup_check', side_effect=lambda version: order.append(('check', version))), \
                 patch.object(m.SuiteStorage, 'attach', side_effect=lambda app: order.append('watch')), \
@@ -245,7 +244,6 @@ class HostStorageTests(Sandbox):
                 patch('tkinter.Tk', return_value=Mock()):
             m.main()
         self.assertEqual(order, [('check', m.SUITE_APP_VERSION), 'app', 'watch'])
-        self.assertTrue(same(errors.call_args.args[1], m.SuiteStorage.folder('errors')))
 
 
 class CompanionStorageTests(Sandbox):

@@ -184,7 +184,6 @@ class StorageMoveTests(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.protrusion = load_source('src/protrusion.py', 'protrusion_' + uuid.uuid4().hex)
         self.special = load_source('src/special_table.py', 'special_' + uuid.uuid4().hex)
-        self.errors = load_source('src/error_history.py', 'errors_' + uuid.uuid4().hex)
         handover = self.old / mover.HANDOVER_NAME
         handover.mkdir(parents=True)
         # 돌출량 표·특수 돌출량: 제품 코드로 만들고 한 번씩 고침
@@ -306,10 +305,9 @@ class StorageMoveTests(unittest.TestCase):
         self.assertEqual(state['revision'], 2)
         table = self.special.TableStore(new / '특수 돌출량').sync()['state']
         self.assertEqual((table['notes'], table['revision']), ('옮기기 전 특이사항', 2))
-        synced = self.errors.sync_shared(new / '오류기록', {'pc_id': self.pc, 'epoch': 'after-clear',
-                                                            'records': [self.record], 'pending': None})
-        self.assertEqual(synced['epoch'], 'after-clear')                               # 세대가 이어져 지난 기록이 남음
-        self.assertEqual([row['id'] for row in synced['records']], ['r1'])
+        # 오류 기록 기능은 2026-11-24에 없앴습니다. 옮긴 파일이 그대로인지만 봅니다.
+        self.assertEqual(json.loads((new / '오류기록' / 'generation.json').read_text(encoding='utf-8')), {'epoch': 'after-clear'})
+        self.assertEqual(json.loads((new / '오류기록' / ('pc-' + self.pc + '.json')).read_text(encoding='utf-8'))['records'][0]['id'], 'r1')
         import material_sync
         self.assertEqual(material_sync.Discovery(new / '소재 사용량 조사').exchange('read'), self.owner)
         storage = load_source('src/storage_location.py', 'storage_' + uuid.uuid4().hex)

@@ -63,10 +63,10 @@ class HeaderAndBoardRegressionTests(unittest.TestCase):
     close_app = placement.MainWindowPlacementTests.close_app
     launch = placement.MainWindowPlacementTests.launch
 
-    def test_error_and_update_notices_stay_fully_visible(self):
+    def test_update_notices_stay_fully_visible(self):
         app = self.launch()
         notices = [app.ttk.Button(app.header_actions, text=text, style='HandoverNotice.TButton')
-                   for text in ('오류 기록 4', '원본 교체 확인')]
+                   for text in ('새 버전 있음', '원본 교체 확인')]
         for button in notices:
             button.pack(side='right', padx=(6, 0))
         for size in ('1120x900', '1000x760'):

@@ -12,12 +12,10 @@ PRIVATE_MAIN='''def main():
         SuiteUpdater.show_message('소재사용량조사 Beta 검토용 지후니우스가 이미 실행 중입니다. 트레이에서 열어주세요.')
         return
     try:
-        SuiteErrors.install('지후니우스', SUITE_APP_VERSION + ' / 소재 Beta 검토용')
         configure_windows_app_identity()
         import tkinter as tk
         window = tk.Tk()
         app = IntegrationApp(window)
-        SuiteErrors.attach(app, Path(HANDOVER_SHARED_PARENT) / HANDOVER_FOLDER_NAME / '오류기록')
         window.mainloop()
     finally:
         lease.release()

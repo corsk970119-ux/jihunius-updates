@@ -42,7 +42,7 @@ class MainWindowPlacementTests(unittest.TestCase):
   next_app=self.launch()
   self.assertEqual(self.geometry(next_app),(1230,920,2180,120))
   self.assertEqual(next_app._window_state.path.name,'jihunius.json')
-  self.assertEqual(next_app.material_button.cget('text'),'소재 사용량 조사(Beta)')
+  self.assertEqual(next_app.material_button.cget('text'),'소재 사용량 조사')
  def test_tray_flush_and_later_resize_are_preserved_without_sharing_pc_preferences(self):
   app=self.launch();self.require_height(app,900);app.window.geometry('1180x900+2100+95');app.window.update()
   app._hide_to_tray()

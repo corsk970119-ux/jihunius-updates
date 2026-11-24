@@ -15,6 +15,6 @@ class CandidateTests(unittest.TestCase):
    m=ModuleType('candidate_test');m.__file__=str(path);sys.modules[m.__name__]=m
    exec(compile(path.read_bytes(),str(path),'exec'),m.__dict__)
    root=Mock();app=Mock();lease=Mock();lease.acquire.return_value=True
-   with patch.object(m.SuiteUpdater,'FileLock',return_value=lease),patch.object(m.SuiteUpdater,'launch') as launch,patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as mark,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root),patch.object(m.SuiteErrors,'install'),patch.object(m.SuiteErrors,'attach'):
+   with patch.object(m.SuiteUpdater,'FileLock',return_value=lease),patch.object(m.SuiteUpdater,'launch') as launch,patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as mark,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root):
     m.main();launch.assert_not_called();attach.assert_not_called();mark.assert_not_called()
     root.mainloop.assert_called_once();lease.release.assert_called_once()

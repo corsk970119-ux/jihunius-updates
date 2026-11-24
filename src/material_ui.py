@@ -11,7 +11,7 @@ from material_client import ClientSession,CachedStore,ReportJobs,DEFAULT_SHARE
 from material_sync import atomic_json,read_json
 from material_quick import QuickBridge
 
-TITLE='소재 사용량 조사(Beta)'
+TITLE='소재 사용량 조사'
 
 class NoCollector:
     def __init__(self,*args):pass
@@ -510,10 +510,6 @@ class SyncedApplication(core.Application):
                 try:self.root.after_cancel(timer)
                 except Exception:pass
     def callback_error(self,kind,value,trace):
-        recorder=getattr(core,'_err_module',None)
-        if recorder:
-            import traceback
-            recorder.capture(str(value),feature=TITLE,stage='화면 처리',detail=''.join(traceback.format_exception(kind,value,trace)))
         self.tell('화면 처리 오류: '+str(value)[:150],True)
     def shutdown(self):
         if self._shutdown_started:return
@@ -611,10 +607,6 @@ def boot():
             raise SystemExit(73)  # Parent reattaches the existing session.
         messagebox.showerror(TITLE,'소재 조사 창이 이미 실행 중입니다. 지후니우스에서 기존 창을 열어주세요.',parent=root)
     except Exception as exc:
-        import traceback
-        recorder=getattr(core,'_err_module',None)
-        if recorder:
-            recorder.capture(str(exc),feature=TITLE,stage=stage,detail=traceback.format_exc())
         path=getattr(exc,'filename',None) or target
         messagebox.showerror(TITLE,'소재 조사 창을 열지 못했습니다.\n단계: {}\n경로: {}\n\n{}'.format(stage,path,exc),parent=root)
     finally:

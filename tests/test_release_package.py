@@ -174,7 +174,7 @@ class PrivatePackageTests(unittest.TestCase):
    m.main();launch.assert_called_once();app.assert_not_called()
  def test_managed_production_launch_attaches_update_checks(self):
   m=load_app();root=Mock();app=Mock();lease=Mock();context={'test':True}
-  with patch.object(m.SuiteUpdater,'managed_context',return_value=context),patch.object(m.SuiteUpdater,'managed_lease',return_value=lease),patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as ready,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root),patch.object(m.SuiteErrors,'install'),patch.object(m.SuiteErrors,'attach'):
+  with patch.object(m.SuiteUpdater,'managed_context',return_value=context),patch.object(m.SuiteUpdater,'managed_lease',return_value=lease),patch.object(m.SuiteUpdater,'attach') as attach,patch.object(m.SuiteUpdater,'mark_ready') as ready,patch.object(m,'IntegrationApp',return_value=app),patch.object(m,'configure_windows_app_identity'),patch('tkinter.Tk',return_value=root):
    m.main();attach.assert_called_once_with(app,context,m.SUITE_APP_VERSION);ready.assert_called_once_with(context)
    root.mainloop.assert_called_once();lease.release.assert_called_once()
 

@@ -10,7 +10,7 @@ but it is now generated. Edit these instead of app.pyw:
   src/host/mes_layout.py      MES 정렬: 판 크기·칸 너비 맞춤 (MES_LAYOUT_SOURCE)
   src/host/card_modifier_10_30.py   카드에 복사하는 수정10.30 스크립트 (CARD_MODIFIER_BYTES)
   src/host/windows_tray.py    시스템 트레이
-  src/*.py                    보조창·소재·오류기록·업데이트 (as before)
+  src/*.py                    보조창·소재·업데이트 (as before)
   assets/*.png, *.wav         아이콘·알림 스위치·알림음
 
 Run:  python tools/build_app.py           (writes apps/jihunius/app.pyw)
@@ -31,7 +31,7 @@ OUTPUT = 'apps/jihunius/app.pyw'
 ICON_SIZES = (256, 64, 48, 32, 24, 16)
 # 창 제목과 글자 하나까지 같아야 합니다(메인이 이 제목으로 그 창을 찾아 앞으로 가져오고 닫습니다).
 COMPANION_TITLES = {'protrusion': '돌출량 현황표', 'wash-log': '세척일보',
-                    'special-table': '특수 돌출량', 'material': '소재 사용량 조사(Beta)'}
+                    'special-table': '특수 돌출량', 'material': '소재 사용량 조사'}
 
 
 def _text(root, name):

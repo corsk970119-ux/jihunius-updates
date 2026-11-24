@@ -36,8 +36,7 @@ class MesLayoutTabTests(unittest.TestCase):
             wash.real_pointer = wash.layout.Pointer                          # 두 번 연결해도 원래 클래스를 씀
         wash.layout.Pointer = lambda api: wash.real_pointer(api, sleep=user.sleep, clock=user.clock)
         for item in (patch.object(self.m, 'mes_layout_reader', lambda module: reader),
-                     patch.object(self.m, 'wash_prepare_window', lambda api, stop: {'maximized': True}),
-                     patch.object(self.m.SuiteErrors, 'capture', Mock())):
+                     patch.object(self.m, 'wash_prepare_window', lambda api, stop: {'maximized': True})):
             item.start()
             self.addCleanup(item.stop)
         wash.show_completion = Mock()
@@ -50,7 +49,6 @@ class MesLayoutTabTests(unittest.TestCase):
         wash.stop = stop or threading.Event()
         wash.controls()
         wash.started = self.m.time.monotonic()
-        wash.trail = []
         wash.layout_work()
         for _ in range(50):
             wash.poll()
@@ -134,7 +132,6 @@ class MesLayoutTabTests(unittest.TestCase):
         self.assertEqual({mode for mode, label, root in reader.captures}, {'mes_rows'})
         self.assertEqual(user.cursor, (5, 5))                               # 마우스를 원래 자리로
         self.assertEqual(str(wash.layout_button.cget('state')), 'normal')
-        self.m.SuiteErrors.capture.assert_not_called()
         # 다 맞췄을 때도 세척완료처럼 끝났음을 알리는 창을 띄웁니다(사용자 요청 2026-11-17).
         wash.show_completion.assert_called_once()
         title, text = wash.show_completion.call_args.args
@@ -191,15 +188,16 @@ class MesLayoutTabTests(unittest.TestCase):
             changed = SimpleNamespace(POWERSHELL='다른 코드', check_capture=None, base64=None)
             self.assertIs(self.m.mes_layout_reader(changed), changed)                                         # 줄을 못 찾으면 원래 판독기
 
-    def test_missing_mes_window_is_reported_and_recorded(self):
+    def test_missing_mes_window_is_reported(self):
         app = self.launch()
         wash, user, reader = self.connect(app, flow.fresh(), windows=[])
         self.finish(wash)
         self.assertEqual(wash.layout_status.get(), '중단: ROOT MES 창을 하나만 실행해 주세요.')
-        record = self.m.SuiteErrors.capture.call_args
-        self.assertEqual(record.kwargs['feature'], 'MES 정렬')
-        self.assertIn('ROOT MES', record.args[0])
         wash.show_completion.assert_called_once()
+        title, text = wash.show_completion.call_args.args
+        self.assertEqual(title, 'MES 정렬 중단')
+        self.assertIn('ROOT MES 창을 하나만 실행해 주세요.', text)
+        self.assertNotIn('오류 기록', text)                                   # 없어진 오류 기록 창을 가리키지 않음
         self.assertEqual(str(wash.layout_button.cget('state')), 'normal')
 
     def test_stop_is_not_an_error(self):
@@ -211,10 +209,9 @@ class MesLayoutTabTests(unittest.TestCase):
         self.finish(wash, stop=stop)
         self.assertTrue(wash.layout_status.get().startswith('중지함'), wash.layout_status.get())
         self.assertEqual(mes.presses, 0)
-        self.m.SuiteErrors.capture.assert_not_called()
         wash.show_completion.assert_not_called()
 
-    def test_partial_result_is_shown_and_recorded_with_the_trail(self):
+    def test_partial_result_is_shown(self):
         app = self.launch()
         mes = flow.fresh(removal_works=False)                               # 칸이 없어지지 않는 MES
         wash, user, reader = self.connect(app, mes)
@@ -223,26 +220,18 @@ class MesLayoutTabTests(unittest.TestCase):
         title, text = wash.show_completion.call_args.args
         self.assertEqual(title, 'MES 정렬 일부만 완료')
         self.assertIn('없애지 못한 칸', text)
-        record = self.m.SuiteErrors.capture.call_args                       # 원인 파악용으로 진행 기록과 함께 남김
-        self.assertEqual((record.kwargs['feature'], record.kwargs['stage']), ('MES 정렬', '일부만 완료'))
-        self.assertIn('없애지 못한 칸', record.kwargs['detail'])
-        self.assertIn('칸 버리기 · 거래처코드 · 그대로 있음 · 위로', record.kwargs['context'])
-        tail = record.kwargs['detail'].split('[작업지시관리 표 기록]')[1]       # 표 기록은 길이 제한에 잘리지 않게 따로 붙임
-        self.assertIn('작업지시관리 표 (', tail)
-        self.assertIn('PART-NO@', tail)
-        self.assertIn('칸 버리기 · 거래처코드 · 그대로 있음 · 아래로', tail)
-        self.assertNotIn('비밀환자', record.kwargs['detail'] + record.kwargs['context'])
+        self.assertNotIn('비밀환자', text)
+        self.assertEqual(str(wash.layout_button.cget('state')), 'normal')
 
-    def test_error_record_carries_the_trail_for_diagnosis(self):
+    def test_a_window_in_front_stops_before_any_click(self):
         app = self.launch()
         mes = flow.fresh()
         wash, user, reader = self.connect(app, mes)
         user.foreground = 777                                               # 다른 창이 앞에 있음
         self.finish(wash)
         self.assertIn('MES 이외의 창이 앞에 있어', wash.layout_status.get())
-        record = self.m.SuiteErrors.capture.call_args
-        self.assertIn('설비별공구관리 안 열림', record.kwargs['context'])
         self.assertEqual(mes.presses, 0)
+        wash.show_completion.assert_called_once()
 
 
 if __name__ == '__main__':
