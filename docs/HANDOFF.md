@@ -609,3 +609,4 @@ python tools/run_tests.py storage    # 이름에 storage가 든 테스트 파일
 - 실행 파일이 약 100KB 작아졌다(1,413,687 → 1,310,798 bytes).
 - 테스트: 오류 기록 전용 3개 파일 삭제(28개), `tests/test_error_history_removed.py` 5개 추가(소스·빌드본·보조창에 흔적 없음, 켤 때 알림 창·예외 처리기를 감싸지 않음, 세척완료 emit은 화면으로만, 소재 이름 일치, 버튼 없음). `test_mes_layout_tab`·`test_wash_large_list`·`test_storage_*`·`test_release_package`·`test_tactile_controls`에서 기록을 확인하던 부분 정리. 전체 647 통과. 새 테스트가 소재 창에 남아 있던 기록 2곳을 잡아 줘서 같이 지웠다.
 - [미확인] Windows 실제 화면.
+- 배포 뒤 Google Drive `일 → CNC 스크립트`의 `지후니우스.pyw`를 2026.11.24.1로 바꿈(새 파일 크기 일치, 설명에 버전·SHA256, 이전 2026.11.23.2 파일은 휴지통). 드라이브 작업기록은 이번에는 요청이 없어 갱신하지 않았다(마지막 기록: 2026-11-23, 2026.11.23.2까지).
