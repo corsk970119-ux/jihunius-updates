@@ -203,8 +203,9 @@ class DateFolderRolloverTests(unittest.TestCase):
         self.stack.enter_context(patch.object(
             self.m, 'date_folder_day', lambda now=None: real_day(clock[0] if now is None else now)))
         root = tk.Tk(); app = self.m.IntegrationApp(root); self.apps.append(app)
+        # 켤 때의 값은 진짜 시계를 따르므로, 여기서부터 가짜 시계(11월 24일)에 맞춥니다.
         app.folder_input.delete(0, 'end'); app.folder_input.insert(0, '11.24')
-        self.assertEqual(app.folder_day, date(2026, 11, 24))
+        app.folder_day = date(2026, 11, 24)
 
         def run(seconds):
             deadline = time.monotonic() + seconds

@@ -8,7 +8,7 @@
 2. `dist/지후니우스.pyw`를 기존 프로그램 폴더에 놓고 실행합니다. 기존 설정·데이터 파일은 그대로 둡니다.
 3. 실행 파일의 위치는 이후에도 유지합니다. 바탕화면 바로가기를 자동으로 생성하지 않습니다.
 
-기존 Windows용 Python 3.8 이상과 Tkinter를 그대로 사용합니다. EXE로 변환하지 않았습니다.
+기존 Windows용 Python 3.8 이상과 Tkinter를 그대로 사용합니다. 프로그램 자체는 EXE로 변환하지 않았습니다(아래 "아이콘 하나짜리 실행 파일"은 이 `.pyw`를 품고 있다가 실행해 주는 껍데기입니다).
 각 PC에 GitHub 로그인, Git, 별도 연결키를 등록할 필요가 없습니다.
 
 ## 업데이트 사용
@@ -66,6 +66,21 @@ python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 `tests/test_build_app.py`가 커밋된 `app.pyw`와 원본 빌드가 바이트 단위로 같은지 검사합니다. 같은 원본이면 어느 PC에서 빌드해도 같은 파일이 나옵니다.
+
+### 아이콘 하나짜리 실행 파일 (`지후니우스.exe`)
+
+`.pyw` 옆에 업데이트가 남기는 파일(`.지후니우스.pyw.previous`, `.지후니우스.pyw.update.lock`)이 보이지 않게, 지후니우스 아이콘이 붙은 파일 하나로 쓰는 방법입니다.
+
+```sh
+python tools/build_launcher.py       # apps/jihunius/app.pyw 를 넣어 build/지후니우스.exe (mingw-w64 필요, 리눅스에서 만듦)
+python tools/run_tests.py launcher   # mingw-w64 가 있으면 만들어 보고, wine 까지 있으면 실제로 돌려 봄
+```
+
+- `지후니우스.exe`는 안에 든 `지후니우스.pyw`를 `%LOCALAPPDATA%\Jihunius\app`에 풀고, 탐색기에서 더블클릭한 것과 같은 방식으로 실행합니다(`src/launcher/launcher.c`). 그 자리에 파일이 없거나 깨졌거나 exe 안의 것이 더 새 버전일 때만 풉니다.
+- 업데이트·중복 실행 방지·보조창은 전부 `.pyw`가 예전 그대로 합니다. 업데이트가 남기는 파일도 `%LOCALAPPDATA%\Jihunius\app` 안에 생기므로 exe를 둔 폴더에는 exe 하나만 남습니다. 배포할 때마다 exe를 새로 만들 필요는 없습니다.
+- PC에 Python이 있어야 하는 것은 같습니다. 설정·업무 데이터 위치(`%LOCALAPPDATA%`, 공유폴더)는 바뀌지 않습니다.
+- `.pyw`에서 exe로 바꿀 때: 기존 지후니우스를 **완전 종료**한 뒤 exe를 실행하고, 예전 `지후니우스.pyw`와 점으로 시작하는 두 파일은 지웁니다(둘 다 두면 서로 다른 자리에서 두 번 켜질 수 있습니다).
+- 서명이 없는 실행 파일이라 인터넷으로 받은 뒤 처음 실행할 때 Windows가 "PC 보호" 창을 띄울 수 있습니다(추가 정보 → 실행).
 
 ### 배포
 
