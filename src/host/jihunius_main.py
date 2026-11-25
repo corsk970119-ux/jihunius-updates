@@ -519,6 +519,13 @@ class MachineMonitor:
 
 # 첨부 로고를 내장합니다. 외부 이미지 파일이나 추가 패키지는 필요하지 않습니다.
 APP_USER_MODEL_ID = "Jihunius.NCProgramManager"
+# 설비 보드의 머신 자리(사용자 요청 2026-11-26): 두 칸씩 세로로. None 은 머신 알림 스위치 자리입니다.
+MACHINE_BOARD_ROWS = ((1, 2), (3, 4), (5, 6), (7, 8), (None, 9))
+MACHINE_BOARD_COLUMNS = 2
+# 인수인계를 펼치고 접을 때 오른쪽 화면의 폭을 붙들어 두는 시간(창 크기가 자리 잡을 때까지).
+HANDOVER_HOLD_MS = 150
+# 작업 기록은 맨 아래 한 줄 전체를 씁니다. 창을 가장 작게 줄였을 때 보이는 줄 수입니다(창을 늘리면 이 칸이 늘어납니다).
+LOG_MINIMUM_LINES = 4
 APP_ICON_PNGS = ...  # build: tools/build_app.py
 
 PI_VALUE_MAP_A12 = {
@@ -3207,14 +3214,16 @@ class SingleImportPanel:
         self.number.focus_set()
 
     def place(self):
-        """처음에는 작업 기록 칸 위 오른쪽에, 옮긴 적이 있으면 마지막에 둔 자리에 엽니다."""
+        """처음에는 프로그램 번호 칸 아래쪽에(오른쪽의 설비 보드를 가리지 않게), 옮긴 적이 있으면 마지막에 둔 자리에 엽니다.
+
+        이 창을 쓰는 동안 메인 화면의 번호 칸은 쓰지 않으므로 그 자리와 작업 기록 위에 겹쳐 둡니다."""
         window, app = self.window, self.app
         try:
             window.update_idletasks()
             if self.position is None:
-                anchor = app.log_card
-                x = anchor.winfo_rootx() + anchor.winfo_width() - window.winfo_reqwidth() - 12
-                y = anchor.winfo_rooty() + 12
+                anchor, main = app.number_input.master, app.window
+                x = max(main.winfo_rootx() + 12, anchor.winfo_rootx() + anchor.winfo_width() - window.winfo_reqwidth())
+                y = main.winfo_rooty() + main.winfo_height() - 12 - window.winfo_reqheight()
             else:
                 x, y = self.position
             window.geometry("+{}+{}".format(max(0, int(x)), max(0, int(y))))
@@ -3421,8 +3430,17 @@ class IntegrationApp:
         outer_frame = frame
         frame.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        # 공통 영역: 왼쪽에 인수인계 칸(펼쳤을 때만), 오른쪽에 머리줄과 탭 화면.
+        # 머리줄을 탭 화면과 같은 칸에 두어, 인수인계를 펼쳐 창이 왼쪽으로 늘어나도 제목·탭·인수인계 버튼이
+        # 화면에서 움직이지 않습니다(예전에는 머리줄이 창 전체 폭이라 왼쪽으로 320픽셀 튀었음. 사용자 요청 2026-11-26).
+        common_body = ttk.Frame(outer_frame)
+        common_body.grid(row=1, column=0, sticky="nsew")
+        common_body.columnconfigure(1, weight=1)
+        common_body.rowconfigure(1, weight=1)
+        self.body = common_body
+
+        header = ttk.Frame(common_body)
+        header.grid(row=0, column=1, sticky="ew", pady=(0, 10))
         header.columnconfigure(0, weight=1)
         title_row = ttk.Frame(header)
         title_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -3471,20 +3489,17 @@ class IntegrationApp:
 
 
         # 공통 인수인계 영역은 두 탭 밖에 두어 어느 화면에서도 사용할 수 있습니다.
-        common_body = ttk.Frame(outer_frame)
-        common_body.grid(row=1, column=0, sticky="nsew")
-        common_body.columnconfigure(1, weight=1)
-        common_body.rowconfigure(0, weight=1)
-        self.body = common_body
         page_host = ttk.Frame(common_body)
-        page_host.grid(row=0, column=1, sticky="nsew")
+        page_host.grid(row=1, column=1, sticky="nsew")
+        self.page_host = page_host
         page_host.rowconfigure(0, weight=1)
         page_host.columnconfigure(0, weight=1)
         self.app_pages = {key: ttk.Frame(page_host) for key in ("cnc", "stl", "wash", "mes")}
         frame = self.app_pages["cnc"]
         frame.grid(row=0, column=0, sticky="nsew")
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(2, weight=1)
+        # 본문(드라이브·번호·설비 보드)은 필요한 높이만 쓰고, 남는 높이는 맨 아래 작업 기록이 받습니다.
+        frame.rowconfigure(3, weight=1)
         self.stl_app = None
 
         modes = ttk.Frame(frame, style="Card.TFrame", padding=15)
@@ -3582,15 +3597,16 @@ class IntegrationApp:
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
 
-        self.build_machine_board(frame)
+        self.build_machine_board(body)
 
-        log_card = ttk.Frame(body, style="Card.TFrame", padding=15)
+        # 작업 기록은 본문 아래 한 줄 전체(예전 설비 보드 자리). 창을 늘리면 이 칸이 늘어납니다.
+        log_card = ttk.Frame(frame, style="Card.TFrame", padding=15)
         self.log_card = log_card
-        log_card.grid(row=0, column=3, sticky="nsew")
+        log_card.grid(row=3, column=0, sticky="nsew")
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
         ttk.Label(log_card, text="작업 기록 · 최근 100줄", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        self.log = tk.Text(log_card, width=30, height=10, font=("맑은 고딕", 9), wrap="word", state="disabled",
+        self.log = tk.Text(log_card, width=30, height=LOG_MINIMUM_LINES, font=("맑은 고딕", 9), wrap="word", state="disabled",
                            background="#050a14", foreground="#aebcd8", relief="flat", borderwidth=0,
                            highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2e333d",
                            padx=10, pady=6)
@@ -3614,7 +3630,7 @@ class IntegrationApp:
             except (OSError, AttributeError) as error:
                 self.drive_hint.set("추가 버튼으로 파일 선택 · Delete: 삭제\n더블클릭: 열기 · F2: 이름 변경\n수정10.30 자동 추가 · 비우기 시 보존")
                 self.append_log("파일 드래그 연결 실패: {}\n추가 버튼으로 파일을 추가할 수 있습니다.\n".format(error))
-        body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), log_card.winfo_reqheight())
+        body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), self.machine_board.winfo_reqheight())
         body.rowconfigure(0, minsize=body_minimum)
         frame.rowconfigure(2, minsize=body_minimum)
         minimum_height = outer_frame.winfo_reqheight()
@@ -3625,9 +3641,11 @@ class IntegrationApp:
         self.wash_app = WashApp(self, self.app_pages["wash"], self.app_pages["mes"])
         self.apply_visual_theme()
         window.update_idletasks()
-        body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), log_card.winfo_reqheight())
+        body_minimum = max(drive_card.winfo_reqheight(), inputs.winfo_reqheight(), self.machine_board.winfo_reqheight())
         body.rowconfigure(0, minsize=body_minimum)
         frame.rowconfigure(2, minsize=body_minimum)
+        # 위에서 고친 줄 높이가 반영된 뒤에 읽어야 실제로 필요한 높이가 나옵니다(세로 설비 보드는 버튼 줄이 많아 차이가 큼).
+        window.update_idletasks()
         self.minimum_height = max(740, outer_frame.winfo_reqheight())
         window.minsize(1000, self.minimum_height)
         window.geometry("1120x{}".format(max(830, self.minimum_height)))
@@ -4019,7 +4037,8 @@ class IntegrationApp:
     def build_machine_monitor(self, parent):
         """머신별 칸(상태색으로 꽉 채움·PRM 번호)과 그 아래 소재 버튼 자리를 만듭니다.
 
-        윗줄 1·3·5·7, 아랫줄 2·4·6·8·9. 반환값은 호기별 버튼 자리 프레임입니다."""
+        두 칸씩 세로로: 1·2 / 3·4 / 5·6 / 7·8 / (머신 알림)·9 (MACHINE_BOARD_ROWS).
+        반환값은 호기별 버튼 자리 프레임입니다."""
         self.machine_tiles = {}
         self.current_machines = {}
         self.machine_detail_dialog = None
@@ -4033,11 +4052,16 @@ class IntegrationApp:
             tile_height = max(56, int(round(12 + title_h + number_h - 1)))
         except Exception:
             title_y, number_y, tile_height = 15, 38, 56
-        for row, machines in enumerate(((1, 3, 5, 7), (2, 4, 6, 8, 9))):
+        last_row, last_column = len(MACHINE_BOARD_ROWS) - 1, MACHINE_BOARD_COLUMNS - 1
+        for row, machines in enumerate(MACHINE_BOARD_ROWS):
             for column, machine in enumerate(machines):
+                if machine is None:
+                    continue   # 머신 알림 자리(build_machine_board 에서 채움)
                 cell = self.ttk.Frame(parent, style="Card.TFrame", borderwidth=0)
-                cell.grid(row=row + 1, column=column, sticky="ew", padx=(0, 10 if column < 4 else 0),
-                          pady=(0, 10 if row == 0 else 0))
+                # 두 줄의 칸 폭이 같도록 사이 간격(10)을 양쪽에 반씩 나눕니다. 줄 위쪽에 붙여 옆 칸(머신 알림)과 윗선을 맞춥니다.
+                cell.grid(row=row + 1, column=column, sticky="new",
+                          padx=(0 if column == 0 else 5, 0 if column == last_column else 5),
+                          pady=(0, 10 if row < last_row else 0))
                 cell.columnconfigure(0, weight=1)
                 tile = self.tk.Canvas(cell, width=150, height=tile_height, background="#060b16",
                                       highlightthickness=0, borderwidth=0,
@@ -4168,24 +4192,31 @@ class IntegrationApp:
         self.drive_delete_button.grid(row=0, column=1, padx=(6, 0), sticky="ns")
         return drive_card
 
-    def build_machine_board(self, frame):
-        """설비 · 소재 사용량 조사 보드(머신 칸, 불량·소재교체, 머신 알림)를 만듭니다."""
+    def build_machine_board(self, body):
+        """설비 · 소재 사용량 조사 보드(머신 칸, 불량·소재교체, 머신 알림)를 만듭니다.
+
+        본문 오른쪽 칸에 세로로 둡니다(사용자 요청 2026-11-26: 작업 기록과 자리를 바꿈)."""
         tk, ttk, window = self.tk, self.ttk, self.window
         # A-3: 머신 상태 칸 아래에 같은 호기의 불량/소재교체를 붙인 한 장의 설비 보드.
-        details = ttk.Frame(frame, style="RoundedCard.TFrame", padding=(16, 12))
-        details.grid(row=3, column=0, sticky="ew")
-        for column in range(5):
+        details = ttk.Frame(body, style="RoundedCard.TFrame", padding=(16, 12))
+        details.grid(row=0, column=3, sticky="nsew")
+        self.machine_board = details
+        for column in range(MACHINE_BOARD_COLUMNS):
             details.columnconfigure(column, weight=1, uniform="machine-cell")
         self.search_root_text = tk.StringVar(value=str(year_search_root(self.saved_program_year)))
         self.year_value.trace_add("write", self.update_year_display)
         self.destination_text = tk.StringVar(value="F:\\ / G:\\ 연결 대기")
         board_header = ttk.Frame(details, style="Card.TFrame", borderwidth=0)
-        board_header.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 8))
+        board_header.grid(row=0, column=0, columnspan=MACHINE_BOARD_COLUMNS, sticky="ew", pady=(0, 8))
         ttk.Label(board_header, text="설비 · 소재 사용량 조사", style="Section.TLabel").pack(side="left")
         quick_cells = self.build_machine_monitor(details)
-        # N3: 머신 알림 스위치와 알림 설정은 윗줄 7호기 옆 빈 칸에 둡니다(명령·바인딩은 그대로).
-        alert_controls = ttk.Frame(details, style="Card.TFrame", padding=(10, 6))
-        alert_controls.grid(row=1, column=4, sticky="nsew", pady=(0, 10))
+        # 머신 알림 스위치와 알림 설정은 맨 아랫줄 9호기 왼쪽 빈 칸에 둡니다(명령·바인딩은 그대로).
+        alert_row, alert_column = next((row, machines.index(None)) for row, machines in enumerate(MACHINE_BOARD_ROWS)
+                                       if None in machines)
+        alert_controls = ttk.Frame(details, style="Card.TFrame", padding=(10, 3))
+        alert_controls.grid(row=alert_row + 1, column=alert_column, sticky="nsew",
+                            padx=(0 if alert_column == 0 else 5, 0 if alert_column == MACHINE_BOARD_COLUMNS - 1 else 5),
+                            pady=(0, 10 if alert_row < len(MACHINE_BOARD_ROWS) - 1 else 0))
         alert_controls.columnconfigure(0, weight=1)
         self.machine_alert_controls = alert_controls
         self.machine_alert_toggle = tk.Canvas(alert_controls, width=174, height=48, background="#060b16",
@@ -4407,12 +4438,35 @@ class IntegrationApp:
         self.handover_toggle.configure(text=text, style="HandoverNotice.TButton"
                                         if count or self.handover_read_error else "HandoverToggle.TButton")
 
+    def hold_handover_content(self):
+        """인수인계를 펼치고 접는 동안 오른쪽 칸(머리줄·탭 화면)의 폭을 지금 값으로 붙들어 둡니다.
+
+        창 크기가 바뀌기 전에 칸 배치가 먼저 돌면서 화면 전체가 한 번 눌렸다가(접을 때는 늘어났다가)
+        돌아오던 것을 없앱니다. 창 크기가 자리 잡으면 release_handover_content 가 풉니다."""
+        self.release_handover_content()
+        width = self.page_host.winfo_width()
+        if width > 1:
+            self.body.columnconfigure(1, weight=0, minsize=width)
+            self.handover_hold_timer = self.window.after(HANDOVER_HOLD_MS, self.release_handover_content)
+
+    def release_handover_content(self):
+        timer, self.handover_hold_timer = getattr(self, "handover_hold_timer", None), None
+        try:
+            if timer is not None:
+                self.window.after_cancel(timer)
+            self.body.columnconfigure(1, weight=1, minsize=0)
+        except self.tk.TclError:
+            pass   # 종료 중
+
     def toggle_handover(self):
         self.window.update_idletasks()
         width, height = self.window.winfo_width(), self.window.winfo_height()
         x, y = self.window.winfo_x(), self.window.winfo_y()
         normal = self.window.state() == "normal"
         self.handover_expanded = not self.handover_expanded
+        if normal and (self.handover_expanded or self.handover_added_width):
+            # 창 폭이 인수인계 칸만큼 바뀌는 경우에만(최대화 상태에서는 화면 안에서 나눠 씀).
+            self.hold_handover_content()
         if self.handover_expanded:
             self.handover_card.grid()
             self.body.columnconfigure(0, weight=0, minsize=320)
@@ -4436,10 +4490,12 @@ class IntegrationApp:
             self.handover_added_width = 0
             self.handover_left_shift = 0
         self.update_handover_toggle()
+        # 창 크기와 칸 자리를 한 번에 반영합니다(사이에 다른 그리기가 끼지 않게).
+        self.window.update_idletasks()
 
     def build_handover_panel(self, parent):
         card = self.ttk.Frame(parent, style="Card.TFrame", padding=14)
-        card.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        card.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 14))   # 머리줄 옆까지 창 높이 전체
         card.columnconfigure(0, weight=1)
         card.rowconfigure(0, weight=1)
         notebook = self.ttk.Notebook(card, style="Handover.TNotebook")
@@ -5829,7 +5885,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.25.1'
+SUITE_APP_VERSION = '2026.11.26.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

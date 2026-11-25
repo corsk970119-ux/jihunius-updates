@@ -145,8 +145,16 @@ class QuickPanel:
             # 설비 보드형: 호기별 머신 칸 아래 자리에 같은 명령의 버튼만 배치합니다.
             self.frame=parent;self.message=tk.StringVar(value='')
             # 저장 결과·오류 문구는 머신 칸 아래 한 줄 전체를 씁니다(width=1: 긴 문구가 배치를 밀지 않음).
-            self.caption=ttk.Label(parent,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9),width=1,anchor='w')
-            self.caption.grid(row=3,column=0,columnspan=5,sticky='ew',pady=(8,0))
+            # 보드가 좁아도(세로 배치) 문구가 잘리지 않게 보드 폭에서 줄을 바꿉니다. 두 줄 높이를 늘 잡아 두어
+            # 문구가 뜨거나 길어져도 아래 칸들이 움직이지 않습니다.
+            columns,rows=parent.grid_size()
+            from tkinter import font as tkfont
+            line=tkfont.Font(root=parent,family='맑은 고딕',size=9).metrics('linespace')
+            holder=ttk.Frame(parent,style='Card.TFrame',borderwidth=0,height=2*line+2)
+            holder.grid(row=rows,column=0,columnspan=max(1,columns),sticky='ew',pady=(8,0));holder.pack_propagate(False)
+            self.caption=ttk.Label(holder,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9),width=1,anchor='nw',justify='left')
+            self.caption.pack(fill='both',expand=True)
+            self.caption.bind('<Configure>',lambda event:event.widget.configure(wraplength=max(1,event.width)),add='+')
             for name in ('Danger','Secondary'):
                 app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,6),font=('맑은 고딕',10,'bold'))
             for n in range(1,10):

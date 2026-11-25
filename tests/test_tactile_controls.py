@@ -96,11 +96,22 @@ class HeaderAndBoardRegressionTests(unittest.TestCase):
             self.assertGreaterEqual(int(str(app.style.lookup(style, 'insertwidth') or 1)), 2, style)
 
     def test_material_caption_has_full_board_width(self):
+        """소재 저장 문구는 머신 칸 아래에서 보드 폭 전체를 쓰고, 보드가 좁으면 줄을 바꿔 잘리지 않는다."""
+        from tkinter import font as tkfont
         app = self.launch()
-        app.material_quick.notice('3호기: ' + '저장하지 못했습니다 ' * 6, True)
-        app.window.geometry('1000x760'); app.window.update()
+        app.window.geometry('1000x{}'.format(app.minimum_height)); app.window.update()   # 가장 좁은 창
         caption = app.material_quick.caption
-        self.assertGreater(caption.winfo_width(), 800)
+        left = app.machine_tiles[1][0]; right = app.machine_tiles[2][0]
+        self.assertLessEqual(caption.winfo_rootx(), left.winfo_rootx())                  # 왼쪽 머신 칸부터
+        self.assertGreaterEqual(caption.winfo_rootx() + caption.winfo_width(), right.winfo_rootx() + right.winfo_width())
+        self.assertGreater(caption.winfo_rooty(), app.material_quick.rows[9]['defect'].winfo_rooty())   # 맨 아래 버튼 줄 밑
+        font = tkfont.Font(root=app.window, font=caption.cget('font'))
+        # 프로그램에 들어 있는 가장 긴 안내 문구에 호기 이름이 붙은 것
+        longest = '3호기: 확인 중 소재 정보가 변경되었습니다. 최신 내용을 확인한 뒤 다시 눌러주세요.'
+        app.material_quick.notice(longest, True); app.window.update()
+        self.assertEqual(int(str(caption.cget('wraplength'))), caption.winfo_width())    # 보드 폭에서 줄바꿈
+        self.assertLessEqual(font.measure(longest), 2 * caption.winfo_width() - 4 * font.measure('가'))   # 두 줄 안에 들어감
+        self.assertGreaterEqual(caption.winfo_height(), 2 * font.metrics('linespace'))   # 두 줄 자리가 늘 잡혀 있음
 
     def test_machine_tile_shows_current_tool_number(self):
         app = self.launch()

@@ -36,27 +36,28 @@ class MainWindowPlacementTests(unittest.TestCase):
    if not app._suite_stopped:self.close_app(app)
   self.apps.clear();self.m=None;gc.collect()
  def test_main_window_restores_last_size_and_right_monitor_position_after_full_exit(self):
-  app=self.launch();self.require_height(app,920);app.window.geometry('1230x920+2180+120');app.window.update()
-  self.assertEqual(self.geometry(app),(1230,920,2180,120))
+  # 높이는 그때의 최소 높이보다 조금 크게 잡습니다(배치·글꼴에 따라 최소 높이가 달라져도 건너뛰지 않게).
+  app=self.launch();h=self.tall(app,40);app.window.geometry('1230x{}+2180+120'.format(h));app.window.update()
+  self.assertEqual(self.geometry(app),(1230,h,2180,120))
   self.close_app(app)
   next_app=self.launch()
-  self.assertEqual(self.geometry(next_app),(1230,920,2180,120))
+  self.assertEqual(self.geometry(next_app),(1230,h,2180,120))
   self.assertEqual(next_app._window_state.path.name,'jihunius.json')
   self.assertEqual(next_app.material_button.cget('text'),'소재 사용량 조사')
  def test_tray_flush_and_later_resize_are_preserved_without_sharing_pc_preferences(self):
-  app=self.launch();self.require_height(app,900);app.window.geometry('1180x900+2100+95');app.window.update()
+  app=self.launch();h=self.tall(app,20);app.window.geometry('1180x{}+2100+95'.format(h));app.window.update()
   app._hide_to_tray()
   path=Path(self.tmp.name)/'JihuniusSuite/window-state/jihunius.json'
   self.assertTrue(path.exists(),'Hiding must flush normal bounds before losing visible state')
-  self.assertEqual(json.loads(path.read_text())['normal'],[2100,95,3280,995])
+  self.assertEqual(json.loads(path.read_text())['normal'],[2100,95,3280,95+h])
   app.restore_from_tray();app.window.update()
-  self.assertEqual(self.geometry(app),(1180,900,2100,95))
-  app.window.geometry('1260x940+80+70');app.window.update();self.close_app(app)
-  next_app=self.launch();self.assertEqual(self.geometry(next_app),(1260,940,80,70))
+  self.assertEqual(self.geometry(app),(1180,h,2100,95))
+  app.window.geometry('1260x{}+80+70'.format(h+40));app.window.update();self.close_app(app)
+  next_app=self.launch();self.assertEqual(self.geometry(next_app),(1260,h+40,80,70))
   self.close_app(next_app)
   with patch.dict(os.environ,LOCALAPPDATA=str(Path(self.tmp.name)/'other-pc')):
    other=self.launch();self.assertEqual(other.window.winfo_width(),1120)
-   self.assertNotEqual(self.geometry(other),(1260,940,80,70))
+   self.assertNotEqual(self.geometry(other),(1260,h+40,80,70))
    self.close_app(other)
  def tall(self,app,extra=0):
   # 글꼴에 따라 최소 높이가 달라지므로, 그보다 조금 큰 높이를 그때그때 정합니다(건너뛰지 않고 항상 확인).
