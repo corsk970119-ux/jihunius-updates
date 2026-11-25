@@ -7,6 +7,7 @@ Windows / Python 3.8 이상. 추가 패키지 설치 없이 실행합니다.
 기본 검색 기준: \\srvc5352374b\생산공유폴더\★NC프로그램파일
 연도 입력칸에 2026처럼 입력하면 ★ 2026 폴더를 선택합니다. 기본값은 2026입니다.
 7.1 또는 07.01, 10.12처럼 날짜 폴더를 지정합니다.
+날짜 폴더 칸에는 켤 때 오늘 날짜가 들어가고, 켜 둔 채로는 매일 오전 8시에 그날 날짜로 바뀝니다.
 날짜의 월에 맞는 월 폴더를 자동 선택합니다. (예: ★ 2026/10월/10.13)
 월·일의 앞자리 0은 생략할 수 있으며, 같은 날짜의 폴더 표기도 인식합니다.
 지정한 날짜 폴더와 그 안의 하위폴더만 검색하며, 다른 날짜 폴더는 제외합니다.
@@ -1229,6 +1230,17 @@ def single_import_default_date(today=None):
 def single_import_folder_text(day):
     """달력에서 고른 날짜를 메인 화면의 날짜 폴더 칸과 같은 표기로(예: 11.03)."""
     return "{}.{:02d}".format(day.month, day.day)
+
+
+# 날짜 폴더 칸은 켜 둔 채로 두어도 매일 오전 8시에 그날 날짜로 바뀝니다(사용자 요청 2026-11-25).
+DATE_FOLDER_ROLLOVER_HOUR = 8
+DATE_FOLDER_POLL_MS = 1000
+
+
+def date_folder_day(now=None):
+    """오전 8시를 하루의 시작으로 본 날짜: 8시부터는 그날, 8시 전에는 전날."""
+    now = datetime.now() if now is None else now
+    return (now - timedelta(hours=DATE_FOLDER_ROLLOVER_HOUR)).date()
 
 
 def year_search_root(year=PROGRAM_YEAR, base_root=None):
@@ -3515,6 +3527,8 @@ class IntegrationApp:
         # 오늘 날짜를 미리 넣어 둡니다(예: 11.10). 입력칸에 들어가면 전체 선택되어 바로 고쳐 쓸 수 있습니다.
         today = datetime.now()
         self.folder_input.insert(0, "{}.{:02d}".format(today.month, today.day))
+        # 켜 둔 채로 오전 8시를 넘기면 그날 날짜로 바꿉니다(roll_date_folder). 켤 때 넣는 날짜는 위 그대로입니다.
+        self.folder_day = date_folder_day(today)
         self.folder_input.bind("<FocusIn>", lambda event: event.widget.select_range(0, "end"), add="+")
         self.program_path_button = ttk.Button(date_options, text="경로설정", style="Secondary.TButton",
                                               command=self.configure_program_path)
@@ -3637,6 +3651,7 @@ class IntegrationApp:
         self.folder_input.focus_set()
         window.after(80, self.drain_events)
         window.after(1000, self.poll_destination)
+        window.after(DATE_FOLDER_POLL_MS, self.poll_date_folder)
         window.after(2500, self.poll_handover)
         self.machine_monitor.start()
         window.after(1000, self.expire_machine_status)
@@ -5298,6 +5313,49 @@ class IntegrationApp:
         finally:
             self.window.after(1000, self.poll_destination)
 
+    def roll_date_folder(self, now=None):
+        """오전 8시가 지났으면 날짜 폴더 칸을 그날 날짜로 바꿉니다(하루에 한 번). 바꿨으면 True.
+
+        연도·번호 목록·작업 모드는 건드리지 않습니다. 바꾼 뒤 직접 고친 날짜는 다음 오전 8시까지 그대로 둡니다.
+        """
+        day = date_folder_day(now)
+        if day == self.folder_day:
+            return False
+        if self.busy or getattr(self, "drive_action_pending", None) is not None:
+            # 가져오는 중(드라이브 확인 대기 포함)에는 그 작업의 입력을 바꾸지 않고, 끝난 뒤 다음 확인 때 바꿉니다.
+            return False
+        self.folder_day = day
+        entry = self.folder_input
+        text, previous = single_import_folder_text(day), entry.get()
+        if previous == text:
+            return False
+        state = str(entry.cget("state"))
+        if state != "normal":
+            entry.configure(state="normal")   # 리스트만 만들기에서는 칸이 잠겨 있어 잠깐 풉니다.
+        try:
+            entry.delete(0, "end")
+            entry.insert(0, text)
+        finally:
+            if state != "normal":
+                entry.configure(state=state)
+        try:
+            focused = self.window.focus_get()
+        except (KeyError, self.tk.TclError):
+            focused = None
+        if focused is entry:
+            # 칸에 들어가 있던 중이면 들어갈 때처럼 전체 선택해 둡니다(바로 고쳐 쓰기).
+            entry.select_range(0, "end")
+            entry.icursor("end")
+        self.append_log("날짜 폴더 자동 변경(오전 {}시): {} → {}\n".format(
+            DATE_FOLDER_ROLLOVER_HOUR, previous or "(빈 칸)", text))
+        return True
+
+    def poll_date_folder(self):
+        try:
+            self.roll_date_folder()
+        finally:
+            self.window.after(DATE_FOLDER_POLL_MS, self.poll_date_folder)
+
     def append_log(self, text):
         append_bounded_log(self.log, text)
 
@@ -5771,7 +5829,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.24.1'
+SUITE_APP_VERSION = '2026.11.25.1'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
