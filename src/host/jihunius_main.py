@@ -525,7 +525,7 @@ MACHINE_BOARD_COLUMNS = 2
 # 인수인계를 펼치고 접을 때 오른쪽 화면의 폭을 붙들어 두는 시간(창 크기가 자리 잡을 때까지).
 HANDOVER_HOLD_MS = 150
 # 작업 기록은 맨 아래 한 줄 전체를 씁니다. 창을 가장 작게 줄였을 때 보이는 줄 수입니다(창을 늘리면 이 칸이 늘어납니다).
-LOG_MINIMUM_LINES = 4
+LOG_MINIMUM_LINES = 6
 APP_ICON_PNGS = ...  # build: tools/build_app.py
 
 PI_VALUE_MAP_A12 = {
@@ -3597,23 +3597,24 @@ class IntegrationApp:
                                         style="Accent.TButton")
         self.import_button.pack(fill="x")
 
-        self.build_machine_board(body)
-
         # 작업 기록은 본문 아래 한 줄 전체(예전 설비 보드 자리). 창을 늘리면 이 칸이 늘어납니다.
+        # 제목 줄 오른쪽(설비 보드 바로 아래)은 소재 저장 안내 문구 자리입니다 — 보드 밑에 빈 줄을 잡아 두지 않으려고.
         log_card = ttk.Frame(frame, style="Card.TFrame", padding=15)
         self.log_card = log_card
         log_card.grid(row=3, column=0, sticky="nsew")
-        log_card.columnconfigure(0, weight=1)
+        log_card.columnconfigure(1, weight=1)
         log_card.rowconfigure(1, weight=1)
         ttk.Label(log_card, text="작업 기록 · 최근 100줄", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.log = tk.Text(log_card, width=30, height=LOG_MINIMUM_LINES, font=("맑은 고딕", 9), wrap="word", state="disabled",
                            background="#050a14", foreground="#aebcd8", relief="flat", borderwidth=0,
                            highlightthickness=1, highlightbackground="#2e333d", highlightcolor="#2e333d",
                            padx=10, pady=6)
-        self.log.grid(row=1, column=0, sticky="nsew")
+        self.log.grid(row=1, column=0, columnspan=2, sticky="nsew")
         log_scrollbar = ttk.Scrollbar(log_card, orient="vertical", command=self.log.yview)
-        log_scrollbar.grid(row=1, column=1, sticky="ns")
+        log_scrollbar.grid(row=1, column=2, sticky="ns")
         self.log.configure(yscrollcommand=log_scrollbar.set)
+
+        self.build_machine_board(body)
         self.handover_card = self.build_handover_panel(common_body)
         self.handover_card.grid_remove()
         self.append_log("번호 입력 후 실행(Ctrl+Enter) · 날짜 폴더는 월 폴더 자동 선택(예: 10.13 → 10월/10.13)\n"
@@ -4237,7 +4238,10 @@ class IntegrationApp:
         self.machine_alert_settings_button.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         self.update_machine_alert_toggle()
 
-        self.material_quick = SuiteMaterialQuick.QuickPanel(self, details, cells=quick_cells, header=board_header)
+        # 저장 안내 문구는 작업 기록 제목 줄 오른쪽에(보드 아래에 빈 줄을 두지 않음. 사용자 요청 2026-11-26).
+        self.material_quick = SuiteMaterialQuick.QuickPanel(
+            self, details, cells=quick_cells, header=board_header, caption_parent=self.log_card,
+            caption_grid=dict(row=0, column=1, sticky="ew", padx=(18, 0), pady=(0, 6)))
 
     def apply_visual_theme(self):
         """모양만 입힙니다(둥근/테두리 요소, 아이콘, 제목 막대). 위젯 명령·값은 그대로입니다."""
@@ -5885,7 +5889,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.26.1'
+SUITE_APP_VERSION = '2026.11.26.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():

@@ -1,7 +1,7 @@
 """메인 화면 배치(사용자 요청 2026-11-26).
 
 - 설비 · 소재 사용량 조사 보드와 작업 기록이 자리를 바꿈: 보드는 본문 오른쪽 칸에 세로로, 작업 기록은 맨 아래 한 줄 전체.
-- 머신 자리: 1·2 / 3·4 / 5·6 / 7·8 / (머신 알림)·9.
+- 머신 자리: 1·2 / 3·4 / 5·6 / 7·8 / (머신 알림)·9. 그 밑에 빈 줄 없음(소재 저장 문구는 작업 기록 제목 줄 오른쪽).
 - 인수인계를 펼치고 접을 때 창만 왼쪽으로 늘고 줄어들 뿐, 보이던 화면은 제자리에서 움직이지 않음.
 
 명령·바인딩·저장 동작은 그대로이고 자리만 바뀐 것을 확인합니다.
@@ -123,7 +123,16 @@ class MachineBoardLayoutTests(LayoutCase):
                     for n in range(1, 10):
                         self.assertLessEqual(right(app.material_quick.rows[n]['rotate']), right(board))
                         self.assertLessEqual(bottom(app.material_quick.rows[n]['rotate']), bottom(board))
-                    self.assertLessEqual(bottom(app.material_quick.caption), bottom(board))
+                    # 맨 아랫줄(머신 알림·9호기) 밑에는 칸 테두리 여백만 있음 — 빈 줄을 잡아 두지 않음(사용자 요청 2026-11-26)
+                    lowest = max(bottom(app.material_quick.rows[9]['rotate']), bottom(app.machine_alert_controls))
+                    top_gap = app.machine_tiles[1][0].master.master.winfo_children()[0].winfo_rooty() - board.winfo_rooty()
+                    self.assertLessEqual(bottom(board) - lowest, top_gap + 2)
+                    self.assertGreaterEqual(bottom(board) - lowest, 8)
+                    # 그 문구는 작업 기록 제목 줄에(보드 바로 아래 오른쪽)
+                    caption = app.material_quick.caption
+                    self.assertGreater(caption.winfo_rooty(), bottom(board))
+                    self.assertLess(caption.winfo_rooty(), app.log.winfo_rooty())
+                    self.assertEqual(right(caption), right(app.log))
                 self.close_app(app)
 
     def test_every_machine_keeps_its_buttons_and_tile_actions(self):

@@ -138,23 +138,25 @@ class QuickBridge:
                     at=state['at'] if state else 0)
 
 class QuickPanel:
-    def __init__(self,app,parent,cells=None,header=None):
+    def __init__(self,app,parent,cells=None,header=None,caption_parent=None,caption_grid=None):
         self.app=app;self.channel=None;self.message_until=0;self.signature=None;self.rows={};self.confirming=False
         tk,ttk=app.tk,app.ttk
         if cells is not None:
             # 설비 보드형: 호기별 머신 칸 아래 자리에 같은 명령의 버튼만 배치합니다.
             self.frame=parent;self.message=tk.StringVar(value='')
-            # 저장 결과·오류 문구는 머신 칸 아래 한 줄 전체를 씁니다(width=1: 긴 문구가 배치를 밀지 않음).
-            # 보드가 좁아도(세로 배치) 문구가 잘리지 않게 보드 폭에서 줄을 바꿉니다. 두 줄 높이를 늘 잡아 두어
-            # 문구가 뜨거나 길어져도 아래 칸들이 움직이지 않습니다.
-            columns,rows=parent.grid_size()
+            # 저장 결과·오류 문구 한 줄. caption_parent 를 주면 그 칸(작업 기록 제목 줄)에 두어 보드 밑에 빈 줄을 잡지 않습니다.
+            # width=1: 긴 문구가 배치를 밀지 않음. 오른쪽에 붙이되, 칸보다 긴 문구는 앞부분이 보이게 왼쪽부터 보여 줍니다.
             from tkinter import font as tkfont
-            line=tkfont.Font(root=parent,family='맑은 고딕',size=9).metrics('linespace')
-            holder=ttk.Frame(parent,style='Card.TFrame',borderwidth=0,height=2*line+2)
-            holder.grid(row=rows,column=0,columnspan=max(1,columns),sticky='ew',pady=(8,0));holder.pack_propagate(False)
-            self.caption=ttk.Label(holder,textvariable=self.message,style='Card.TLabel',font=('맑은 고딕',9),width=1,anchor='nw',justify='left')
-            self.caption.pack(fill='both',expand=True)
-            self.caption.bind('<Configure>',lambda event:event.widget.configure(wraplength=max(1,event.width)),add='+')
+            self.caption_font=tkfont.Font(root=parent,family='맑은 고딕',size=9)
+            self.caption_side='e' if caption_parent is not None else 'w'
+            self.caption=ttk.Label(caption_parent if caption_parent is not None else parent,textvariable=self.message,
+                style='Card.TLabel',font=('맑은 고딕',9),width=1,anchor=self.caption_side)
+            if caption_parent is not None:self.caption.grid(**(caption_grid or dict(row=0,column=1,sticky='ew')))
+            else:
+                columns,rows=parent.grid_size()
+                self.caption.grid(row=rows,column=0,columnspan=max(1,columns),sticky='ew',pady=(8,0))
+            self.caption.bind('<Configure>',lambda event:self.fit_caption(),add='+')
+            self.message.trace_add('write',lambda *unused:self.fit_caption())
             for name in ('Danger','Secondary'):
                 app.style.configure('QuickMaterial.'+name+'.TButton',padding=(4,6),font=('맑은 고딕',10,'bold'))
             for n in range(1,10):
@@ -185,6 +187,13 @@ class QuickPanel:
                 command=lambda machine=n:self.submit('rotate',machine));rotate.grid(row=2,column=0,sticky='ew')
             defect.configure(state='disabled');rotate.configure(state='disabled')
             self.rows[n]=dict(cell=cell,name=name,defect=defect,rotate=rotate)
+    def fit_caption(self):
+        if getattr(self,'caption_font',None) is None:return
+        try:
+            fits=self.caption_font.measure(self.message.get())<=self.caption.winfo_width()
+            side=self.caption_side if fits else 'w'
+            if str(self.caption.cget('anchor'))!=side:self.caption.configure(anchor=side)
+        except Exception:pass
     def set_icons(self,images):
         # Root-owned PNGs stay alive; native ttk retains disabled/invoke behavior.
         for widgets in self.rows.values():
