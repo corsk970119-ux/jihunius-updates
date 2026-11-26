@@ -127,12 +127,6 @@ def is_protected_drive_name(name):
 
 
 MONITOR_HOST = "192.168.0.245"
-# 245가 답하지 않을 때 대신 읽는 가공현황 서버(사용자 요청 2026-11-26: "245가 작동 안하면 여기서 보고 띄우게").
-# 같은 NC Gate 화면(monitoring_list_machine.php)이 쓰는 조회 요청을 그대로 보냅니다. 245가 다시 답하면 돌아옵니다.
-MONITOR_FALLBACK_HOST = "192.168.0.252"
-MONITOR_HOSTS = (MONITOR_HOST, MONITOR_FALLBACK_HOST)
-# 어느 서버에서 읽을지(머신 목록)를 다시 확인하는 간격. 245가 꺼지면 이 시간 안에 252로, 켜지면 이 시간 안에 245로.
-MONITOR_RECHECK_SECONDS = 10.0
 MONITOR_INTERVAL = 3.0
 MONITOR_TIMEOUT = 4.0
 MONITOR_STALE_SECONDS = 8.0
@@ -165,11 +159,11 @@ def _monitor_exchange(connection, endpoint, fields):
     return result, reusable
 
 
-def monitor_request(endpoint, fields, host=MONITOR_HOST):
+def monitor_request(endpoint, fields):
     """NC Gate의 기존 조회 요청만 사용합니다. 이미지나 설정 변경은 요청하지 않습니다."""
     if _MONITOR_ALLOWED.get(endpoint) != fields.get("ajax_selector"):
         raise ValueError("지원하지 않는 가공현황 조회입니다.")
-    connection = HTTPConnection(host, timeout=MONITOR_TIMEOUT)
+    connection = HTTPConnection(MONITOR_HOST, timeout=MONITOR_TIMEOUT)
     try:
         return _monitor_exchange(connection, endpoint, fields)[0]
     finally:
@@ -186,8 +180,8 @@ class MonitorClient:
              http.client.RemoteDisconnected, http.client.CannotSendRequest,
              http.client.ResponseNotReady, http.client.BadStatusLine)
 
-    def __init__(self, factory=None, host=MONITOR_HOST):
-        self.factory = factory or (lambda: HTTPConnection(host, timeout=MONITOR_TIMEOUT))
+    def __init__(self, factory=None):
+        self.factory = factory or (lambda: HTTPConnection(MONITOR_HOST, timeout=MONITOR_TIMEOUT))
         self.connection = None
 
     def close(self):
@@ -453,20 +447,12 @@ def show_machine_toast_noactivate(dialog, x, y, width, height):
 
 
 class MachineMonitor:
-    """머신별 독립 조회로 느린 한 대가 다른 머신이나 파일 작업을 막지 않습니다.
-
-    가공현황 서버는 hosts 의 첫째(245)에서 읽습니다. 그 서버와 연결이 끊겼거나(머신 목록 요청에 답이 없음)
-    머신 값이 한동안 하나도 오지 않을 때, 다음 서버(252)가 값을 주고 있으면 그쪽에서 읽습니다.
-    첫째 서버가 다시 값을 주면 돌아옵니다. 한 번에 한 서버의 값만 화면에 올립니다(섞지 않음).
-    """
-    def __init__(self, events, request=None, hosts=None):
+    """머신별 독립 조회로 느린 한 대가 다른 머신이나 파일 작업을 막지 않습니다."""
+    def __init__(self, events, request=None):
         self.events = events
         self.request = request or monitor_request
-        self.hosts = tuple(hosts or MONITOR_HOSTS)
         self.stopped = threading.Event()
         self.workers = {}
-        self.active = None                   # 지금 읽고 있는 서버
-        self.valid_at = time.monotonic()     # 그 서버에서 올바른 머신 값을 마지막으로 받은 때
 
     def start(self):
         threading.Thread(target=self._discover, daemon=True).start()
@@ -474,108 +460,45 @@ class MachineMonitor:
     def stop(self):
         self.stopped.set()
 
-    def _addresses(self, host):
-        """그 서버가 알려 주는 머신(NC Gate) 주소 목록."""
-        result = self.request("monitoring_ajax_setting.php", {"ajax_selector": "loadIPlist"}, host)
-        values = result.get("ip")
-        if not isinstance(values, list) or len(values) > 64:
-            raise ValueError("머신 목록 응답 형식을 확인해 주세요.")
-        addresses = set()
-        for value in values:
-            if not isinstance(value, str):
-                raise ValueError("머신 주소 형식을 확인해 주세요.")
-            addresses.add(str(IPv4Address(value.strip())))
-        return addresses
-
-    def _machine(self, host, ip):
-        return monitor_machine_record(self.request(
-            "monitoring_ajax_this_machine.php", {"ajax_selector": "callUpdateMachineOne", "ncgateIP": ip}, host))
-
-    def _delivers(self, host, addresses):
-        """그 서버가 머신 값을 주고 있는지. 읽고 있는 서버는 받은 기록으로, 다른 서버는 한 번 물어봐서 압니다."""
-        if host == self.active:
-            return bool(self.workers) and time.monotonic() - self.valid_at <= MONITOR_GRACE_SECONDS
-        for ip in sorted(addresses):
-            if self.stopped.is_set():
-                return False
-            try:
-                if self._machine(host, ip) is not None:
-                    return True
-            except Exception:
-                pass
-        return False
-
-    def _choose(self):
-        """(읽을 서버, 그 머신 주소들, 첫째로 난 오류).
-
-        앞 서버부터, 값을 주고 있는 첫 서버. 값을 주는 서버가 없으면 답은 하는 첫 서버(화면에는 '?'로 보임).
-        처음 켤 때는 답하는 첫 서버에서 바로 읽기 시작합니다."""
-        answering, first_error = [], None
-        for host in self.hosts:
-            if self.stopped.is_set():
-                break
-            try:
-                addresses = self._addresses(host)
-            except Exception as error:
-                if first_error is None:
-                    first_error = str(error) or "가공현황 서버에 연결하지 못했습니다."
-                continue
-            if self.active is None or self._delivers(host, addresses):
-                return host, addresses, first_error
-            answering.append((host, addresses))
-        if answering:
-            return answering[0][0], answering[0][1], first_error
-        return None, None, first_error
-
     def _discover(self):
         while not self.stopped.is_set():
             delay = MONITOR_INTERVAL
-            host, addresses, error = self._choose()
-            if self.stopped.is_set():
-                break
-            if host is None:
-                # 어느 서버도 답하지 않음: 읽던 것은 그대로 두고(화면에는 '?'로 표시됨) 곧 다시 확인합니다.
-                self.events.put(("machine_connection", error))
-            else:
-                switched = host != self.active
-                if switched:
-                    primary = self.hosts[0]
-                    if host != primary:
-                        self.events.put(("machine_source", "가공현황: {}에서 값이 오지 않아 {}에서 읽습니다.".format(primary, host)))
-                    elif self.active is not None:
-                        self.events.put(("machine_source", "가공현황: {}에서 다시 읽습니다.".format(primary)))
-                    self.active = host
-                    self.valid_at = time.monotonic()   # 새 서버가 값을 줄 시간을 줍니다
+            try:
+                result = self.request("monitoring_ajax_setting.php", {"ajax_selector": "loadIPlist"})
+                values = result.get("ip")
+                if not isinstance(values, list) or len(values) > 64:
+                    raise ValueError("머신 목록 응답 형식을 확인해 주세요.")
+                addresses = set()
+                for value in values:
+                    if not isinstance(value, str):
+                        raise ValueError("머신 주소 형식을 확인해 주세요.")
+                    addresses.add(str(IPv4Address(value.strip())))
                 for ip in list(self.workers):
                     cancel, thread = self.workers[ip]
                     if ip not in addresses:
                         cancel.set()
                         del self.workers[ip]
                         self.events.put(("machine_sample", ip, None, time.monotonic(), None))
-                    elif switched:
-                        # 같은 머신 주소를 새 서버에 묻도록 바꿉니다. 화면의 값은 새 값이 올 때까지 그대로 둡니다.
-                        cancel.set()
-                        del self.workers[ip]
                 for ip in sorted(addresses):
                     if self.stopped.is_set():
                         break
                     if ip not in self.workers:
                         cancel = threading.Event()
-                        thread = threading.Thread(target=self._poll_one, args=(ip, cancel, host), daemon=True)
+                        thread = threading.Thread(target=self._poll_one, args=(ip, cancel), daemon=True)
                         self.workers[ip] = (cancel, thread)
                         thread.start()
                 self.events.put(("machine_connection", None))
-                delay = MONITOR_RECHECK_SECONDS
+                delay = 30.0
+            except Exception as error:
+                if not self.stopped.is_set():
+                    self.events.put(("machine_connection", str(error)))
             self.stopped.wait(delay)
         for cancel, thread in self.workers.values():
             cancel.set()
 
-    def _poll_one(self, ip, cancel, host=MONITOR_HOST):
-        client = MonitorClient(host=host) if self.request is monitor_request else None
-        if client is not None:
-            request = client.request
-        else:
-            request = lambda endpoint, fields: self.request(endpoint, fields, host)
+    def _poll_one(self, ip, cancel):
+        client = MonitorClient() if self.request is monitor_request else None
+        request = client.request if client is not None else self.request
         try:
             while not self.stopped.is_set() and not cancel.is_set():
                 record = None
@@ -587,8 +510,6 @@ class MachineMonitor:
                     pass
                 if self.stopped.is_set() or cancel.is_set():
                     return
-                if record is not None:
-                    self.valid_at = time.monotonic()
                 self.events.put(("machine_sample", ip, record, time.monotonic(), cancel))
                 if self.stopped.wait(MONITOR_INTERVAL):
                     return
@@ -5694,9 +5615,6 @@ class IntegrationApp:
             elif event[0] == "machine_sample":
                 _, ip, record, observed, cancel = event
                 self.receive_machine_sample(ip, record, observed, cancel)
-            elif event[0] == "machine_source":
-                # 245 대신 252에서 읽기 시작했거나 245로 돌아온 것을 작업 기록에 남깁니다.
-                self.append_log(event[1] + '\n')
             elif event[0] == "machine_connection":
                 error = event[1]
                 if error != self.machine_monitor_error:
@@ -5971,7 +5889,7 @@ class IntegrationApp:
 
 
 
-SUITE_APP_VERSION = '2026.11.26.3'
+SUITE_APP_VERSION = '2026.11.26.2'
 SUITE_UPDATE_PROTOCOL = 1
 SuiteUpdater = ...  # build: tools/build_app.py
 def main():
